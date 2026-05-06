@@ -34,24 +34,30 @@ Input frame
 > AMD's [TheRock](https://github.com/ROCm/TheRock) environment and install
 > additional packages on top — not to create a fresh conda env from scratch.
 
-### 1. Install PyTorch + ROCm 7.13 for gfx1151
+### 1. Install ROCm SDK + PyTorch for gfx1151
 
 AMD provides official nightly wheels for gfx1151 at:
 **`https://rocm.nightlies.amd.com/v2/gfx1151/`**
 
-Create a conda environment and install directly from this index:
-
 ```bash
+# Create a fresh conda environment
 conda create -n sam3-tracker python=3.12 -y
 conda activate sam3-tracker
 
-# Install PyTorch, torchvision, torchaudio from AMD nightly index
-pip install torch torchvision torchaudio \
+# Step 1a: Install ROCm runtime Python packages
+pip install rocm rocm-sdk-core rocm-sdk-libraries-gfx1151 rocm-sdk-devel \
     --index-url https://rocm.nightlies.amd.com/v2/gfx1151/
 
-# Also install the ROCm SDK packages from the same index
-pip install rocm-sdk \
+# Step 1b: Install PyTorch nightly for gfx1151
+pip install torch torchvision torchaudio triton \
     --index-url https://rocm.nightlies.amd.com/v2/gfx1151/
+```
+
+Set the following environment variables (add to `~/.bashrc` or your run script):
+
+```bash
+export HSA_OVERRIDE_GFX_VERSION=11.5.1
+export PYTORCH_ALLOC_CONF=expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:512
 ```
 
 Verified working versions:
