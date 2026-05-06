@@ -50,7 +50,7 @@ memory_encoder.onnx                     [CPU ONNX]
 | **memory_attention** | 157ms (CPU, dynamic axes) | **16ms** | Fixed N=7 ONNX → MIGraphX (3.3×); dynamic_axes caused dangling reference compiler bug, bypassed with fixed-size export; requires `MIGRAPHX_GPU_HIP_FLAGS` to suppress lifetimebound compiler error |
 | **mask_decoder_propagate** | 54ms | **7ms** | ORT intra_op_num_threads=8 (4×) |
 | **memory_encoder** | 45ms | **10ms** | ORT intra_op_num_threads=8 (5×) |
-| **Total (propagation frame)** | ~875ms (1.14 FPS) | **174ms (5.74 FPS)** | |
+| **Total (propagation frame)** | ~875ms (1.14 FPS) | **175ms (5.72 FPS)** | |
 
 ### 1008px (High-Quality Configuration)
 
@@ -98,8 +98,8 @@ memory_encoder.onnx                     [CPU ONNX]
 |---|---|---|
 | **DAVIS 2017 val Mean J** | **85.8%** | 81.1% |
 | **SG val Mean J** (50 seqs, seed=42) | 44.8% | 39.6% |
-| Propagation FPS | 1.35 | **5.74** |
-| Init frame FPS | 1.68 | **6.40** |
+| Propagation FPS | 1.35 | **5.72** |
+| Init frame FPS | 1.68 | **6.33** |
 | Backbone latency | 528ms | 142ms |
 | Use case | High-quality offline | **Real-time tracking (≥5 Hz)** |
 
@@ -113,36 +113,41 @@ Accuracy trade-off: halving resolution causes approximately 4–5 pp drop in J (
 
 | Stage | 504px |
 |---|---:|
-| backbone [PyTorch ROCm FP16] | 139.8 ms |
-| mask_decoder_init [ONNX CPU] | 6.3 ms |
-| **Total → FPS** | **156 ms → 6.40 FPS** |
+| backbone [PyTorch ROCm FP16] | 139.9 ± 1.8 ms |
+| mask_decoder_init [ONNX CPU] | 6.5 ± 0.5 ms |
+| **Total → FPS** | **158 ms → 6.33 FPS** |
 
 ### Pipeline B: Propagation per-frame (video tracking)
 
 | Stage | 504px |
 |---|---:|
-| backbone [PyTorch ROCm FP16] | 138.8 ms |
-| memory_attention [MIGraphX] | 16.1 ms |
-| mask_decoder_propagate [ONNX CPU] | 7.4 ms |
-| memory_encoder [ONNX CPU] | 10.1 ms |
-| **Total → FPS** | **174 ms → 5.74 FPS** |
+| backbone [PyTorch ROCm FP16] | 138.7 ± 0.7 ms |
+| memory_attention [MIGraphX] | 16.1 ± 1.0 ms |
+| mask_decoder_propagate [ONNX CPU] | 6.9 ± 0.6 ms |
+| memory_encoder [ONNX CPU] | 11.2 ± 3.2 ms |
+| **Total → FPS** | **175 ms → 5.72 FPS** |
 
-*n=30 timed runs, after TunableOp warmup. Run `python eval/bench_pipeline.py` to reproduce.*
+*n=30 timed runs, GPU exclusive (no concurrent workloads), after TunableOp warmup.*
+*Run `python eval/bench_pipeline.py --checkpoint model/sam3 --onnx-dir onnx_files` to reproduce.*
 
 ### DAVIS 2017 val (30 sequences, standard VOS benchmark)
 
-| Configuration | Mean J | FPS |
+| Configuration | Mean J | Propagation FPS |
 |---|---|---|
 | **Ours — 1008px** | **85.8%** | 1.35 |
-| **Ours — 504px** | **81.1%** | 5.74 |
+| **Ours — 504px** | **81.1%** | 5.72 |
 | SAM2 official (J&F, reference) | ~90.7% | — |
+
+*Verified with MIGraphX enabled after `MIGRAPHX_GPU_HIP_FLAGS` fix; accuracy unchanged from pre-fix baseline.*
 
 ### Smartglass SG val (50 sequences, seed=42, egocentric tracking)
 
-| Configuration | Mean J | FPS |
+| Configuration | Mean J | Propagation FPS |
 |---|---|---|
 | **Ours — 1008px** | **44.8%** | 1.13 |
-| **Ours — 504px** | **39.6%** | 4.06 |
+| **Ours — 504px** | **39.6%** | 3.84 |
+
+*SG FPS measured during eval (includes GT mask loading); pure inference FPS matches Pipeline B above.*
 
 The SG dataset covers first-person (smartglass) viewpoints and is significantly harder than DAVIS, containing many small or fast-moving targets (hands, wires, smartphones).
 
@@ -192,7 +197,7 @@ export PYTORCH_ALLOC_CONF=expandable_segments:True,garbage_collection_threshold:
 
 `MIGRAPHX_SKIP_BENCHMARKING=1` and `MIGRAPHX_GPU_HIP_FLAGS` are set automatically by `tracker.py`.
 
-- **FPS**: 5.74 (propagation), 6.40 (single-frame init)
+- **FPS**: 5.72 (propagation), 6.33 (single-frame init)
 - **DAVIS J**: 81.1% at 504px / 85.8% at 1008px
 - **Prompt**: box on frame 0; subsequent frames use pure memory propagation
 
