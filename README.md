@@ -124,9 +124,9 @@ python demo.py \
 
 ### Single-image segmentation (box prompt)
 
-![Truck demo](assets/demo_tracked.jpg)
-
-*Box prompt `85,281,1710,850` on the demo image; mask overlaid in green.*
+| truck (demo) | drift-straight (J = 95.2%) | parkour (J = 92.2%) |
+|:---:|:---:|:---:|
+| ![truck](assets/demo_tracked.jpg) | ![drift-straight](assets/demo_drift-straight.jpg) | ![parkour](assets/demo_parkour.jpg) |
 
 ### Video tracking (DAVIS 2017 val, 504px)
 
