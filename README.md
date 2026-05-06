@@ -120,6 +120,22 @@ python demo.py \
 
 ---
 
+## Results
+
+### Single-image segmentation (box prompt)
+
+![Truck demo](assets/demo_tracked.jpg)
+
+*Box prompt `85,281,1710,850` on the demo image; mask overlaid in green.*
+
+### Video tracking (DAVIS 2017 val, 504px)
+
+| blackswan  (J = 93.0%) | dog  (J = 94.7%) | camel  (J = 96.0%) |
+|:---:|:---:|:---:|
+| ![blackswan](assets/demo_blackswan.gif) | ![dog](assets/demo_dog.gif) | ![camel](assets/demo_camel.gif) |
+
+---
+
 ## Performance
 
 | Resolution | DAVIS 2017 val J | SG val J (50 seqs) | Propagation FPS |

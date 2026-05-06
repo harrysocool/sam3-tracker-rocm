@@ -14,9 +14,11 @@ dataset/
 results/
 *.mp4
 *.jpg
-!assets/*.jpg
 *_tracked.*
 *_demo.*
+!assets/*.jpg
+!assets/*.gif
+!assets/demo_tracked.jpg
 
 # TunableOp cache
 tunableop_results*.csv
