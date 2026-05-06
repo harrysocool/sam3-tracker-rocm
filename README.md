@@ -151,9 +151,9 @@ python demo.py \
 
 | Stage | 504px |
 |---|---:|
-| backbone `[PyTorch ROCm FP16]` | 138.9 ms |
-| mask_decoder_init `[ONNX CPU]` | 7.1 ms |
-| **Total → FPS** | **159 ms → 6.29 FPS** |
+| backbone `[PyTorch ROCm FP16]` | 139.8 ms |
+| mask_decoder_init `[ONNX CPU]` | 6.3 ms |
+| **Total → FPS** | **156 ms → 6.40 FPS** |
 
 Run `python eval/bench_pipeline.py --checkpoint model/sam3 --onnx-dir onnx_files` to reproduce.
 
