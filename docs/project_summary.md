@@ -46,11 +46,11 @@ memory_encoder.onnx                     [CPU ONNX]
 
 | Module | Initial Latency | Final Latency | Optimization |
 |---|---|---|---|
-| **backbone** | 561ms (PyTorch FP16, 1008px) | **142ms** | Resolution reduction to 504px (area ratio 0.25) + TunableOp |
-| **memory_attention** | 157ms (CPU, dynamic axes) | **16ms** | Fixed N=7 ONNX → MIGraphX (3.3×); dynamic_axes caused dangling reference compiler bug, bypassed with fixed-size export |
+| **backbone** | 561ms (PyTorch FP16, 1008px) | **139ms** | Resolution reduction to 504px (area ratio 0.25) + TunableOp |
+| **memory_attention** | 157ms (CPU, dynamic axes) | **16ms** | Fixed N=7 ONNX → MIGraphX (3.3×); dynamic_axes caused dangling reference compiler bug, bypassed with fixed-size export; requires `MIGRAPHX_GPU_HIP_FLAGS` to suppress lifetimebound compiler error |
 | **mask_decoder_propagate** | 54ms | **7ms** | ORT intra_op_num_threads=8 (4×) |
-| **memory_encoder** | 45ms | **9ms** | ORT intra_op_num_threads=8 (5×) |
-| **Total (propagation frame)** | ~875ms (1.14 FPS) | **175ms (5.72 FPS)** | |
+| **memory_encoder** | 45ms | **10ms** | ORT intra_op_num_threads=8 (5×) |
+| **Total (propagation frame)** | ~875ms (1.14 FPS) | **174ms (5.74 FPS)** | |
 
 ### 1008px (High-Quality Configuration)
 
@@ -83,7 +83,7 @@ memory_encoder.onnx                     [CPU ONNX]
 |---|---|---|
 | sam3_image_encoder.onnx (meta format) | ✅ Used in detection pipeline | — |
 | memory_attention (dynamic axes) | ❌ | dynamic_axes triggers "Dangling reference in module main" compiler bug |
-| **memory_attention (fixed N=7)** | **✅** | Fixed-size ONNX bypasses bug; 3.3× speedup |
+| **memory_attention (fixed N=7)** | **✅** | Fixed-size ONNX bypasses dangling-ref bug; requires `MIGRAPHX_GPU_HIP_FLAGS=-Wno-error -Wno-lifetime-safety-intra-tu-suggestions` to pass newer clang `-Werror` check; 3.3× speedup |
 | memory_encoder | ❌ CPU only | ConvTranspose layout bug |
 | mask_decoder_init / propagate | ❌ CPU only | simplify_reshapes error / Segfault |
 | Backbone ONNX FP16 | ❌ | _Float16 vectorization bug in MIGraphX; FP32 ONNX is slower than PyTorch GPU FP16 |
@@ -98,8 +98,8 @@ memory_encoder.onnx                     [CPU ONNX]
 |---|---|---|
 | **DAVIS 2017 val Mean J** | **85.8%** | 81.1% |
 | **SG val Mean J** (50 seqs, seed=42) | 44.8% | 39.6% |
-| Propagation FPS | 1.35 | **5.72** |
-| Init frame FPS | 1.68 | **6.22** |
+| Propagation FPS | 1.35 | **5.74** |
+| Init frame FPS | 1.68 | **6.40** |
 | Backbone latency | 528ms | 142ms |
 | Use case | High-quality offline | **Real-time tracking (≥5 Hz)** |
 
@@ -109,12 +109,32 @@ Accuracy trade-off: halving resolution causes approximately 4–5 pp drop in J (
 
 ## Benchmark Results
 
+### Pipeline A: Single-frame (box/point → mask, no tracking)
+
+| Stage | 504px |
+|---|---:|
+| backbone [PyTorch ROCm FP16] | 139.8 ms |
+| mask_decoder_init [ONNX CPU] | 6.3 ms |
+| **Total → FPS** | **156 ms → 6.40 FPS** |
+
+### Pipeline B: Propagation per-frame (video tracking)
+
+| Stage | 504px |
+|---|---:|
+| backbone [PyTorch ROCm FP16] | 138.8 ms |
+| memory_attention [MIGraphX] | 16.1 ms |
+| mask_decoder_propagate [ONNX CPU] | 7.4 ms |
+| memory_encoder [ONNX CPU] | 10.1 ms |
+| **Total → FPS** | **174 ms → 5.74 FPS** |
+
+*n=30 timed runs, after TunableOp warmup. Run `python eval/bench_pipeline.py` to reproduce.*
+
 ### DAVIS 2017 val (30 sequences, standard VOS benchmark)
 
 | Configuration | Mean J | FPS |
 |---|---|---|
 | **Ours — 1008px** | **85.8%** | 1.35 |
-| **Ours — 504px** | **81.1%** | 5.72 |
+| **Ours — 504px** | **81.1%** | 5.74 |
 | SAM2 official (J&F, reference) | ~90.7% | — |
 
 ### Smartglass SG val (50 sequences, seed=42, egocentric tracking)
@@ -140,19 +160,39 @@ The SG dataset covers first-person (smartglass) viewpoints and is significantly 
 
 5. **ORT thread tuning**: CPU ONNX sessions default to single-threaded. Setting `intra_op_num_threads=8` reduces combined decoder + encoder latency from ~100ms to ~16ms.
 
+6. **MIGraphX JIT compiler flag** (`MIGRAPHX_GPU_HIP_FLAGS`): Newer versions of the comgr/clang compiler inside ROCm treat the C++ `[[clang::lifetimebound]]` suggestion as `-Werror`, aborting GPU kernel compilation for `memory_attention_fixed_N7.onnx`. Setting `MIGRAPHX_GPU_HIP_FLAGS=-Wno-error -Wno-lifetime-safety-intra-tu-suggestions` suppresses this. Without it, memory_attention silently falls back to CPU (72ms instead of 16ms, propagation drops from 5.74 to 3.82 FPS). This flag is now set automatically in `tracker.py` via `os.environ.setdefault()`.
+
 ---
 
 ## Current Best Configuration
 
+The pipeline is packaged as the standalone `sam3-tracker-rocm` project (no DART fork required; uses HuggingFace `transformers ≥ 5.8.0`).
+
 ```bash
-PYTHONPATH=repo/DART/.local_deps MIGRAPHX_SKIP_BENCHMARKING=1 \
-    python scripts/onnx/analysis/track_video_onnx.py \
-    --imgsz 504 \
-    --image <input.jpg> \
-    --box x1,y1,x2,y2
+# Export ONNX modules once
+python export/export_tracker_modules.py --imgsz 504 --output-dir onnx_files
+
+# Run demo
+python demo.py --checkpoint model/sam3 --onnx-dir onnx_files \
+               --image assets/demo.jpg --box 85,281,1710,850
+
+# Evaluate on DAVIS 2017 val
+python eval/eval_davis.py --checkpoint model/sam3 --onnx-dir onnx_files \
+                          --davis dataset/DAVIS --imgsz 504
+
+# Benchmark pipeline A vs B
+python eval/bench_pipeline.py --checkpoint model/sam3 --onnx-dir onnx_files
 ```
 
-- **FPS**: 5.72 (propagation), 6.22 (init frame)
+Required environment variables (set in `~/.bashrc` or run script):
+```bash
+export HSA_OVERRIDE_GFX_VERSION=11.5.1
+export PYTORCH_ALLOC_CONF=expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:512
+```
+
+`MIGRAPHX_SKIP_BENCHMARKING=1` and `MIGRAPHX_GPU_HIP_FLAGS` are set automatically by `tracker.py`.
+
+- **FPS**: 5.74 (propagation), 6.40 (single-frame init)
 - **DAVIS J**: 81.1% at 504px / 85.8% at 1008px
 - **Prompt**: box on frame 0; subsequent frames use pure memory propagation
 
