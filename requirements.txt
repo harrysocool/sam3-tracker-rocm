@@ -5,8 +5,12 @@
 # installed through TheRock. See README for instructions.
 
 transformers>=5.8.0
+onnx>=1.16
+onnxconverter-common>=1.13
 opencv-python>=4.8
 numpy>=1.26,<2.0
 pillow>=10.0
 pycocotools>=2.0
 huggingface-hub>=0.20
+flatbuffers
+protobuf

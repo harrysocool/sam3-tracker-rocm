@@ -207,11 +207,18 @@ class SAM3OnnxTracker:
             str(onnx_dir / "memory_encoder.onnx"), sess_options=cpu_opts, providers=CPU)
 
         # memory_attention: prefer fixed-N7 on MIGraphX (avoids dangling reference bug)
+        # Falls back to CPU if MIGraphX compilation fails (e.g. OOM when PyTorch is loaded)
         mem_attn_fixed = onnx_dir / "memory_attention_fixed_N7.onnx"
         if mem_attn_fixed.exists():
-            self.mem_attn = ort.InferenceSession(str(mem_attn_fixed), providers=MIG)
-            self._mem_attn_slots = num_maskmem
-            print("  memory_attention: MIGraphX (fixed N=7)")
+            try:
+                self.mem_attn = ort.InferenceSession(str(mem_attn_fixed), providers=MIG)
+                self._mem_attn_slots = num_maskmem
+                print("  memory_attention: MIGraphX (fixed N=7)")
+            except Exception as e:
+                print(f"  memory_attention: MIGraphX failed ({str(e)[:60]}), falling back to CPU")
+                self.mem_attn = ort.InferenceSession(str(mem_attn_fixed), providers=CPU)
+                self._mem_attn_slots = num_maskmem
+                print("  memory_attention: CPU (fixed N=7)")
         else:
             self.mem_attn = ort.InferenceSession(
                 str(onnx_dir / "memory_attention.onnx"), providers=CPU)
