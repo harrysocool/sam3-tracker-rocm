@@ -93,14 +93,12 @@ def main():
     print(f"Evaluating {len(subset)} sequences at {args.imgsz}px ...")
     print(f"ONNX dir: {args.onnx_dir}")
 
-    class TrackerArgs:
-        imgsz = args.imgsz
-        onnx_dir = args.onnx_dir
-        checkpoint = args.checkpoint
-        num_maskmem = args.num_maskmem
-        backbone_onnx = None
-
-    tracker = SAM3OnnxTracker(TrackerArgs())
+    tracker = SAM3OnnxTracker(
+        checkpoint=args.checkpoint,
+        onnx_dir=args.onnx_dir,
+        imgsz=args.imgsz,
+        num_maskmem=args.num_maskmem,
+    )
 
     results = []
     t_global = time.perf_counter()
