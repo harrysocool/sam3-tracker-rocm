@@ -37,10 +37,25 @@ for Ubuntu 24.04. Verify with:
 rocminfo | grep gfx
 ```
 
-### 2. Install PyTorch for ROCm
+### 2. Install PyTorch for ROCm (gfx1151 / ROCm 7.13)
+
+The Ryzen AI Max+ 395 (gfx1151) requires PyTorch built against **ROCm 7.13**,
+provided by AMD's [TheRock](https://github.com/ROCm/TheRock) project as nightly
+wheels. The standard `pytorch.org/whl/rocm6.2` index does **not** include gfx1151.
+
+Download the matching wheels from the [TheRock GitHub Releases](https://github.com/ROCm/TheRock/releases)
+page and install locally:
 
 ```bash
-pip install torch torchvision --index-url https://download.pytorch.org/whl/rocm6.2
+# Example filenames — replace with actual names from the release page
+pip install torch-2.12.0a0+rocm7.13.0a20260411-cp312-cp312-linux_x86_64.whl \
+            torchvision-0.27.0a0+rocm7.13.0a20260411-cp312-cp312-linux_x86_64.whl
+```
+
+Verify:
+```bash
+python -c "import torch; print(torch.__version__); print(torch.cuda.is_available())"
+# Expected: 2.12.0a0+rocm7.13.0a20260411  True
 ```
 
 ### 3. Create conda environment
