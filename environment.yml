@@ -1,16 +1,14 @@
-name: sam3-tracker-rocm
-channels:
-  - defaults
-dependencies:
-  - python=3.12
-  - pip
-  - pip:
-    # ROCm-specific PyTorch — install manually first (see README step 2)
-    # pip install torch --index-url https://download.pytorch.org/whl/rocm6.2
-    - transformers>=5.8.0
-    - onnxruntime-rocm==1.24.2
-    - opencv-python>=4.8
-    - numpy>=1.26,<2.0
-    - pillow>=10.0
-    - pycocotools>=2.0      # for eval scripts
-    - huggingface-hub>=0.20 # for model download
+# NOTE: This file lists the additional Python packages to install on top of
+# the TheRock-provided base environment (which already includes PyTorch + ROCm).
+# Do NOT create a fresh conda env from this file — torch and onnxruntime-migraphx
+# are not on standard PyPI. See README Setup section for correct procedure.
+#
+# After activating your TheRock conda env, run:
+#   pip install -r requirements.txt
+#
+# Verified environment (rocm7p13-sam3):
+#   torch               2.12.0a0+rocm7.13.0a20260411
+#   onnxruntime-migraphx 1.24.2
+#   transformers        5.8.0
+#   numpy               1.26.4
+#   Python              3.12.13

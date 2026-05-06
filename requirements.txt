@@ -1,0 +1,12 @@
+# Install these on top of the TheRock base environment:
+#   pip install -r requirements.txt
+#
+# torch and onnxruntime-migraphx are NOT listed here — they must be
+# installed through TheRock. See README for instructions.
+
+transformers>=5.8.0
+opencv-python>=4.8
+numpy>=1.26,<2.0
+pillow>=10.0
+pycocotools>=2.0
+huggingface-hub>=0.20
