@@ -1,8 +1,10 @@
-# Install these on top of the TheRock base environment:
+# Install after completing Steps 1-2 in README (ROCm SDK + PyTorch + onnxruntime-migraphx).
+#
 #   pip install -r requirements.txt
 #
-# torch and onnxruntime-migraphx are NOT listed here — they must be
-# installed through TheRock. See README for instructions.
+# Verified with: torch==2.12.0a0+rocm7.13.0a20260411
+#                onnxruntime-migraphx==1.24.2
+#                rocm-sdk-core==7.13.0a20260411
 
 transformers>=5.8.0
 onnx>=1.16

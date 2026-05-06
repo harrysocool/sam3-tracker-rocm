@@ -44,14 +44,21 @@ AMD provides official nightly wheels for gfx1151 at:
 conda create -n sam3-tracker python=3.12 -y
 conda activate sam3-tracker
 
-# Step 1a: Install ROCm runtime Python packages
-pip install rocm rocm-sdk-core rocm-sdk-libraries-gfx1151 rocm-sdk-devel \
+# Step 1a: Install ROCm runtime Python packages (pin to 20260411 for onnxruntime-migraphx compatibility)
+pip install rocm "rocm-sdk-core==7.13.0a20260411" rocm-sdk-libraries-gfx1151 rocm-sdk-devel \
     --index-url https://rocm.nightlies.amd.com/v2/gfx1151/
 
-# Step 1b: Install PyTorch nightly for gfx1151
-pip install torch torchvision torchaudio triton \
+# Step 1b: Install PyTorch matching the same ROCm build date
+pip install "torch==2.12.0a0+rocm7.13.0a20260411" \
+            "torchvision==0.27.0a0+rocm7.13.0a20260411" \
+            "torchaudio==2.9.0a0+rocm7.13.0a20260411" \
+            triton \
     --index-url https://rocm.nightlies.amd.com/v2/gfx1151/
 ```
+
+> **Why pin to `20260411`?** `onnxruntime-migraphx 1.24.2` was compiled against the
+> ROCm SDK from that date. Mismatched ROCm versions (even a few days apart) can cause
+> MIGraphX kernel compilation to crash at runtime.
 
 Set the following environment variables (add to `~/.bashrc` or your run script):
 
@@ -59,10 +66,6 @@ Set the following environment variables (add to `~/.bashrc` or your run script):
 export HSA_OVERRIDE_GFX_VERSION=11.5.1
 export PYTORCH_ALLOC_CONF=expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:512
 ```
-
-Verified working versions:
-- `torch 2.12.0a0+rocm7.13.0a20260411`
-- `torchvision 0.27.0a0+rocm7.13.0a20260411`
 
 Verify:
 ```bash
