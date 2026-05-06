@@ -75,13 +75,11 @@ python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 
 ### 2. Install onnxruntime-migraphx
 
-The MIGraphX-enabled ONNX Runtime build is from
-[Looong01/onnxruntime-rocm-build](https://github.com/Looong01/onnxruntime-rocm-build/releases).
-Download the wheel matching your Python version and install:
+The MIGraphX-enabled ONNX Runtime is provided by
+[Looong01/onnxruntime-rocm-build](https://github.com/Looong01/onnxruntime-rocm-build).
 
 ```bash
-# Example for Python 3.12
-pip install onnxruntime_migraphx-1.24.2-cp312-cp312-linux_x86_64.whl
+pip install https://github.com/Looong01/onnxruntime-rocm-build/releases/download/v1.24.2/onnxruntime_migraphx-1.24.2-cp312-cp312-manylinux_2_34_x86_64.whl
 ```
 
 ### 3. Install remaining dependencies
