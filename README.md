@@ -115,7 +115,7 @@ python demo.py \
     --checkpoint model/sam3 \
     --onnx-dir onnx_files \
     --image assets/demo.jpg \
-    --box 50,80,1750,920
+    --box 60,85,1710,850
 ```
 
 ---
