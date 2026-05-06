@@ -34,49 +34,61 @@ Input frame
 > AMD's [TheRock](https://github.com/ROCm/TheRock) environment and install
 > additional packages on top — not to create a fresh conda env from scratch.
 
-### 1. Set up ROCm 7.13 + PyTorch base environment via TheRock
+### 1. Install PyTorch + ROCm 7.13 for gfx1151
 
-The Ryzen AI Max+ 395 (gfx1151) requires **ROCm 7.13**, which is provided by
-AMD's [TheRock](https://github.com/ROCm/TheRock) project.
+AMD provides official nightly wheels for gfx1151 at:
+**`https://rocm.nightlies.amd.com/v2/gfx1151/`**
 
-Follow the TheRock setup guide to create a conda environment with PyTorch and
-ROCm 7.13. The resulting environment will include:
-- `torch 2.12.0a0+rocm7.13.0a20260411`
-- `torchvision 0.27.0a0+rocm7.13.0a20260411`
-- ROCm 7.13 runtime libraries
-
-Install `onnxruntime-migraphx` (the AMD MIGraphX-enabled ORT build) from
-[Looong01/onnxruntime-rocm-build](https://github.com/Looong01/onnxruntime-rocm-build/releases):
+Create a conda environment and install directly from this index:
 
 ```bash
-# Download the wheel matching your Python version, then:
-pip install onnxruntime_migraphx-1.24.2-cp312-cp312-linux_x86_64.whl
+conda create -n sam3-tracker python=3.12 -y
+conda activate sam3-tracker
+
+# Install PyTorch, torchvision, torchaudio from AMD nightly index
+pip install torch torchvision torchaudio \
+    --index-url https://rocm.nightlies.amd.com/v2/gfx1151/
+
+# Also install the ROCm SDK packages from the same index
+pip install rocm-sdk \
+    --index-url https://rocm.nightlies.amd.com/v2/gfx1151/
 ```
+
+Verified working versions:
+- `torch 2.12.0a0+rocm7.13.0a20260411`
+- `torchvision 0.27.0a0+rocm7.13.0a20260411`
 
 Verify:
 ```bash
-rocminfo | grep gfx   # should show gfx1151
 python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 # Expected: 2.12.0a0+rocm7.13.0a20260411  True
 ```
 
-### 2. Activate your TheRock env and install remaining dependencies
+### 2. Install onnxruntime-migraphx
+
+The MIGraphX-enabled ONNX Runtime build is from
+[Looong01/onnxruntime-rocm-build](https://github.com/Looong01/onnxruntime-rocm-build/releases).
+Download the wheel matching your Python version and install:
 
 ```bash
-# Activate the TheRock conda environment (name may vary)
-conda activate <your-therock-env>
+# Example for Python 3.12
+pip install onnxruntime_migraphx-1.24.2-cp312-cp312-linux_x86_64.whl
+```
 
+### 3. Install remaining dependencies
+
+```bash
 # Install additional packages needed by this project
 pip install -r requirements.txt
 ```
 
-### 3. Download SAM3 model weights
+### 4. Download SAM3 model weights
 
 ```bash
 huggingface-cli download facebook/sam3 --local-dir model/sam3
 ```
 
-### 4. Export ONNX tracking modules (~5 minutes)
+### 5. Export ONNX tracking modules (~5 minutes)
 
 ```bash
 # 504px — recommended (5.72 FPS, DAVIS J=81.1%)
@@ -86,7 +98,7 @@ python export/export_tracker_modules.py --imgsz 504 --output-dir onnx_files
 python export/export_tracker_modules.py --imgsz 1008 --output-dir onnx_files_1008
 ```
 
-### 5. Run the demo
+### 6. Run the demo
 
 ```bash
 python demo.py \
