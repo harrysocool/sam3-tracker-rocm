@@ -51,7 +51,6 @@ pip install rocm "rocm-sdk-core==7.13.0a20260411" rocm-sdk-libraries-gfx1151 roc
 # Step 1b: Install PyTorch matching the same ROCm build date
 pip install "torch==2.12.0a0+rocm7.13.0a20260411" \
             "torchvision==0.27.0a0+rocm7.13.0a20260411" \
-            "torchaudio==2.9.0a0+rocm7.13.0a20260411" \
             triton \
     --index-url https://rocm.nightlies.amd.com/v2/gfx1151/
 ```
@@ -104,6 +103,10 @@ python export/export_tracker_modules.py --imgsz 504 --output-dir onnx_files
 # 1008px — higher quality (1.35 FPS, DAVIS J=85.8%)
 python export/export_tracker_modules.py --imgsz 1008 --output-dir onnx_files_1008
 ```
+
+> `--fixed-slots 7` (default) also exports `memory_attention_fixed_N7.onnx` with static shapes.
+> The tracker automatically picks this file and attempts to run it on MIGraphX (falling back to CPU
+> if MIGraphX kernel compilation fails, which is known to happen on some builds).
 
 ### 6. Run the demo
 

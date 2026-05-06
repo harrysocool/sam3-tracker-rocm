@@ -44,6 +44,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--checkpoint", type=Path, default=LOCAL_HF_MODEL)
     p.add_argument("--opset", type=int, default=17)
     p.add_argument("--verify", action="store_true", help="Run CPU accuracy test after export")
+    p.add_argument("--fixed-slots", type=int, default=7, metavar="N",
+                   help="Also export memory_attention_fixed_N<N>.onnx with static shapes for MIGraphX (0=skip)")
     return p.parse_args()
 
 
@@ -427,6 +429,38 @@ def export_memory_attention(model, args, H, W, output_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Memory attention — fixed-size ONNX (for MIGraphX)
+# ---------------------------------------------------------------------------
+
+def export_memory_attention_fixed(model, args, H: int, W: int, num_slots: int, output_path: Path) -> None:
+    wrapper = MemoryAttentionWrapper(model.memory_attention, H, W).cpu().eval()
+
+    HW  = H * W
+    N   = num_slots * HW  # fixed memory bank: num_maskmem frames x HW tokens
+    dummy_cur_feat = torch.randn(HW, 1, 256)
+    dummy_memory   = torch.randn(N, 1, 64)
+    dummy_cur_pos  = torch.randn(HW, 1, 256)
+    dummy_mem_pos  = torch.randn(N, 1, 64)
+
+    with torch.no_grad():
+        cond = wrapper(dummy_cur_feat, dummy_memory, dummy_cur_pos, dummy_mem_pos)
+    print(f"  MemoryAttention forward (fixed N={num_slots}): conditioned={cond.shape}")
+
+    with torch.no_grad():
+        torch.onnx.export(
+            wrapper,
+            (dummy_cur_feat, dummy_memory, dummy_cur_pos, dummy_mem_pos),
+            str(output_path),
+            opset_version=args.opset,
+            dynamo=False,
+            input_names=["current_vision_features", "memory",
+                         "current_vis_pos_embed", "memory_pos_embed"],
+            output_names=["conditioned_features"],
+        )
+    print(f"  Saved: {output_path}  ({output_path.stat().st_size / 1e6:.1f} MB)")
+
+
+# ---------------------------------------------------------------------------
 # Verification
 # ---------------------------------------------------------------------------
 
@@ -564,6 +598,12 @@ def main() -> int:
 
     print("\n[4/4] Exporting memory_attention ...")
     export_memory_attention(model, args, H, W, paths["memory_attention"])
+
+    if args.fixed_slots > 0:
+        fixed_name = f"memory_attention_fixed_N{args.fixed_slots}.onnx"
+        paths["memory_attention_fixed"] = args.output_dir / fixed_name
+        print(f"\n[4b] Exporting {fixed_name} (fixed shapes for MIGraphX) ...")
+        export_memory_attention_fixed(model, args, H, W, args.fixed_slots, paths["memory_attention_fixed"])
 
     print(f"\nExported to {args.output_dir}:")
     for name, p in paths.items():
