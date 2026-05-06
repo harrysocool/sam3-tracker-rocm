@@ -138,10 +138,24 @@ python demo.py \
 
 ## Performance
 
+### Video tracking (propagation FPS)
+
 | Resolution | DAVIS 2017 val J | SG val J (50 seqs) | Propagation FPS |
 |---|---|---|---|
 | **504px** | **81.1%** | **39.6%** | **5.72** |
 | 1008px | 85.8% | 44.8% | 1.35 |
+
+*Propagation FPS measured with `memory_attention_fixed_N7.onnx` on MIGraphX, after TunableOp warmup.*
+
+### Single-frame pipeline (Pipeline A: box/point → mask, no tracking)
+
+| Stage | 504px |
+|---|---:|
+| backbone `[PyTorch ROCm FP16]` | 138.9 ms |
+| mask_decoder_init `[ONNX CPU]` | 7.1 ms |
+| **Total → FPS** | **159 ms → 6.29 FPS** |
+
+Run `python eval/bench_pipeline.py --checkpoint model/sam3 --onnx-dir onnx_files` to reproduce.
 
 *Measured on AMD Ryzen AI Max+ 395 (gfx1151), after TunableOp warmup.*
 
