@@ -11,10 +11,10 @@ Key design decisions:
   - RoPE in memory_attention uses cos/sin (real-valued), no view_as_complex → ONNX-compatible
   - memory bank length is dynamic (up to 7 spatial frames × 5184 tokens each)
   - num_object_pointer_tokens=0 for this version (object pointers appended to memory but RoPE applied)
-  - Load model with PYTHONPATH pointing to DART .local_deps (not sys.path.insert)
+
 
 Usage:
-    PYTHONPATH=/home/amd/project/sam3/repo/DART/.local_deps \\
+    PYTHONPATH not required (transformers>=5.8.0 includes sam3_tracker_video)\
         python scripts/onnx/export/export_tracker_modules.py \\
         [--output-dir results/onnx/tracker] [--imgsz 1008] [--opset 17] [--verify]
 """

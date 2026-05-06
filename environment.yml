@@ -1,0 +1,16 @@
+name: sam3-tracker-rocm
+channels:
+  - defaults
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+    # ROCm-specific PyTorch — install manually first (see README step 2)
+    # pip install torch --index-url https://download.pytorch.org/whl/rocm6.2
+    - transformers>=5.8.0
+    - onnxruntime-rocm==1.24.2
+    - opencv-python>=4.8
+    - numpy>=1.26,<2.0
+    - pillow>=10.0
+    - pycocotools>=2.0      # for eval scripts
+    - huggingface-hub>=0.20 # for model download

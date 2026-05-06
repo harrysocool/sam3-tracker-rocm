@@ -1,0 +1,28 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Model weights and ONNX files (download separately)
+model/
+onnx_files/
+
+# Datasets
+dataset/
+
+# Results and outputs
+results/
+*.mp4
+*.jpg
+*_tracked.*
+*_demo.*
+
+# TunableOp cache
+tunableop_results*.csv
+
+# MIGraphX cache
+/tmp/migraphx/
+
+# IDE
+.vscode/
+.idea/
