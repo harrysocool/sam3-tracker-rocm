@@ -1,6 +1,6 @@
 # SAM3 Video Tracking ONNX Pipeline — Project Summary
 
-**Hardware**: AMD Ryzen AI Max+ 395 (gfx1151 / Radeon 8060S), 64GB unified memory (APU)  
+**Hardware**: AMD Ryzen AI Max+ 395 (gfx1151 / Radeon 8060S), 128GB unified memory (APU, UMA=64GB)  
 **Target**: Mask-level video tracking at ≥5 Hz
 
 ## Software Environment
