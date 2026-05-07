@@ -17,10 +17,10 @@ AMD Ryzen AI Max+ 395 with a DAVIS 2017 val Mean J of **81.1%** (504px).
 
 ```
 Input frame
-  → PyTorch backbone (ROCm GPU FP16)          ~142ms
+  → PyTorch backbone (ROCm GPU FP16)          ~139ms
   → memory_attention_fixed_N7.onnx (MIGraphX)  ~16ms
   → mask_decoder_propagate.onnx (CPU ONNX)      ~7ms
-  → memory_encoder.onnx (CPU ONNX)              ~9ms
+  → memory_encoder.onnx (CPU ONNX)             ~11ms
   ─────────────────────────────────────────────────
   Total propagation frame: ~175ms → 5.72 FPS
 ```
@@ -30,9 +30,9 @@ Input frame
 ## Setup
 
 > **Important**: PyTorch for gfx1151 (ROCm 7.13) and `onnxruntime-migraphx`
-> are **not on standard PyPI**. The correct setup flow is to start from
-> AMD's [TheRock](https://github.com/ROCm/TheRock) environment and install
-> additional packages on top — not to create a fresh conda env from scratch.
+> are **not on standard PyPI**. Install them from AMD's nightly wheel index
+> and the GitHub release linked below. A plain `conda create` + the steps
+> below is sufficient — no TheRock pre-built environment is required.
 
 ### 1. Install ROCm SDK + PyTorch for gfx1151
 
@@ -65,6 +65,11 @@ Set the following environment variables (add to `~/.bashrc` or your run script):
 export HSA_OVERRIDE_GFX_VERSION=11.5.1
 export PYTORCH_ALLOC_CONF=expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:512
 ```
+
+> **BIOS tip (128 GB systems)**: set *UMA Frame Buffer Size* to **64 GB** in BIOS.
+> This maximises the GPU's fast non-coherent memory pool. Setting it to 128 GB
+> starves the OS and paradoxically reduces GPU bandwidth. See
+> [`docs/project_summary.md`](docs/project_summary.md) Finding #7 for details.
 
 Verify:
 ```bash
@@ -142,10 +147,12 @@ python demo.py \
 
 | Resolution | DAVIS 2017 val J | SG val J (50 seqs) | Propagation FPS |
 |---|---|---|---|
-| **504px** | **81.1%** | **39.6%** | **5.72** |
-| 1008px | 85.8% | 44.8% | 1.35 |
+| **504px** | **81.1%** | **39.6%** ¹ | **5.72** |
+| 1008px | 85.8% | 44.8% ¹ | 1.35 |
 
 *Propagation FPS measured with `memory_attention_fixed_N7.onnx` on MIGraphX, after TunableOp warmup.*
+
+¹ SG J (IoU) is a proxy metric on a random 50-sequence subset, not the official cgF1/pHOTA evaluation. See [`docs/project_summary.md`](docs/project_summary.md).
 
 ### Single-frame pipeline (Pipeline A: box/point → mask, no tracking)
 
@@ -168,13 +175,21 @@ Run `python eval/bench_pipeline.py --checkpoint model/sam3 --onnx-dir onnx_files
 python eval/eval_davis.py \
     --checkpoint model/sam3 \
     --onnx-dir onnx_files \
-    --davis dataset/DAVIS
+    --davis dataset/DAVIS \
+    --imgsz 504
 
 # Smartglass SG val (download separately)
 python eval/eval_saco_sg.py \
     --checkpoint model/sam3 \
     --onnx-dir onnx_files \
+    --gt-json dataset/gt-annotations/saco_veval_smartglasses_val.json \
+    --img-root dataset/saco_sg/JPEGImages_6fps \
     --imgsz 504
+
+# Pipeline A vs B latency benchmark
+python eval/bench_pipeline.py \
+    --checkpoint model/sam3 \
+    --onnx-dir onnx_files
 ```
 
 ---
@@ -190,7 +205,8 @@ sam3-tracker-rocm/
 │   └── export_tracker_modules.py   # Generate ONNX files from model weights
 ├── eval/
 │   ├── eval_davis.py               # DAVIS 2017 evaluation
-│   └── eval_saco_sg.py             # Smartglass SG evaluation
+│   ├── eval_saco_sg.py             # Smartglass SG evaluation
+│   └── bench_pipeline.py           # Pipeline A vs B latency benchmark
 ├── demo.py                         # Single image / video demo
 ├── assets/demo.jpg                 # Sample image
 ├── docs/project_summary.md         # Technical report
