@@ -17,11 +17,11 @@ AMD Ryzen AI Max+ 395 with a DAVIS 2017 val Mean J of **81.1%** (504px).
 
 ```
 Input frame
-  → PyTorch backbone (ROCm GPU FP16)          ~139ms
-  → memory_attention_fixed_N7.onnx (MIGraphX)  ~16ms
-  → mask_decoder_propagate.onnx (CPU ONNX)      ~7ms
-  → memory_encoder.onnx (CPU ONNX)             ~11ms
-  ─────────────────────────────────────────────────
+  → PyTorch backbone (ROCm GPU FP16)                ~139ms
+  → memory_attention_fixed_N7.onnx (MIGraphX ONNX)  ~16ms
+  → mask_decoder_propagate.onnx (CPU ONNX)          ~7ms
+  → memory_encoder.onnx (CPU ONNX)                  ~11ms
+  ─────────────────────────────────────────────────────────
   Total propagation frame: ~175ms → 5.72 FPS
 ```
 
