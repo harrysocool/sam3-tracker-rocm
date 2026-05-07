@@ -241,21 +241,27 @@ export PYTORCH_ALLOC_CONF=expandable_segments:True,garbage_collection_threshold:
 
 ## Next Steps
 
-### 1. Full backbone ONNX → MIGraphX (highest impact)
+### 1. Full backbone ONNX → MIGraphX ✗ INVESTIGATED — PyTorch wins
 
-The `Sam3TrackerVideoModel` vision encoder has already been successfully exported to ONNX at 1008px (`backbone_split_fp16/`) using `export_tracker_backbone_split.py` — which correctly exports from the HF version (not the incompatible Meta version). It also compiles on MIGraphX with the `MIGRAPHX_GPU_HIP_FLAGS` fix. Two remaining blockers:
+**Status**: Fully investigated on dev branch. Conclusion: PyTorch backbone is irreplaceable for this model architecture.
 
-- **MIGraphX JIT cache not persistent**: Each Python process re-compiles from scratch (~680s). Fix: use the MIGraphX Python API to pre-compile and explicitly save/load a `.mxr` file, bypassing the ONNX Runtime JIT entirely:
-  ```python
-  import migraphx
-  prog = migraphx.parse_onnx("backbone_hf_504.onnx")
-  prog.compile(migraphx.get_target("gpu"))
-  prog.save("backbone_hf_504.mxr")   # one-time, ~10 min
-  # subsequent runs: migraphx.load("backbone_hf_504.mxr")  — seconds
-  ```
-- **Only 1008px exported**: Re-run `export_tracker_backbone_split.py --imgsz 504` to get the 504px version.
+**Key findings** (see `dev` branch, commits `7415144`–`dd24da8`):
 
-**Expected outcome**: full pipeline on MIGraphX — backbone latency currently unknown at 504px on MIGraphX but likely faster than PyTorch's 139ms, potentially closing the 4× gap vs H200 at 1008px.
+| Approach | 504px latency | vs PyTorch |
+|---|---|---|
+| PyTorch FP16 | **139ms (7.2 FPS)** | baseline |
+| HF split 3-session FP32 MIGraphX | 1415ms | 10× slower |
+| HF split 3-session FP16 MIGraphX | 923ms | 6.6× slower |
+| HF single-session FP32→FP16 MIGraphX | 971ms | 7× slower |
+| Meta encoder FP16 single-session MIGraphX | 88ms (incompatible) | 1.6× faster |
+
+**Root cause**: `Sam3TrackerVideoModel.vision_encoder` exports to ONNX with **9324 nodes** (vs Meta encoder's 2303). The extra nodes include `If` (control flow), `Shape`, `ConstantOfShape` — ops that MIGraphX cannot graph-optimize, causing it to execute sequentially. The 3-session split added GPU↔CPU transfer overhead on top.
+
+The Meta encoder (2303 nodes, clean feed-forward) achieves 88ms on MIGraphX FP16 — faster than PyTorch — but is numerically incompatible with the tracker (Finding #1, max_diff=4.89).
+
+**To unblock**: constant-fold the `If`/`Shape` nodes in the HF ONNX graph (requires graph rewriting or a custom PyTorch export pass). Beyond current scope.
+
+**ORT session cache** (`migraphx_model_cache_dir` provider option) is now correctly documented: first compile takes ~120s per session, subsequent runs load in seconds. Env var `MIGRAPHX_GPU_HIP_FLAGS` must be set before session creation.
 
 ---
 
@@ -315,8 +321,8 @@ Meta released SAM 3.1 with **Object Multiplex** — processes multiple objects i
 
 | Next Step | Effort | Expected FPS gain | Status |
 |---|---|---|---|
-| HF backbone → ONNX at 504px | Low (script exists) | Unknown (to be measured) | Pending |
-| MIGraphX JIT cache fix (`.mxr` save/load) | Medium | Eliminates 680s cold start | Pending |
+| HF backbone → MIGraphX | Investigated | No gain (9324 nodes, If ops block optimization) | **Closed** |
+| MIGraphX JIT cache | Resolved | `migraphx_model_cache_dir` ORT option works | **Closed** |
 | Shared backbone for multi-object tracking | Low (Python host only) | ~N× for N objects | Pending |
 | Official SG cgF1/pHOTA eval | Medium (~4h runtime) | — (accuracy metric) | Pending |
 | memory_encoder on MIGraphX | Medium | ~10ms saved | Pending |
