@@ -140,6 +140,23 @@ Accuracy trade-off: halving resolution causes approximately 4–5 pp drop in J (
 
 *Verified with MIGraphX enabled after `MIGRAPHX_GPU_HIP_FLAGS` fix; accuracy unchanged from pre-fix baseline.*
 
+### Hardware comparison — SAM3 video propagation FPS
+
+SAM3's standard target resolution is **1008px**. The table below compares propagation FPS across hardware at that resolution, followed by our 504px result for context.
+
+| Hardware | Resolution | FPS | Notes |
+|---|---|---|---|
+| NVIDIA H200 (data-centre) | ~1080p (≈1008px) | 5–6 | PyTorch, single GPU, single object |
+| NVIDIA RTX 5090 (consumer flagship) | 1008px | ~5 | PyTorch |
+| NVIDIA RTX 5090 | 1008px | 30+ | TensorRT + ByteTrack optimised |
+| NVIDIA RTX 3090 (consumer) | — | — | SAM3 not publicly benchmarked |
+| **Ours — AMD Ryzen AI Max+ 395 (APU)** | **1008px** | **1.35** | PyTorch backbone + ONNX (MIGraphX) |
+| **Ours — AMD Ryzen AI Max+ 395 (APU)** | **504px** | **5.72** | Half-resolution trade-off |
+
+**Fair comparison at 1008px**: our APU achieves 1.35 FPS vs. 5–6 FPS on an H200, a ~4× gap. The 5.72 FPS figure is at 504px (half the standard resolution) and is therefore not a like-for-like comparison against the H200 number.
+
+**Context**: the 504px operating point was a deliberate choice to reach a practical frame rate on an edge APU. The accuracy cost is modest (DAVIS J: 85.8% → 81.1%). Reaching comparable 1008px performance on AMD APU hardware would require either a faster backbone (e.g., MIGraphX backbone ONNX once JIT cache issues are resolved) or model distillation.
+
 ### Smartglass SG val (50 sequences, seed=42, egocentric tracking)
 
 > **Note**: The numbers below use J (IoU) averaged over a random 50-sequence subset,
