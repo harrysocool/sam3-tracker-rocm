@@ -5,18 +5,28 @@
 
 ## Software Environment
 
-| Software | Version |
-|---|---|
-| OS | Ubuntu 24.04.4 LTS (Noble Numbat) |
-| Kernel | 6.18.6-061806-generic |
-| ROCm | 7.13.60980 |
-| PyTorch | 2.12.0a0+rocm7.13.0a20260411 |
-| MIGraphX | 2.15.0 (20250912) |
-| ONNX Runtime | 1.24.2 |
-| ONNX | 1.21.0 |
-| Python | 3.12.13 |
-| NumPy | 1.26.4 |
-| conda | 26.1.1 |
+| Software | Version | Source |
+|---|---|---|
+| OS | Ubuntu 24.04.4 LTS (Noble Numbat) | — |
+| Kernel | 6.18.6-061806-generic | — |
+| ROCm HIP runtime | 7.13.0a20260411 | AMD nightly pip (`rocm-sdk-core`) |
+| PyTorch | 2.12.0a0+rocm7.13.0a20260411 | AMD nightly pip |
+| MIGraphX | 2.15.0 | System APT (`repo.radeon.com/rocm/apt/7.2`) |
+| ONNX Runtime (MIGraphX EP) | 1.24.2 | [Looong01/onnxruntime-rocm-build](https://github.com/Looong01/onnxruntime-rocm-build) |
+| ONNX | 1.21.0 | pip |
+| Python | 3.12.13 | conda |
+| NumPy | 1.26.4 | pip |
+| conda | 26.1.1 | miniforge |
+
+> **Dual ROCm stack**: AMD maintains two parallel release tracks. The nightly pip
+> wheels (ROCm 7.13) provide gfx1151 PyTorch support but do not include MIGraphX.
+> The stable APT release (ROCm 7.2) provides MIGraphX but does not support gfx1151
+> for PyTorch. Both are required concurrently — they coexist without conflict because
+> PyTorch loads its ROCm runtime libraries explicitly from the conda env's
+> `_rocm_sdk_core` paths (via `rocm_sdk.initialize_process()`), while
+> `onnxruntime-migraphx` links against the system APT `libmigraphx_c.so.3`.
+> This split is expected to resolve when AMD unifies the release tracks (planned
+> mid-2026).
 
 ---
 

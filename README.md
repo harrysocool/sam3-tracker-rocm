@@ -36,8 +36,33 @@ Input frame
 | Hardware | AMD Ryzen AI Max+ 395 (gfx1151) | Other ROCm-capable AMD GPUs may work but are untested |
 | OS | Ubuntu 24.04.4 LTS | Other Linux distros with ROCm 7.x support may work |
 | Kernel | 6.8+ (tested: 6.18.6) | Required for gfx1151 AMDGPU driver support |
+| **System ROCm 7.2 APT** | `migraphx 2.15.0` | Required for MIGraphX — see note below |
 | conda / miniforge | any recent | Used to create the Python environment |
 | BIOS | UMA Frame Buffer Size = **64 GB** | On 128 GB systems; see [Finding #7](docs/project_summary.md) |
+
+> **Why two ROCm stacks?** AMD currently maintains two parallel release tracks:
+> the **stable APT release** (ROCm 7.2.x, includes MIGraphX) and the
+> **nightly pip wheels** (ROCm 7.13, includes PyTorch for gfx1151, but no MIGraphX).
+> gfx1151 support is only available in the nightly track, so both are required:
+> the APT install provides MIGraphX; the pip install provides PyTorch.
+> See [`docs/project_summary.md`](docs/project_summary.md) for details.
+
+#### 0. Install system ROCm 7.2 APT packages (MIGraphX)
+
+```bash
+# Add AMD ROCm 7.2 APT repository
+sudo apt-get update
+sudo apt-get install -y wget gnupg
+wget -qO - https://repo.radeon.com/rocm/rocm.gpg.key | \
+    gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] \
+    https://repo.radeon.com/rocm/apt/7.2 noble main" | \
+    sudo tee /etc/apt/sources.list.d/rocm.list
+
+# Install MIGraphX
+sudo apt-get update
+sudo apt-get install -y migraphx
+```
 
 > **Important**: PyTorch for gfx1151 (ROCm 7.13) and `onnxruntime-migraphx`
 > are **not on standard PyPI**. Install them from AMD's nightly wheel index
