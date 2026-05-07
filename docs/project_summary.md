@@ -163,17 +163,17 @@ The SG dataset covers first-person (smartglass) viewpoints and is significantly 
 
 ## Key Technical Findings
 
-1. **Meta vs. HF backbone incompatibility**: `sam3_image_encoder.onnx` (Meta format) produces FPN features with max_diff=4.89 vs. `Sam3TrackerVideoModel` (HF format), causing mask coverage to drop from 29.5% to 0.2%. The HF backbone must be run via PyTorch directly.
+1. **memory_attention must use fixed-size ONNX**: Dynamic axes trigger a MIGraphX compiler bug ("Dangling reference in module main"). Exporting with fixed N=7×HW shape bypasses this and enables 3.3× speedup on MIGraphX.
 
-2. **memory_attention must use fixed-size ONNX**: Dynamic axes trigger a MIGraphX compiler bug ("Dangling reference in module main"). Exporting with fixed N=7×HW shape bypasses this and enables 3.3× speedup on MIGraphX.
+2. **MIGraphX JIT compiler flag** (`MIGRAPHX_GPU_HIP_FLAGS`): Newer versions of the comgr/clang compiler inside ROCm treat the C++ `[[clang::lifetimebound]]` suggestion as `-Werror`, aborting GPU kernel compilation for `memory_attention_fixed_N7.onnx`. Setting `MIGRAPHX_GPU_HIP_FLAGS=-Wno-error -Wno-lifetime-safety-intra-tu-suggestions` suppresses this. Without it, memory_attention silently falls back to CPU (72ms instead of 16ms, propagation drops from 5.74 to 3.82 FPS). This flag is now set automatically in `tracker.py` via `os.environ.setdefault()`.
 
-3. **propagate_frame mask bug (fixed)**: `binary_mask[0]` at 504px incorrectly extracted the first row (1D) instead of the full 2D mask, causing all propagation frames to output 0% mask coverage. Fixed: `masks.squeeze() > 0`.
+3. **ORT thread tuning**: CPU ONNX sessions default to single-threaded. Setting `intra_op_num_threads=8` reduces combined decoder + encoder latency from ~100ms to ~16ms.
 
 4. **TunableOp (AMD)**: 8 warmup passes trigger per-operation GEMM kernel autotuning. Subsequent calls use the optimal kernel, reducing backbone latency by ~8.7ms.
 
-5. **ORT thread tuning**: CPU ONNX sessions default to single-threaded. Setting `intra_op_num_threads=8` reduces combined decoder + encoder latency from ~100ms to ~16ms.
+5. **propagate_frame mask bug (fixed)**: `binary_mask[0]` at 504px incorrectly extracted the first row (1D) instead of the full 2D mask, causing all propagation frames to output 0% mask coverage. Fixed: `masks.squeeze() > 0`.
 
-6. **MIGraphX JIT compiler flag** (`MIGRAPHX_GPU_HIP_FLAGS`): Newer versions of the comgr/clang compiler inside ROCm treat the C++ `[[clang::lifetimebound]]` suggestion as `-Werror`, aborting GPU kernel compilation for `memory_attention_fixed_N7.onnx`. Setting `MIGRAPHX_GPU_HIP_FLAGS=-Wno-error -Wno-lifetime-safety-intra-tu-suggestions` suppresses this. Without it, memory_attention silently falls back to CPU (72ms instead of 16ms, propagation drops from 5.74 to 3.82 FPS). This flag is now set automatically in `tracker.py` via `os.environ.setdefault()`.
+6. **Meta vs. HF backbone incompatibility**: `sam3_image_encoder.onnx` (Meta format) produces FPN features with max_diff=4.89 vs. `Sam3TrackerVideoModel` (HF format), causing mask coverage to drop from 29.5% to 0.2%. The HF backbone must be run via PyTorch directly.
 
 ---
 
