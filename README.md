@@ -17,11 +17,11 @@ AMD Ryzen AI Max+ 395 with a DAVIS 2017 val Mean J of **81.1%** (504px).
 
 ```
 Input frame
-  → PyTorch backbone (ROCm GPU FP16)                ~139ms
-  → memory_attention_fixed_N7.onnx (MIGraphX ONNX)  ~16ms
-  → mask_decoder_propagate.onnx (CPU ONNX)          ~7ms
-  → memory_encoder.onnx (CPU ONNX)                  ~11ms
-  ─────────────────────────────────────────────────────────
+  → PyTorch backbone (ROCm GPU FP16)          ~139ms
+  → memory_attention_fixed_N7.onnx (MIGraphX)  ~16ms
+  → mask_decoder_propagate.onnx (CPU ONNX)      ~7ms
+  → memory_encoder.onnx (CPU ONNX)             ~11ms
+  ─────────────────────────────────────────────────
   Total propagation frame: ~175ms → 5.72 FPS
 ```
 
@@ -180,15 +180,46 @@ Run `python eval/bench_pipeline.py --checkpoint model/sam3 --onnx-dir onnx_files
 
 ## Evaluation
 
+### Download datasets
+
+**DAVIS 2017 val** (semi-supervised, 480p):
 ```bash
-# DAVIS 2017 val (download from https://davischallenge.org)
+# Download from the official DAVIS challenge site
+wget https://data.vision.ee.ethz.ch/csergi/share/davis/DAVIS-2017-trainval-480p.zip
+unzip DAVIS-2017-trainval-480p.zip -d dataset/
+# Result: dataset/DAVIS/{Annotations,ImageSets,JPEGImages}/
+```
+
+> Official page: [davischallenge.org/davis2017/code.html](https://davischallenge.org/davis2017/code.html)
+
+**Smartglass SG val** (SA-Co/VEval, gated — requires HuggingFace account and agreeing to Meta's terms):
+```bash
+# Annotations
+huggingface-cli download facebook/SACo-VEval \
+    annotation/saco_veval_smartglasses_val.json \
+    --repo-type dataset --local-dir dataset/gt-annotations/
+
+# Video frames (~6 FPS)
+huggingface-cli download facebook/SACo-VEval \
+    media/saco_sg.tar.gz \
+    --repo-type dataset --local-dir dataset/
+tar -xzf dataset/media/saco_sg.tar.gz -C dataset/
+# Result: dataset/saco_sg/JPEGImages_6fps/
+```
+
+> Dataset page: [huggingface.co/datasets/facebook/SACo-VEval](https://huggingface.co/datasets/facebook/SACo-VEval)
+
+### Run evaluation
+
+```bash
+# DAVIS 2017 val
 python eval/eval_davis.py \
     --checkpoint model/sam3 \
     --onnx-dir onnx_files \
     --davis dataset/DAVIS \
     --imgsz 504
 
-# Smartglass SG val (download separately)
+# Smartglass SG val
 python eval/eval_saco_sg.py \
     --checkpoint model/sam3 \
     --onnx-dir onnx_files \
