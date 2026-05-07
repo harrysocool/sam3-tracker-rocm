@@ -29,6 +29,16 @@ Input frame
 
 ## Setup
 
+### Prerequisites
+
+| Requirement | Tested version | Notes |
+|---|---|---|
+| Hardware | AMD Ryzen AI Max+ 395 (gfx1151) | Other ROCm-capable AMD GPUs may work but are untested |
+| OS | Ubuntu 24.04.4 LTS | Other Linux distros with ROCm 7.x support may work |
+| Kernel | 6.8+ (tested: 6.18.6) | Required for gfx1151 AMDGPU driver support |
+| conda / miniforge | any recent | Used to create the Python environment |
+| BIOS | UMA Frame Buffer Size = **64 GB** | On 128 GB systems; see [Finding #7](docs/project_summary.md) |
+
 > **Important**: PyTorch for gfx1151 (ROCm 7.13) and `onnxruntime-migraphx`
 > are **not on standard PyPI**. Install them from AMD's nightly wheel index
 > and the GitHub release linked below. A plain `conda create` + the steps
