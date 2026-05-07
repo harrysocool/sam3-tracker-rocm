@@ -149,11 +149,11 @@ python demo.py \
 
 ### Single-frame pipeline (Pipeline A: box/point → mask, no tracking)
 
-| Stage | 504px |
-|---|---:|
-| backbone `[PyTorch ROCm FP16]` | 139.8 ms |
-| mask_decoder_init `[ONNX CPU]` | 6.3 ms |
-| **Total → FPS** | **156 ms → 6.40 FPS** |
+| Stage | 504px | 1008px |
+|---|---:|---:|
+| backbone `[PyTorch ROCm FP16]` | 139.8 ms | 525.5 ms |
+| mask_decoder_init `[ONNX CPU]` | 6.3 ms | 23.4 ms |
+| **Total → FPS** | **156 ms → 6.40 FPS** | **584 ms → 1.71 FPS** |
 
 Run `python eval/bench_pipeline.py --checkpoint model/sam3 --onnx-dir onnx_files` to reproduce.
 

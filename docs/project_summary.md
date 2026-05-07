@@ -111,11 +111,11 @@ Accuracy trade-off: halving resolution causes approximately 4–5 pp drop in J (
 
 ### Pipeline A: Single-frame (box/point → mask, no tracking)
 
-| Stage | 504px |
-|---|---:|
-| backbone [PyTorch ROCm FP16] | 139.9 ± 1.8 ms |
-| mask_decoder_init [ONNX CPU] | 6.5 ± 0.5 ms |
-| **Total → FPS** | **158 ms → 6.33 FPS** |
+| Stage | 504px | 1008px |
+|---|---:|---:|
+| backbone [PyTorch ROCm FP16] | 139.9 ± 1.8 ms | 525.5 ± 1.4 ms |
+| mask_decoder_init [ONNX CPU] | 6.5 ± 0.5 ms | 23.4 ± 0.4 ms |
+| **Total → FPS** | **158 ms → 6.33 FPS** | **584 ms → 1.71 FPS** |
 
 ### Pipeline B: Propagation per-frame (video tracking)
 
