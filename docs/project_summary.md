@@ -271,7 +271,32 @@ The backbone split approach (inserting a numpy `BHWD→BCHW` permute between ONN
 
 ---
 
-### 4. SAM 3.1 upgrade evaluation
+### 4. True simultaneous multi-object tracking
+
+The current implementation tracks multiple objects **sequentially** — the full sequence is run once per object, so the backbone is called N×frames times for N objects. The official SAM3 architecture is designed for **simultaneous** multi-object tracking: the backbone runs **once per frame** (shared across all objects), and each object has its own independent memory bank and mask decoder call.
+
+The fix is straightforward within the existing Python host (no ONNX re-export needed):
+
+```python
+# Current (sequential — backbone runs N×frames times):
+for obj_id in obj_ids:
+    tracker.reset()
+    for frame in frames:
+        mask = tracker.init_frame(img, box)  # backbone inside
+
+# Proposed (shared backbone — backbone runs frames times):
+for frame in frames:
+    fpn_0, fpn_1, fpn_2, pos = tracker._backbone(img)   # once
+    for obj_id in obj_ids:
+        mask = tracker._decode(fpn_0, fpn_1, fpn_2, obj_memory[obj_id])
+        obj_memory[obj_id].update(fpn_2, mask)
+```
+
+This would reduce total processing time for N objects from O(N×frames) to O(frames + N×decoder_cost). At 504px the decoder is ~7ms per object vs ~140ms for the backbone — so for 3 objects the speedup is roughly 3× vs current sequential approach.
+
+---
+
+### 5. SAM 3.1 upgrade evaluation
 
 Meta released SAM 3.1 with **Object Multiplex** — processes multiple objects in a single forward pass, up to **7× faster** than SAM 3 for multi-object tracking with no accuracy loss. Worth evaluating whether the same ONNX export pipeline applies to SAM 3.1's `Sam3TrackerVideoModel` variant, and measuring the propagation FPS improvement.
 
@@ -283,6 +308,7 @@ Meta released SAM 3.1 with **Object Multiplex** — processes multiple objects i
 |---|---|---|---|
 | HF backbone → ONNX at 504px | Low (script exists) | Unknown (to be measured) | Pending |
 | MIGraphX JIT cache fix (`.mxr` save/load) | Medium | Eliminates 680s cold start | Pending |
+| Shared backbone for multi-object tracking | Low (Python host only) | ~N× for N objects | Pending |
 | Official SG cgF1/pHOTA eval | Medium (~4h runtime) | — (accuracy metric) | Pending |
 | memory_encoder on MIGraphX | Medium | ~10ms saved | Pending |
 | mask_decoder on MIGraphX | High (segfault to debug) | ~7ms saved | Pending |
