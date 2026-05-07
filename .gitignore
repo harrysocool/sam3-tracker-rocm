@@ -29,3 +29,5 @@ tunableop_results*.csv
 # IDE
 .vscode/
 .idea/
+mxr_cache/
+onnx_files/backbone_*.onnx
