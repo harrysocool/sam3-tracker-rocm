@@ -321,7 +321,7 @@ Meta released SAM 3.1 with **Object Multiplex** — processes multiple objects i
 
 | Next Step | Effort | Expected FPS gain | Status |
 |---|---|---|---|
-| HF backbone → MIGraphX | Investigated | No gain (9324 nodes, If ops block optimization) | **Closed** |
+| HF backbone → MIGraphX | Investigated | onnxsim: 9324→2202 nodes (-76%) but still 916ms (PyTorch: 139ms). Issue is Transpose+MatMul kernel quality, not graph size | **Closed** |
 | MIGraphX JIT cache | Resolved | `migraphx_model_cache_dir` ORT option works | **Closed** |
 | Shared backbone for multi-object tracking | Low (Python host only) | ~N× for N objects | Pending |
 | Official SG cgF1/pHOTA eval | Medium (~4h runtime) | — (accuracy metric) | Pending |
