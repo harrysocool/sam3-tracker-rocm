@@ -81,7 +81,7 @@ memory_encoder.onnx                     [CPU ONNX]
 
 | Module | MIGraphX Status | Root Cause / Resolution |
 |---|---|---|
-| sam3_image_encoder.onnx (meta format) | ✅ Used in detection pipeline | — |
+| sam3_image_encoder.onnx (Meta format) | ✅ Works on MIGraphX — but **not used in the tracker** | This is the encoder exported from Meta's original codebase. It runs correctly on MIGraphX and was used for single-frame detection benchmarking. It cannot replace the tracker backbone because its FPN outputs are numerically incompatible with `Sam3TrackerVideoModel` (see Key Technical Finding #1). |
 | memory_attention (dynamic axes) | ❌ | dynamic_axes triggers "Dangling reference in module main" compiler bug |
 | **memory_attention (fixed N=7)** | **✅** | Fixed-size ONNX bypasses dangling-ref bug; requires `MIGRAPHX_GPU_HIP_FLAGS=-Wno-error -Wno-lifetime-safety-intra-tu-suggestions` to pass newer clang `-Werror` check; 3.3× speedup |
 | memory_encoder | ❌ CPU only | ConvTranspose layout bug |
@@ -180,19 +180,19 @@ The SG dataset covers first-person (smartglass) viewpoints and is significantly 
 
 ## Key Technical Findings
 
-1. **memory_attention must use fixed-size ONNX**: Dynamic axes trigger a MIGraphX compiler bug ("Dangling reference in module main"). Exporting with fixed N=7×HW shape bypasses this and enables 3.3× speedup on MIGraphX.
+1. **Two SAM3 implementations exist and they are not interchangeable**: SAM3 has two independently maintained codebases — Meta's original and the HuggingFace `transformers` port. Although they nominally share the same weights, their image backbone produces numerically different FPN feature maps (max absolute difference = 4.89 on identical inputs). The mask decoder was trained against the HuggingFace variant's outputs; feeding it Meta-format features causes mask coverage to collapse from 29.5% to 0.2% — effectively no segmentation. Consequence: `sam3_image_encoder.onnx` (exported from Meta's code, already running on MIGraphX) **cannot be dropped in as a replacement** for the tracker backbone. The backbone must be run as PyTorch via `Sam3TrackerVideoModel.vision_encoder`. This is the single most important architectural constraint of the project — it is why the backbone remains PyTorch rather than ONNX/MIGraphX.
 
-2. **MIGraphX JIT compiler flag** (`MIGRAPHX_GPU_HIP_FLAGS`): Newer versions of the comgr/clang compiler inside ROCm treat the C++ `[[clang::lifetimebound]]` suggestion as `-Werror`, aborting GPU kernel compilation for `memory_attention_fixed_N7.onnx`. Setting `MIGRAPHX_GPU_HIP_FLAGS=-Wno-error -Wno-lifetime-safety-intra-tu-suggestions` suppresses this. Without it, memory_attention silently falls back to CPU (72ms instead of 16ms, propagation drops from 5.74 to 3.82 FPS). This flag is now set automatically in `tracker.py` via `os.environ.setdefault()`.
+2. **memory_attention must use fixed-size ONNX**: Dynamic axes trigger a MIGraphX compiler bug ("Dangling reference in module main"). Exporting with fixed N=7×HW shape bypasses this and enables 3.3× speedup on MIGraphX.
 
-3. **ORT thread tuning**: CPU ONNX sessions default to single-threaded. Setting `intra_op_num_threads=8` reduces combined decoder + encoder latency from ~100ms to ~16ms.
+3. **MIGraphX JIT compiler flag** (`MIGRAPHX_GPU_HIP_FLAGS`): Newer versions of the comgr/clang compiler inside ROCm treat the C++ `[[clang::lifetimebound]]` suggestion as `-Werror`, aborting GPU kernel compilation for `memory_attention_fixed_N7.onnx`. Setting `MIGRAPHX_GPU_HIP_FLAGS=-Wno-error -Wno-lifetime-safety-intra-tu-suggestions` suppresses this. Without it, memory_attention silently falls back to CPU (72ms instead of 16ms, propagation drops from 5.74 to 3.82 FPS). This flag is now set automatically in `tracker.py` via `os.environ.setdefault()`.
 
-4. **TunableOp (AMD)**: 8 warmup passes trigger per-operation GEMM kernel autotuning. Subsequent calls use the optimal kernel, reducing backbone latency by ~8.7ms.
+4. **ORT thread tuning**: CPU ONNX sessions default to single-threaded. Setting `intra_op_num_threads=8` reduces combined decoder + encoder latency from ~100ms to ~16ms.
 
-5. **propagate_frame mask bug (fixed)**: `binary_mask[0]` at 504px incorrectly extracted the first row (1D) instead of the full 2D mask, causing all propagation frames to output 0% mask coverage. Fixed: `masks.squeeze() > 0`.
+5. **TunableOp (AMD)**: 8 warmup passes trigger per-operation GEMM kernel autotuning. Subsequent calls use the optimal kernel, reducing backbone latency by ~8.7ms.
 
-6. **UMA BIOS setting (64 GB out of 128 GB)**: The Ryzen AI Max+ 395 is an APU with 128 GB total LPDDR5X shared between CPU and GPU. The BIOS "UMA Frame Buffer Size" carves out a **coarse-grained (non-coherent)** memory pool for the GPU at boot. Memory inside this pool is fast for GPU access; memory outside it is **fine-grained (cache-coherent)**, which is 2–4× slower due to CPU cache coherency overhead. Setting UMA=64 GB gives the GPU a 64 GB fast coarse-grained pool while leaving 64 GB for the OS — the optimal balance. Setting UMA=128 GB (all RAM) starves the OS of memory, causing instability and paradoxically worse GPU performance because OS pressure forces operations into the slow fine-grained region. Measurable impact in early benchmarking: +2.4% on the encoder+decoder chain path, up to +20.7% on the fused FP16 path. The tracker backbone is memory-bandwidth-limited, so this setting matters. The current machine is configured at UMA=64 GB (`rocm-smi` reports 64 GB VRAM).
+6. **propagate_frame mask bug (fixed)**: `binary_mask[0]` at 504px incorrectly extracted the first row (1D) instead of the full 2D mask, causing all propagation frames to output 0% mask coverage. Fixed: `masks.squeeze() > 0`.
 
-7. **Meta vs. HF backbone incompatibility**: `sam3_image_encoder.onnx` (Meta format) produces FPN features with max_diff=4.89 vs. `Sam3TrackerVideoModel` (HF format), causing mask coverage to drop from 29.5% to 0.2%. The HF backbone must be run via PyTorch directly.
+7. **UMA BIOS setting (64 GB out of 128 GB)**: The Ryzen AI Max+ 395 is an APU with 128 GB total LPDDR5X shared between CPU and GPU. The BIOS "UMA Frame Buffer Size" carves out a **coarse-grained (non-coherent)** memory pool for the GPU at boot. Memory inside this pool is fast for GPU access; memory outside it is **fine-grained (cache-coherent)**, which is 2–4× slower due to CPU cache coherency overhead. Setting UMA=64 GB gives the GPU a 64 GB fast coarse-grained pool while leaving 64 GB for the OS — the optimal balance. Setting UMA=128 GB (all RAM) starves the OS of memory, causing instability and paradoxically worse GPU performance because OS pressure forces operations into the slow fine-grained region. Measurable impact in early benchmarking: +2.4% on the encoder+decoder chain path, up to +20.7% on the fused FP16 path. The tracker backbone is memory-bandwidth-limited, so this setting matters. The current machine is configured at UMA=64 GB (`rocm-smi` reports 64 GB VRAM).
 
 ---
 
