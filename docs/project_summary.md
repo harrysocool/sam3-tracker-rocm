@@ -142,14 +142,13 @@ Accuracy trade-off: halving resolution causes approximately 4–5 pp drop in J (
 
 ### Hardware comparison — SAM3 video propagation FPS
 
-SAM3's standard target resolution is **1008px** [[SAM3 paper](https://arxiv.org/abs/2511.16719)]. The table below compares propagation FPS across hardware at that resolution, followed by our 504px result for context.
+SAM3's standard target resolution is **1008px**. The official paper reports 30 ms/image on H200 with 100+ objects, and "near real-time for ∼5 concurrent objects" in video [[SAM3, arXiv 2511.16719](https://arxiv.org/abs/2511.16719)]. The table below compares propagation FPS across hardware at that resolution, followed by our 504px result for context.
 
 | Hardware | Resolution | FPS | Notes | Source |
 |---|---|---|---|---|
-| NVIDIA H200 (data-centre) | ~1080p (≈1008px) | 5–6 | PyTorch, single GPU, single object | [GitHub issue #425](https://github.com/facebookresearch/sam3/issues/425) |
+| NVIDIA H200 (data-centre) | ≈1008px | ~5–6 | PyTorch, single object; paper states "near real-time for ∼5 concurrent objects" | [arXiv 2511.16719](https://arxiv.org/abs/2511.16719); [community report](https://github.com/facebookresearch/sam3/issues/425) |
 | NVIDIA RTX 5090 (consumer flagship) | 1008px | ~5 | PyTorch | [Medium — TensorRT guide](https://medium.com/@kynkynkyn/how-to-accelerate-sam3-with-tensorrt-for-real-time-inference-d014ef504383) |
 | NVIDIA RTX 5090 | 1008px | 30+ | TensorRT + ByteTrack optimised | [Medium — TensorRT guide](https://medium.com/@kynkynkyn/how-to-accelerate-sam3-with-tensorrt-for-real-time-inference-d014ef504383) |
-| NVIDIA RTX 3090 (consumer) | — | — | SAM3 not publicly benchmarked | — |
 | **Ours — AMD Ryzen AI Max+ 395 (APU)** | **1008px** | **1.35** | PyTorch backbone + ONNX (MIGraphX) | This work |
 | **Ours — AMD Ryzen AI Max+ 395 (APU)** | **504px** | **5.72** | Half-resolution trade-off | This work |
 
