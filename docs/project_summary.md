@@ -86,7 +86,7 @@ memory_encoder.onnx                     [CPU ONNX]
 | **memory_attention (fixed N=7)** | **✅** | Fixed-size ONNX bypasses dangling-ref bug; requires `MIGRAPHX_GPU_HIP_FLAGS=-Wno-error -Wno-lifetime-safety-intra-tu-suggestions` to pass newer clang `-Werror` check; 3.3× speedup |
 | memory_encoder | ❌ CPU only | ConvTranspose layout bug |
 | mask_decoder_init / propagate | ❌ CPU only | simplify_reshapes error / Segfault |
-| Backbone ONNX FP16 | ❌ | _Float16 vectorization bug in MIGraphX; FP32 ONNX is slower than PyTorch GPU FP16 |
+| Backbone ONNX FP16 | ❌ (impractical) | Compiles on MIGraphX with `MIGRAPHX_GPU_HIP_FLAGS` fix, but: (1) JIT cache does not persist across Python processes — 680s cold-start every run; (2) existing exports are fixed at 1008px, 504px version would need re-export. PyTorch ROCm GPU FP16 is the practical choice. |
 
 **Key hardware constraint**: gfx1151 is an APU with unified memory. The backbone is **memory-bandwidth-limited**, not compute-limited. As a result, kernel-level optimizations (torch.compile, Flash Attention, SDPA) provide no benefit, while resolution reduction is highly effective.
 
