@@ -201,14 +201,18 @@ sam3-tracker-rocm/
 
 ## Known limitations
 
-- **MIGraphX cold-start**: first run compiles GPU kernels (~10 min for 1008px backbone,
-  ~30s for 504px). Subsequent runs are fast. TunableOp autotuning adds ~8 warmup passes
-  at startup.
-- **MIGraphX library conflict**: PyTorch and MIGraphX ONNX sessions cannot be loaded in
-  the same process with arbitrary ordering — the tracker initializes PyTorch first, then
-  loads ONNX sessions.
-- **Only `memory_attention_fixed_N7.onnx` runs on MIGraphX**; other tracking modules
-  (mask decoder, memory encoder) fall back to CPU ONNX due to MIGraphX compiler bugs on gfx1151.
+- **MIGraphX cold-start**: the first run JIT-compiles `memory_attention_fixed_N7.onnx`
+  (~30s at 504px). Subsequent runs load from cache and are fast. TunableOp autotuning
+  adds ~8 warmup passes at startup.
+- **Only `memory_attention_fixed_N7.onnx` runs on MIGraphX**; mask decoder and memory
+  encoder fall back to CPU ONNX. See the MIGraphX Compatibility Summary in
+  [`docs/project_summary.md`](docs/project_summary.md) for root causes and next steps.
+- **Backbone runs as PyTorch** (not ONNX): `Sam3TrackerVideoModel.vision_encoder` must
+  run via PyTorch ROCm — the Meta-format `sam3_image_encoder.onnx` is numerically
+  incompatible with the HuggingFace mask decoder. See Finding #1 in
+  [`docs/project_summary.md`](docs/project_summary.md).
+- **MIGraphX initialisation order**: PyTorch must be initialised before MIGraphX ONNX
+  sessions are loaded in the same process. The tracker handles this automatically.
 
 ---
 
