@@ -230,6 +230,66 @@ export PYTORCH_ALLOC_CONF=expandable_segments:True,garbage_collection_threshold:
 
 ---
 
+## Next Steps
+
+### 1. Full backbone ONNX → MIGraphX (highest impact)
+
+The `Sam3TrackerVideoModel` vision encoder has already been successfully exported to ONNX at 1008px (`backbone_split_fp16/`) using `export_tracker_backbone_split.py` — which correctly exports from the HF version (not the incompatible Meta version). It also compiles on MIGraphX with the `MIGRAPHX_GPU_HIP_FLAGS` fix. Two remaining blockers:
+
+- **MIGraphX JIT cache not persistent**: Each Python process re-compiles from scratch (~680s). Fix: use the MIGraphX Python API to pre-compile and explicitly save/load a `.mxr` file, bypassing the ONNX Runtime JIT entirely:
+  ```python
+  import migraphx
+  prog = migraphx.parse_onnx("backbone_hf_504.onnx")
+  prog.compile(migraphx.get_target("gpu"))
+  prog.save("backbone_hf_504.mxr")   # one-time, ~10 min
+  # subsequent runs: migraphx.load("backbone_hf_504.mxr")  — seconds
+  ```
+- **Only 1008px exported**: Re-run `export_tracker_backbone_split.py --imgsz 504` to get the 504px version.
+
+**Expected outcome**: full pipeline on MIGraphX — backbone latency currently unknown at 504px on MIGraphX but likely faster than PyTorch's 139ms, potentially closing the 4× gap vs H200 at 1008px.
+
+---
+
+### 2. Official SG evaluation (cgF1 / pHOTA)
+
+Current SG numbers (J/IoU, 50-seq random subset) are a proxy metric only. The official SA-Co/VEval protocol requires:
+- Run tracker on all **1686 annotations** across 334 videos (~3–4 hours at 5 FPS)
+- Save predictions in YT-VIS JSON format
+- Run DART's `VEvalEvaluator` for **cgF1** and **pHOTA** (Video Phrase HOTA)
+
+The DART evaluator and all dependencies (`iopath`, `sam3.eval.*`) are already available on this machine. Work needed: add `--save-preds` flag to `eval_saco_sg.py` to output YT-VIS format predictions, then call `saco_veval_eval.py`.
+
+---
+
+### 3. memory_encoder and mask_decoder on MIGraphX
+
+Currently CPU-only due to two separate MIGraphX bugs:
+- **memory_encoder**: ConvTranspose tensor layout bug (similar to the FPN Transpose+ConvTranspose bug that was worked around in the backbone split)
+- **mask_decoder_init / propagate**: `simplify_reshapes` error / segfault
+
+The backbone split approach (inserting a numpy `BHWD→BCHW` permute between ONNX sessions to avoid the layout bug) may be applicable to memory_encoder. If resolved, combined ONNX CPU time (~18ms) would move to MIGraphX.
+
+---
+
+### 4. SAM 3.1 upgrade evaluation
+
+Meta released SAM 3.1 with **Object Multiplex** — processes multiple objects in a single forward pass, up to **7× faster** than SAM 3 for multi-object tracking with no accuracy loss. Worth evaluating whether the same ONNX export pipeline applies to SAM 3.1's `Sam3TrackerVideoModel` variant, and measuring the propagation FPS improvement.
+
+---
+
+### Summary table
+
+| Next Step | Effort | Expected FPS gain | Status |
+|---|---|---|---|
+| HF backbone → ONNX at 504px | Low (script exists) | Unknown (to be measured) | Pending |
+| MIGraphX JIT cache fix (`.mxr` save/load) | Medium | Eliminates 680s cold start | Pending |
+| Official SG cgF1/pHOTA eval | Medium (~4h runtime) | — (accuracy metric) | Pending |
+| memory_encoder on MIGraphX | Medium | ~10ms saved | Pending |
+| mask_decoder on MIGraphX | High (segfault to debug) | ~7ms saved | Pending |
+| SAM 3.1 upgrade | Medium | Up to 7× (multi-object) | Pending |
+
+---
+
 ## Reference: Software Stack Relationships
 
 ```
