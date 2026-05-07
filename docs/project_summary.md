@@ -142,7 +142,15 @@ Accuracy trade-off: halving resolution causes approximately 4–5 pp drop in J (
 
 ### Smartglass SG val (50 sequences, seed=42, egocentric tracking)
 
-| Configuration | Mean J | Propagation FPS |
+> **Note**: The numbers below use J (IoU) averaged over a random 50-sequence subset,
+> which is an internal proxy metric only. The official SA-Co/VEval evaluation protocol
+> for the SG dataset uses **cgF1** and **pHOTA** (Video Phrase HOTA), computed over
+> all 1686 annotations across 334 videos. cgF1 requires full-dataset coverage because
+> it includes an image-level MCC term (IL_MCC) that penalises false positives on
+> negative video–noun-phrase pairs — a metric that is not meaningful on a 50-seq subset.
+> **Official cgF1/pHOTA evaluation is pending** and will be added in a future update.
+
+| Configuration | Mean J (50 seqs, proxy) | Propagation FPS |
 |---|---|---|
 | **Ours — 1008px** | **44.8%** | 1.13 |
 | **Ours — 504px** | **39.6%** | 3.84 |
