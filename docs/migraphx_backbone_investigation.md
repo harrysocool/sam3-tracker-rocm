@@ -120,6 +120,45 @@ the specific matrix shapes used in SAM3's window attention.
 
 ## Why Meta Encoder is 10× Faster (88ms vs 916ms)
 
+### ORT profiling comparison
+
+**Meta encoder** (88ms/run, 5 runs = 440ms total):
+
+| Op | Total ms | Count | Avg/call | % |
+|---|---|---|---|---|
+|  | 31.3 | 8 | 3.91ms | **100%** |
+
+MIGraphX **fully fused the entire 2303-node graph into a single GPU kernel**.
+One kernel launch, zero intermediate memory transfers, maximum GPU utilization.
+
+**HF backbone simplified** (916ms/run, 5 runs = 9507ms total):
+
+| Op | Total ms | Count | Avg/call | % |
+|---|---|---|---|---|
+| Gemm | 4320.8 | 912 | 4.74ms | 45.4% |
+| MatMul | 1722.2 | 464 | 3.71ms | 18.1% |
+| Add | 546.9 | 1656 | 0.33ms | 5.8% |
+| Transpose | 509.3 | 1744 | 0.29ms | 5.4% |
+| FusedMatMul | 496.4 | 256 | 1.94ms | 5.2% |
+| Split | 294.3 | 720 | 0.41ms | 3.1% |
+| Softmax | 285.1 | 256 | 1.11ms | 3.0% |
+| ... | | | | |
+
+MIGraphX produced **thousands of separate kernel calls** — it could not fuse the HF
+backbone's graph, resulting in massive kernel launch and synchronization overhead.
+
+### Root cause: graph fusion eligibility
+
+MIGraphX can fully fuse a graph when:
+1. All ops are pure compute (MatMul, Conv, Elementwise) — no control flow, no dynamic shapes
+2. Data flow is strictly feed-forward — no branches (), no shape-dependent routing
+3. Op sequence maps to known fusion patterns (e.g., Conv+Bias+ReLU, GEMM+Add)
+
+The Meta encoder's clean feed-forward structure (15 op types, no //)
+allows complete graph fusion. The HF backbone's  ops around window attention
+Q/K/V projections break the fusion boundary — each  forces a separate kernel
+and a new data layout in memory.
+
 Same node count (~2200), but different op composition:
 
 | | Meta encoder | HF backbone (simplified) |
