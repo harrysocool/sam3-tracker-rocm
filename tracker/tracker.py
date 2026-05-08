@@ -7,8 +7,10 @@ Pipeline:
                    mask_decoder_propagate.onnx → mask + object pointer
   Every frame:     memory_encoder.onnx → memory entry → FIFO bank (max 7 frames)
 
-Backbone runs as PyTorch on ROCm GPU (FP16). All other modules are CPU ONNX,
-except memory_attention which runs on MIGraphX when the fixed-N7 file is present.
+Backbone: MIGraphX compiled (backbone_mxr_tuned.mxr, ~88ms at 504px) when available,
+          falling back to PyTorch ROCm FP16 (139ms). Pass backbone="pytorch" to force
+          PyTorch. All other modules are CPU ONNX, except memory_attention which runs
+          on MIGraphX when the fixed-N7 file is present.
 """
 from __future__ import annotations
 
@@ -20,13 +22,94 @@ from typing import Optional
 
 import cv2
 import numpy as np
-import torch
+
+# torch is imported lazily in the PyTorch backbone path only.
+# MIGraphX backbone mode has zero torch dependencies.
 
 os.environ.setdefault("MIGRAPHX_SKIP_BENCHMARKING", "1")
 # Suppress clang -Werror on lifetimebound warnings in MIGraphX JIT kernel compilation.
 # Without this flag, newer comgr/clang versions fail with:
 #   "parameter ... should be marked [[clang::lifetimebound]] [-Werror,-Wlifetime-safety-intra-tu-suggestions]"
 os.environ.setdefault("MIGRAPHX_GPU_HIP_FLAGS", "-Wno-error -Wno-lifetime-safety-intra-tu-suggestions")
+
+
+# ---------------------------------------------------------------------------
+# MIGraphX backbone (patched MIGraphX 2.16.0, ~88ms at 504px)
+# ---------------------------------------------------------------------------
+
+_MXR_BUILD_LIB = "/home/amd/project/tools/AMDMIGraphX/build_docker/lib"
+
+
+class MIGraphXBackbone:
+    """
+    SAM3 vision encoder compiled with patched MIGraphX 2.16.0.
+
+    Achieves ~88ms at 504px vs PyTorch ROCm's 139ms (1.6× speedup).
+    Uses backbone_single_simplified.onnx with kernel autotuning baked into
+    the .mxr cache file; first-time compilation takes ~3 minutes.
+
+    Outputs: (fpn_0, fpn_1, fpn_2, None) as float32 numpy arrays.
+    pos_2 is None because the ONNX does not export position encodings;
+    SAM3OnnxTracker.propagate_frame() uses zeros when pos_2 is None.
+    """
+
+    def __init__(self, onnx_path: str | Path, cache_path: str | Path) -> None:
+        import sys
+        # Prefer the ROCm lib dir where the Python binding lives; fall back to build dir.
+        _mxr_py_dir = "/opt/rocm-7.2.0/lib"
+        if _mxr_py_dir not in sys.path:
+            sys.path.insert(0, _mxr_py_dir)
+        if _MXR_BUILD_LIB not in sys.path:
+            sys.path.append(_MXR_BUILD_LIB)
+
+        import migraphx as _mxr
+        self._mxr = _mxr
+
+        cache_path = Path(cache_path)
+        onnx_path  = Path(onnx_path)
+
+        if cache_path.exists():
+            print(f"  MIGraphX backbone: loading {cache_path.name} ...")
+            t0 = time.perf_counter()
+            self._prog = _mxr.load(str(cache_path))
+            print(f"  MIGraphX backbone: ready in {time.perf_counter()-t0:.1f}s")
+        elif onnx_path.exists():
+            print(f"  MIGraphX backbone: compiling {onnx_path.name} with autotuning (~3 min) ...")
+            t0 = time.perf_counter()
+            # Temporarily lift SKIP_BENCHMARKING so autotuning selects optimal kernels
+            _old = os.environ.pop("MIGRAPHX_SKIP_BENCHMARKING", None)
+            prog = _mxr.parse_onnx(str(onnx_path))
+            _mxr.quantize_fp16(prog)
+            prog.compile(_mxr.get_target("gpu"), offload_copy=True)
+            if _old is not None:
+                os.environ["MIGRAPHX_SKIP_BENCHMARKING"] = _old
+            print(f"  MIGraphX backbone: compiled in {time.perf_counter()-t0:.1f}s")
+            _mxr.save(prog, str(cache_path))
+            print(f"  MIGraphX backbone: cache saved → {cache_path}")
+            self._prog = prog
+        else:
+            raise FileNotFoundError(
+                f"MIGraphX backbone needs {cache_path} (pre-compiled) "
+                f"or {onnx_path} (to compile from scratch); neither found."
+            )
+
+    def warmup(self, n: int = 3) -> None:
+        # Use random normal (not zeros) and keep array reference alive across all runs.
+        # MIGraphX may access input pointer asynchronously; a pre-allocated persistent
+        # array prevents dangling-pointer reads if a temporary were GC'd mid-run.
+        _shape = list(self._prog.get_parameter_shapes()["pixel_values"].lens())
+        _data  = np.random.randn(*_shape).astype(np.float32)
+        _arg   = self._mxr.argument(_data)
+        for _ in range(n):
+            self._prog.run({"pixel_values": _arg})
+
+    def __call__(self, img_np: np.ndarray):
+        """img_np: (1, 3, H, W) float32  →  (fpn_0, fpn_1, fpn_2, pos_2=None)"""
+        # Keep explicit references to prevent GC of data/argument before GPU finishes.
+        img_cont = np.ascontiguousarray(img_np)
+        arg      = self._mxr.argument(img_cont)
+        outputs  = self._prog.run({"pixel_values": arg})
+        return np.array(outputs[0]), np.array(outputs[1]), np.array(outputs[2]), None
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +132,7 @@ def preprocess_image(img_bgr: np.ndarray, imgsz: int) -> np.ndarray:
 
 def retarget_resolution(model, new_imgsz: int) -> None:
     """Re-initialize all RoPE buffers for a different input resolution."""
+    import torch
     from transformers.models.sam3.modeling_sam3 import Sam3ViTRotaryEmbedding
     from transformers.models.sam3_tracker_video.modeling_sam3_tracker_video import (
         Sam3TrackerVideoVisionRotaryEmbedding,
@@ -127,13 +211,16 @@ class MemoryBank:
 
 class SAM3OnnxTracker:
     """
-    SAM3 mask-level video tracker using PyTorch backbone + ONNX tracking modules.
+    SAM3 mask-level video tracker using ONNX tracking modules.
 
     Args:
         checkpoint:   Path to facebook/sam3 model directory.
         onnx_dir:     Directory containing the exported ONNX files.
         imgsz:        Input resolution (default 504; use 1008 for higher quality).
         num_maskmem:  Memory bank size (default 7).
+        backbone:     "auto" (default) — use MIGraphX if cache/onnx present, else PyTorch.
+                      "migraphx"       — require MIGraphX backbone (88ms at 504px).
+                      "pytorch"        — require PyTorch ROCm backbone (139ms at 504px).
     """
 
     def __init__(
@@ -142,55 +229,81 @@ class SAM3OnnxTracker:
         onnx_dir: str | Path,
         imgsz: int = 504,
         num_maskmem: int = 7,
+        backbone: str = "auto",
     ):
         import onnxruntime as ort
-        from transformers.models.sam3_tracker_video.modeling_sam3_tracker_video import (
-            Sam3TrackerVideoModel,
-        )
 
-        self.imgsz       = imgsz
-        self.H = self.W  = imgsz // 14
-        self.HW          = self.H * self.W
-        self.num_maskmem = num_maskmem
-        self.mask_mem_size = self.H * 16   # mask resize target for memory_encoder
+        self.imgsz         = imgsz
+        self.H = self.W    = imgsz // 14
+        self.HW            = self.H * self.W
+        self.num_maskmem   = num_maskmem
+        self.mask_mem_size = self.H * 16
         onnx_dir = Path(onnx_dir)
 
-        # ---- Backbone (PyTorch ROCm GPU FP16) ----
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Loading SAM3 from {checkpoint} (device={self.device}) ...")
-        model = Sam3TrackerVideoModel.from_pretrained(
-            str(checkpoint), attn_implementation="eager"
-        ).to(self.device).half().eval()
+        _mxr_cache  = onnx_dir / "backbone_mxr_tuned.mxr"
+        _mxr_onnx   = onnx_dir / "backbone_single_simplified.onnx"
+        _temporal_pe = onnx_dir / "temporal_pe.npy"
+        _use_mxr    = (backbone == "migraphx") or (
+            backbone == "auto" and (_mxr_cache.exists() or _mxr_onnx.exists())
+        )
 
-        if imgsz != 1008:
-            retarget_resolution(model, imgsz)
+        if _use_mxr:
+            # MIGraphX backbone path: no torch dependency whatsoever.
+            # temporal_pe is loaded from a pre-saved .npy file (generated once during export).
+            if not _temporal_pe.exists():
+                raise FileNotFoundError(
+                    f"{_temporal_pe} not found. Run export/export_tracker_modules.py once "
+                    f"to generate it, or copy it from another onnx_files directory."
+                )
+            temporal_pe = np.load(str(_temporal_pe))
 
-        self.vision_encoder = model.vision_encoder
-        temporal_pe = model.memory_temporal_positional_encoding.detach().cpu().numpy()
+            self._mxr_backbone  = MIGraphXBackbone(_mxr_onnx, _mxr_cache)
+            self.vision_encoder = None
+            self.device         = None
 
-        # ---- AMD TunableOp: GEMM kernel autotuner ----
-        _tunableop = False
-        if self.device.type == "cuda":
-            try:
-                torch.cuda.tunable.enable(val=True)
-                torch.cuda.tunable.tuning_enable(val=True)
-                _tunableop = True
-            except Exception:
-                pass
+        else:
+            # ---- Backbone: PyTorch ROCm GPU FP16 ----
+            import torch
+            from transformers.models.sam3_tracker_video.modeling_sam3_tracker_video import (
+                Sam3TrackerVideoModel,
+            )
 
-        # ---- Warmup (also triggers TunableOp tuning) ----
-        print("  Warming up GPU kernels ...")
-        dummy = torch.zeros(1, 3, imgsz, imgsz, device=self.device, dtype=torch.float16)
-        n_warmup = 8 if _tunableop else 1
-        with torch.inference_mode():
-            for _ in range(n_warmup):
-                self.vision_encoder(dummy, return_dict=True)
-        if self.device.type == "cuda":
-            torch.cuda.synchronize()
-            if _tunableop:
-                torch.cuda.tunable.tuning_enable(val=False)
-                print("  TunableOp tuning complete.")
-        print("  Warmup complete.")
+            self._mxr_backbone = None
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            print(f"Loading SAM3 from {checkpoint} (device={self.device}) ...")
+            model = Sam3TrackerVideoModel.from_pretrained(
+                str(checkpoint), attn_implementation="eager"
+            ).to(self.device).half().eval()
+
+            if imgsz != 1008:
+                retarget_resolution(model, imgsz)
+
+            self.vision_encoder = model.vision_encoder
+            temporal_pe = model.memory_temporal_positional_encoding.detach().cpu().numpy()
+
+            # ---- AMD TunableOp: GEMM kernel autotuner ----
+            _tunableop = False
+            if self.device.type == "cuda":
+                try:
+                    torch.cuda.tunable.enable(val=True)
+                    torch.cuda.tunable.tuning_enable(val=True)
+                    _tunableop = True
+                except Exception:
+                    pass
+
+            # ---- Warmup (also triggers TunableOp tuning) ----
+            print("  Warming up GPU kernels ...")
+            dummy = torch.zeros(1, 3, imgsz, imgsz, device=self.device, dtype=torch.float16)
+            n_warmup = 8 if _tunableop else 1
+            with torch.inference_mode():
+                for _ in range(n_warmup):
+                    self.vision_encoder(dummy, return_dict=True)
+            if self.device.type == "cuda":
+                torch.cuda.synchronize()
+                if _tunableop:
+                    torch.cuda.tunable.tuning_enable(val=False)
+                    print("  TunableOp tuning complete.")
+            print("  Warmup complete.")
 
         # ---- ORT session options: 8 CPU threads (optimal for mask_decoder + memory_encoder) ----
         cpu_opts = ort.SessionOptions()
@@ -235,24 +348,34 @@ class SAM3OnnxTracker:
             k: [] for k in ["backbone", "mem_attn", "dec_init", "dec_prop", "mem_enc", "total"]
         }
 
+        # Re-warmup MIGraphX backbone after all ORT sessions are created.
+        # ORT's MIGraphX EP initialization can reset GPU state, invalidating earlier warmup.
+        if self._mxr_backbone is not None:
+            self._mxr_backbone.warmup()
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
     def _backbone(self, img_np: np.ndarray):
-        pv = torch.from_numpy(img_np).to(self.device).half()
         t0 = time.perf_counter()
-        with torch.inference_mode():
-            vis = self.vision_encoder(pv, return_dict=True)
-        if self.device.type == "cuda":
-            torch.cuda.synchronize()
+        if self._mxr_backbone is not None:
+            result = self._mxr_backbone(img_np)
+        else:
+            pv = torch.from_numpy(img_np).to(self.device).half()
+            with torch.inference_mode():
+                vis = self.vision_encoder(pv, return_dict=True)
+            if self.device.type == "cuda":
+                torch.cuda.synchronize()
+            result = (
+                vis.fpn_hidden_states[0].float().cpu().numpy(),
+                vis.fpn_hidden_states[1].float().cpu().numpy(),
+                vis.fpn_hidden_states[2].float().cpu().numpy(),
+                (vis.fpn_position_encoding[2].float().cpu().numpy()
+                 if vis.fpn_position_encoding is not None else None),
+            )
         self._timings["backbone"].append(time.perf_counter() - t0)
-        fpn_0 = vis.fpn_hidden_states[0].float().cpu().numpy()
-        fpn_1 = vis.fpn_hidden_states[1].float().cpu().numpy()
-        fpn_2 = vis.fpn_hidden_states[2].float().cpu().numpy()
-        pos_2 = (vis.fpn_position_encoding[2].float().cpu().numpy()
-                 if vis.fpn_position_encoding is not None else None)
-        return fpn_0, fpn_1, fpn_2, pos_2
+        return result
 
     def _encode_memory(self, fpn_2: np.ndarray, pred_masks: np.ndarray) -> None:
         t0 = time.perf_counter()

@@ -3,9 +3,10 @@ __pycache__/
 *.egg-info/
 .eggs/
 
-# Model weights and ONNX files (download separately)
+# Model weights and ONNX files (download/generate separately)
 model/
 onnx_files/
+onnx_files_1008/
 
 # Datasets
 dataset/
@@ -19,15 +20,16 @@ results/
 !assets/*.jpg
 !assets/*.gif
 !assets/demo_tracked.jpg
+!assets/demo_tracked_504.jpg
+!assets/demo_tracked_1008.jpg
 
 # TunableOp cache
 tunableop_results*.csv
 
 # MIGraphX cache
 /tmp/migraphx/
+*.mxr
 
 # IDE
 .vscode/
 .idea/
-mxr_cache/
-onnx_files/backbone_*.onnx

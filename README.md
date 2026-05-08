@@ -1,7 +1,7 @@
 # SAM3 Video Tracker — ROCm / AMD
 
 Mask-level video tracking pipeline built on [SAM3](https://github.com/facebookresearch/sam3),
-optimized for AMD ROCm hardware. Achieves **5.72 FPS** (propagation frame) on an
+optimized for AMD ROCm hardware. Achieves **7.10 FPS** (propagation frame) on an
 AMD Ryzen AI Max+ 395 with a DAVIS 2017 val Mean J of **81.1%** (504px).
 
 > **Hardware requirement**: AMD gfx1151 (Radeon 8060S / Ryzen AI Max+ 395) with ROCm 7.x.
@@ -13,7 +13,20 @@ AMD Ryzen AI Max+ 395 with a DAVIS 2017 val Mean J of **81.1%** (504px).
 
 - **Frame 0**: user provides a bounding box → `mask_decoder_init.onnx` produces the initial mask
 - **Frames 1+**: memory bank drives `mask_decoder_propagate.onnx` — no prompt needed
-- **Backbone** runs as PyTorch on ROCm GPU (FP16); tracking modules run via ONNX Runtime
+- **Backbone** runs via patched MIGraphX 2.16.0 (ONNX, no PyTorch required); tracking modules run via ONNX Runtime
+
+```
+Input frame
+  → backbone_mxr_tuned.mxr (MIGraphX 2.16.0)   ~94ms
+  → memory_attention_fixed_N7.onnx (MIGraphX)   ~19ms
+  → mask_decoder_propagate.onnx (CPU ONNX)       ~17ms
+  → memory_encoder.onnx (CPU ONNX)               ~8ms
+  ─────────────────────────────────────────────────
+  Total propagation frame: ~140ms → 7.10 FPS
+```
+
+<details>
+<summary>Previous PyTorch backbone pipeline (for reference)</summary>
 
 ```
 Input frame
@@ -24,6 +37,8 @@ Input frame
   ─────────────────────────────────────────────────
   Total propagation frame: ~175ms → 5.72 FPS
 ```
+
+</details>
 
 ---
 
@@ -137,23 +152,50 @@ huggingface-cli download facebook/sam3 --local-dir model/sam3
 ### 5. Export ONNX tracking modules (~5 minutes)
 
 ```bash
-# 504px — recommended (5.72 FPS, DAVIS J=81.1%)
+# 504px — recommended (7.10 FPS, DAVIS J=81.1%)
 python export/export_tracker_modules.py --imgsz 504 --output-dir onnx_files
 
-# 1008px — higher quality (1.35 FPS, DAVIS J=85.8%)
+# 1008px — higher quality (1.47 FPS, DAVIS J=85.8%)
 python export/export_tracker_modules.py --imgsz 1008 --output-dir onnx_files_1008
 ```
 
 > `--fixed-slots 7` (default) also exports `memory_attention_fixed_N7.onnx` with static shapes.
-> The tracker automatically picks this file and attempts to run it on MIGraphX (falling back to CPU
-> if MIGraphX kernel compilation fails, which is known to happen on some builds).
+> The tracker automatically picks this file and runs it on MIGraphX.
+
+### 5b. Export and compile MIGraphX backbone (~10 minutes first time)
+
+```bash
+# Export backbone ONNX (single-session, simplified)
+# Then compile to .mxr with kernel autotuning — saved once, loaded in ~3s afterwards
+
+# 504px backbone
+python export/export_backbone_single.py --imgsz 504 --output-dir onnx_files
+# Creates: onnx_files/backbone_mxr_tuned.mxr  (~896 MB, one-time compile ~3 min)
+
+# 1008px backbone
+python export/export_backbone_single.py --imgsz 1008 --output-dir onnx_files_1008
+# Creates: onnx_files_1008/backbone_mxr_tuned.mxr  (~920 MB, one-time compile ~9 min)
+```
+
+> The `.mxr` cache encodes kernel-autotuned GPU programs. After first compile the backbone
+> loads in ~3s on subsequent runs. Pass `--backbone pytorch` to fall back to PyTorch.
 
 ### 6. Run the demo
 
 ```bash
+# MIGraphX backbone (default, fastest)
 python demo.py \
     --checkpoint model/sam3 \
     --onnx-dir onnx_files \
+    --backbone migraphx \
+    --image assets/demo.jpg \
+    --box 85,281,1710,850
+
+# PyTorch backbone (fallback if .mxr not yet compiled)
+python demo.py \
+    --checkpoint model/sam3 \
+    --onnx-dir onnx_files \
+    --backbone pytorch \
     --image assets/demo.jpg \
     --box 85,281,1710,850
 ```
@@ -180,26 +222,43 @@ python demo.py \
 
 ### Video tracking (propagation FPS)
 
-| Resolution | DAVIS 2017 val J | SG val J (50 seqs) | Propagation FPS |
-|---|---|---|---|
-| **504px** | **81.1%** | **39.6%** ¹ | **5.72** |
-| 1008px | 85.8% | 44.8% ¹ | 1.35 |
+| Resolution | DAVIS 2017 val J | SG val J (50 seqs) | Propagation FPS | Backbone |
+|---|---|---|---|---|
+| **504px** | **81.1%** | **39.6%** ¹ | **7.10** | MIGraphX 2.16.0 |
+| 1008px | 85.8% | 44.8% ¹ | **1.47** | MIGraphX 2.16.0 |
+| 504px (PyTorch) | 81.1% | 39.6% ¹ | 5.72 | PyTorch ROCm FP16 |
+| 1008px (PyTorch) | 85.8% | 44.8% ¹ | 1.35 | PyTorch ROCm FP16 |
 
-*Propagation FPS measured with `memory_attention_fixed_N7.onnx` on MIGraphX, after TunableOp warmup.*
+*MIGraphX backbone uses `backbone_mxr_tuned.mxr` (pre-compiled with kernel autotuning).
+PyTorch baseline uses TunableOp-autotuned GEMM kernels.*
 
 ¹ SG J (IoU) is a proxy metric on a random 50-sequence subset, not the official cgF1/pHOTA evaluation. See [`docs/project_summary.md`](docs/project_summary.md).
 
-### Single-frame pipeline (Pipeline A: box/point → mask, no tracking)
+### Per-module latency breakdown (504px, MIGraphX backbone)
 
-| Stage | 504px | 1008px |
-|---|---:|---:|
-| backbone `[PyTorch ROCm FP16]` | 139.8 ms | 525.5 ms |
-| mask_decoder_init `[ONNX CPU]` | 6.3 ms | 23.4 ms |
-| **Total → FPS** | **156 ms → 6.40 FPS** | **584 ms → 1.71 FPS** |
+| Stage | Latency | Backend |
+|---|---:|---|
+| backbone (`backbone_mxr_tuned.mxr`) | ~94 ms | MIGraphX 2.16.0 GPU |
+| memory_attention (`fixed_N7.onnx`) | ~19 ms | ORT MIGraphX EP |
+| mask_decoder_propagate | ~17 ms | ORT CPU |
+| memory_encoder | ~8 ms | ORT CPU |
+| **Total propagation frame** | **~140 ms → 7.10 FPS** | |
+
+### Backbone speed comparison (504px)
+
+| Backbone | Latency | Speedup |
+|---|---|---|
+| MIGraphX 2.16.0 (patched, autotuned) | **94 ms** | **1.5×** |
+| PyTorch ROCm FP16 + TunableOp | 139 ms | baseline |
+| MIGraphX 2.15.0 (stock, HF ONNX) | ~916 ms | 0.15× |
+
+The 1.5× backbone speedup comes from two changes to MIGraphX 2.16.0:
+1. A patch to `find_splits` ([AMDMIGraphX#4256](https://github.com/ROCm/AMDMIGraphX/issues/4256)) enabling fusion of the HF window-attention `Split` ops
+2. Kernel autotuning (analogous to PyTorch TunableOp) selecting optimal GEMM kernels
 
 Run `python eval/bench_pipeline.py --checkpoint model/sam3 --onnx-dir onnx_files` to reproduce.
 
-*Measured on AMD Ryzen AI Max+ 395 (gfx1151), after TunableOp warmup.*
+*Measured on AMD Ryzen AI Max+ 395 (gfx1151).*
 
 ---
 
@@ -283,18 +342,19 @@ sam3-tracker-rocm/
 
 ## Known limitations
 
-- **MIGraphX cold-start**: the first run JIT-compiles `memory_attention_fixed_N7.onnx`
-  (~30s at 504px). Subsequent runs load from cache and are fast. TunableOp autotuning
-  adds ~8 warmup passes at startup.
-- **Only `memory_attention_fixed_N7.onnx` runs on MIGraphX**; mask decoder and memory
-  encoder fall back to CPU ONNX. See the MIGraphX Compatibility Summary in
-  [`docs/project_summary.md`](docs/project_summary.md) for root causes and next steps.
-- **Backbone runs as PyTorch** (not ONNX): `Sam3TrackerVideoModel.vision_encoder` must
-  run via PyTorch ROCm — the Meta-format `sam3_image_encoder.onnx` is numerically
-  incompatible with the HuggingFace mask decoder. See Finding #1 in
-  [`docs/project_summary.md`](docs/project_summary.md).
-- **MIGraphX initialisation order**: PyTorch must be initialised before MIGraphX ONNX
-  sessions are loaded in the same process. The tracker handles this automatically.
+- **MIGraphX backbone cold-start**: first compile of `backbone_mxr_tuned.mxr` takes
+  ~3 min (504px) or ~9 min (1008px) with kernel autotuning. Subsequent runs load in ~3s.
+  Run `export/export_backbone_single.py` once per resolution to pre-build the cache.
+- **MIGraphX memory_attention cold-start**: first run JIT-compiles
+  `memory_attention_fixed_N7.onnx` (~6s at 504px). Subsequent runs use the ORT cache.
+- **Mask decoder and memory encoder run on CPU ONNX**: these are small modules
+  (<20ms each) and do not benefit from GPU acceleration.
+- **Backbone PYTHONPATH**: the MIGraphX backbone requires `/opt/rocm-7.2.0/lib` in
+  `PYTHONPATH` to find the patched MIGraphX 2.16.0 Python bindings. This is set in
+  the run scripts. The PyTorch backbone has no such requirement.
+- **Patched MIGraphX 2.16.0 required**: the stock MIGraphX 2.15.0 from the ROCm 7.2
+  APT package produces ~916ms for the HF backbone (6.6× slower) due to a fusion
+  limitation in `find_splits`. See [`docs/mig_inv.md`](docs/mig_inv.md) for details.
 
 ---
 
