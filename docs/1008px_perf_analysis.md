@@ -127,17 +127,40 @@ there are effectively 4× more windows packed into the same 32 kernel calls.
 
 ## Remaining Optimization Opportunities
 
+### ONNX graph analysis: exporter comparison (2026-05-08)
+
+The 1008px backbone was originally exported with PyTorch 2.9's new `torch.export`-based
+ONNX exporter (opset 18), while the 504px used the legacy TorchScript exporter (opset 17).
+This produces structurally different graphs:
+
+| | New exporter (1008px) | Legacy exporter |
+|---|---|---|
+| Split ops | **32** | 90 |
+| Cast ops | 132 | 131 |
+| MatMul ops | 192 | 204 |
+| GELU kernel name | `mlir_dot_reshape_add_mul_erf_mul_add_mul` | `mlir_dot_add_mul_erf_add_mul` |
+| GELU time | 73ms | ~74ms |
+
+**Key finding**: The Reshape inside the new exporter's GELU kernel name is absorbed by MLIR
+and does NOT cause extra overhead. Re-exporting with the legacy exporter produces **identical
+performance** (338ms vs 332ms, within measurement noise). The backbone ONNX graph structure
+is already at or near the MIGraphX fusion optimum for the current compiler.
+
+The 132 Cast ops (float32↔float16 type boundaries) are also neutralized by
+`migraphx.quantize_fp16()` before compilation — they do not appear as separate GPU kernels
+in the final compiled program.
+
 ### Tier 1 — Compiler changes to MIGraphX (significant effort)
 
 | Opportunity | Potential saving | Mechanism |
 |---|---|---|
-| Flash Attention (fuse Q@K + Softmax) | ~30ms on 1008px backbone | New fusion pass calling ROCm flash-attn kernel |
-| RoPE fusion into adjacent GEMM | ~8ms on 1008px backbone | Remove independent memory round-trip for 64 RoPE kernels |
+| Flash Attention (fuse Q@K + Softmax) | ~67ms (20%) on 1008px backbone | New fusion pass calling ROCm flash-attn kernel |
+| RoPE fusion into adjacent GEMM | ~12ms (3.5%) on 1008px backbone | Eliminate 64 independent cache-miss-heavy memory accesses |
 
 These require new MIGraphX passes or op registrations. The upstream issue
 [AMDMIGraphX#4256](https://github.com/ROCm/AMDMIGraphX/issues/4256) (our
-`find_splits` patch) addresses fusion; flash attention would be a separate,
-larger effort.
+`find_splits` patch) addresses fusion; flash attention and RoPE fusion would be
+separate, larger efforts.
 
 ### Tier 2 — Memory bank size reduction (accuracy tradeoff)
 
