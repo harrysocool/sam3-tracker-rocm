@@ -159,17 +159,30 @@ allows complete graph fusion. The HF backbone's  ops around window attention
 Q/K/V projections break the fusion boundary — each  forces a separate kernel
 and a new data layout in memory.
 
-Same node count (~2200), but different op composition:
+Both models are ViT transformers — Meta encoder has 156 Transpose ops, HF has 218.
+The difference is **not** the presence of Transpose per se.
 
-| | Meta encoder | HF backbone (simplified) |
-|---|---|---|
-| Node count | 2303 | 2202 |
-| Key ops | `Expand`, no `Transpose` | `Transpose` × 1744 |
-| GEMM pattern | Optimized for MIGraphX | Generic window-attention reshapes |
+**Op count comparison (key differences):**
 
-The Meta encoder ONNX was explicitly exported to be MIGraphX-friendly (no unnecessary
-transposes, clean data flow). The HF implementation's window attention introduces many
-`Transpose` operations for Q/K/V reshaping that MIGraphX cannot fuse with adjacent MatMuls.
+| Op | Meta | HF simplified | Δ | Significance |
+|---|---|---|---|---|
+| `Split` | **0** | **90** | +90 | Window partition — fusion killer |
+| `Neg` | 0 | 64 | +64 | RoPE computation |
+| `Gather` | 128 | 20 | −108 | Different indexing strategy |
+| `Slice` | 155 | 40 | −115 | Different windowing |
+| `Shape` | 0 | 32 | +32 | Remaining dynamic shapes |
+| `Transpose` | 156 | 218 | +62 | Both have many |
+
+**Root cause: `Split` ops (90 in HF, 0 in Meta)**
+
+Both models implement window attention, but via different ONNX patterns:
+
+- **Meta**: window partitioning via `Gather`/`Slice` (index-based selection). MIGraphX can fuse these into the surrounding compute.
+- **HF**: window partitioning via `Split` (tensor splitting into 90 separate chunks). Each `Split` forces MIGraphX to produce independent output buffers and start a new kernel. 90 Splits = 90 fusion boundaries = hundreds of fragmented kernel calls.
+
+`Split` is a graph fusion "firewall": MIGraphX cannot fuse computation across a Split because each output branch must be materialized separately in memory. This is why despite similar node counts, Meta gets one fused `MGXKernel` while HF produces thousands of separate kernel launches.
+
+**RoPE (`Neg` × 64)** also contributes: HF uses Rotary Position Embedding with 64 negation ops that Meta's implementation avoids.
 
 ---
 
