@@ -220,11 +220,28 @@ MIGraphX lacks equivalent auto-tuning for the specific matrix shapes in SAM3's V
 | onnxsim (fixed 504px) | 2202 | -76% | If→0, Shape 521→32 | 916ms (Split still 90) |
 | ORT transformer O2 | 1943 | -11% | BiasGelu fusion, Shape→0 | CPU fallback (BiasGelu unsupported by MIGraphX) |
 
-### Community precedent
+### Community precedent and upstream status
 
 No published work found for AMD/MIGraphX-specific SAM3 window attention optimization.
 TensorRT (NVIDIA-only) achieves ~22ms for the SAM3 vision encoder at 512px on RTX 5090 FP16,
 as it can fuse window attention patterns natively via its own compiler.
+
+**AMD is aware of this limitation.** A directly relevant open issue exists in the MIGraphX repo:
+
+> **[ROCm/AMDMIGraphX#4256](https://github.com/ROCm/AMDMIGraphX/issues/4256)**  
+> "Improve horizontal fusion with multi-used splits" (Aug 22, 2025, open, Perf Improve)  
+> 
+> "when there are interdependencies in the split groups, we dont fuse it and instead
+> fuse after we have run `fuse_pointwise`"  
+> Fix: extend `find_splits` to support multiple arguments as long as extra data arguments are constants.
+
+This is exactly the issue causing HF backbone's 90 Split ops to block graph fusion.
+Once #4256 is resolved, MIGraphX may be able to fuse the HF window attention pattern,
+potentially bringing the HF backbone performance close to the Meta encoder's 88ms.
+
+Other relevant channels:
+- MIGraphX GitHub Discussions: [ROCm/AMDMIGraphX/discussions](https://github.com/ROCm/AMDMIGraphX/discussions)
+- ROCm Documentation: [rocm.docs.amd.com/projects/AMDMIGraphX](https://rocm.docs.amd.com/projects/AMDMIGraphX/en/latest/)
 
 ### Path to fix
 
