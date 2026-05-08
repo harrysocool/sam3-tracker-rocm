@@ -305,7 +305,7 @@ class SAM3OnnxTracker:
                     print("  TunableOp tuning complete.")
             print("  Warmup complete.")
 
-        # ---- ORT session options: 8 CPU threads (optimal for mask_decoder + memory_encoder) ----
+        # ---- ORT session options ----
         cpu_opts = ort.SessionOptions()
         cpu_opts.intra_op_num_threads = 8
         cpu_opts.inter_op_num_threads = 1
@@ -318,10 +318,23 @@ class SAM3OnnxTracker:
         print("  Loading ONNX tracking modules ...")
         self.dec_init = ort.InferenceSession(
             str(onnx_dir / "mask_decoder_init.onnx"), sess_options=cpu_opts, providers=CPU)
-        self.dec_prop = ort.InferenceSession(
-            str(onnx_dir / "mask_decoder_propagate.onnx"), sess_options=cpu_opts, providers=CPU)
-        self.mem_enc  = ort.InferenceSession(
-            str(onnx_dir / "memory_encoder.onnx"), sess_options=cpu_opts, providers=CPU)
+
+        # dec_prop and mem_enc run on MIGraphX GPU: avoids CPU NCHW→NCHWc layout overhead
+        # (ReorderInput alone = 37% of dec_prop CPU time at 1008px; mem_enc = 6× faster on GPU).
+        # Falls back to CPU if MIGraphX compilation fails.
+        def _mig_session(path, label):
+            try:
+                sess = ort.InferenceSession(str(path), providers=MIG)
+                if sess.get_providers()[0].startswith("MIGraphX"):
+                    print(f"  {label}: MIGraphX")
+                    return sess
+            except Exception:
+                pass
+            print(f"  {label}: CPU (MIGraphX unavailable)")
+            return ort.InferenceSession(str(path), sess_options=cpu_opts, providers=CPU)
+
+        self.dec_prop = _mig_session(onnx_dir / "mask_decoder_propagate.onnx", "dec_propagate")
+        self.mem_enc  = _mig_session(onnx_dir / "memory_encoder.onnx",          "memory_encoder")
 
         # memory_attention: prefer fixed-N7 on MIGraphX (avoids dangling reference bug)
         # Falls back to CPU if MIGraphX compilation fails (e.g. OOM when PyTorch is loaded)
