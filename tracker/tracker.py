@@ -313,37 +313,50 @@ class SAM3OnnxTracker:
 
         CPU = ["CPUExecutionProvider"]
         MIG = ["MIGraphXExecutionProvider", "CPUExecutionProvider"]
+        # FP16 for MIGraphX sessions where it's numerically safe:
+        #   memory_attention: FP32→FP16 gives 2.76× speedup at 504px (max_diff=0.012, safe).
+        #     At 1008px, backbone holds ~1 GB GPU memory; FP16 compilation OOMs and falls
+        #     back to CPU (760ms), so we keep FP32 at 1008px (189ms on MIGraphX GPU).
+        #   dec_propagate:    FP16 corrupts ConvTranspose upsampling — always keep FP32.
+        #   memory_encoder:   FP16 gives ~1ms speedup, numerically safe.
+        MIG_FP16 = [("MIGraphXExecutionProvider", {"migraphx_fp16_enable": "1"}),
+                    ("CPUExecutionProvider", {})]
+        # Use FP16 for memory_attention only when feature map is small enough to avoid OOM.
+        # HW = 36×36 = 1296 at 504px; 72×72 = 5184 at 1008px.
+        _attn_prov = MIG_FP16 if self.HW <= 2000 else MIG
 
         # ---- Load ONNX modules ----
         print("  Loading ONNX tracking modules ...")
         self.dec_init = ort.InferenceSession(
             str(onnx_dir / "mask_decoder_init.onnx"), sess_options=cpu_opts, providers=CPU)
 
-        # dec_prop and mem_enc run on MIGraphX GPU: avoids CPU NCHW→NCHWc layout overhead
-        # (ReorderInput alone = 37% of dec_prop CPU time at 1008px; mem_enc = 6× faster on GPU).
-        # Falls back to CPU if MIGraphX compilation fails.
-        def _mig_session(path, label):
+        # dec_prop runs on MIGraphX FP32 (FP16 corrupts ConvTranspose upsampling results).
+        # mem_enc runs on MIGraphX FP16 (1.28× speedup, numerically safe).
+        def _mig_session(path, label, providers=MIG):
             try:
-                sess = ort.InferenceSession(str(path), providers=MIG)
+                sess = ort.InferenceSession(str(path), providers=providers)
                 if sess.get_providers()[0].startswith("MIGraphX"):
-                    print(f"  {label}: MIGraphX")
+                    fp16 = "FP16" if "migraphx_fp16_enable" in str(providers) else "FP32"
+                    print(f"  {label}: MIGraphX ({fp16})")
                     return sess
             except Exception:
                 pass
             print(f"  {label}: CPU (MIGraphX unavailable)")
             return ort.InferenceSession(str(path), sess_options=cpu_opts, providers=CPU)
 
-        self.dec_prop = _mig_session(onnx_dir / "mask_decoder_propagate.onnx", "dec_propagate")
-        self.mem_enc  = _mig_session(onnx_dir / "memory_encoder.onnx",          "memory_encoder")
+        self.dec_prop = _mig_session(onnx_dir / "mask_decoder_propagate.onnx", "dec_propagate",
+                                     providers=MIG)
+        self.mem_enc  = _mig_session(onnx_dir / "memory_encoder.onnx", "memory_encoder",
+                                     providers=MIG_FP16)
 
-        # memory_attention: prefer fixed-N7 on MIGraphX (avoids dangling reference bug)
-        # Falls back to CPU if MIGraphX compilation fails (e.g. OOM when PyTorch is loaded)
+        # memory_attention: FP16 at 504px (2.76× speedup), FP32 at 1008px (avoids OOM fallback)
         mem_attn_fixed = onnx_dir / "memory_attention_fixed_N7.onnx"
         if mem_attn_fixed.exists():
             try:
-                self.mem_attn = ort.InferenceSession(str(mem_attn_fixed), providers=MIG)
+                self.mem_attn = ort.InferenceSession(str(mem_attn_fixed), providers=_attn_prov)
                 self._mem_attn_slots = num_maskmem
-                print("  memory_attention: MIGraphX (fixed N=7)")
+                fp16_str = "FP16" if _attn_prov is MIG_FP16 else "FP32"
+                print(f"  memory_attention: MIGraphX {fp16_str} (fixed N=7)")
             except Exception as e:
                 print(f"  memory_attention: MIGraphX failed ({str(e)[:60]}), falling back to CPU")
                 self.mem_attn = ort.InferenceSession(str(mem_attn_fixed), providers=CPU)
