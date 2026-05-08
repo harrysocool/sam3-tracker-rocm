@@ -209,10 +209,44 @@ MIGraphX lacks equivalent auto-tuning for the specific matrix shapes in SAM3's V
 | HF single session FP32→FP16 (MIGraphX) | 971ms | 1.03 | ❌ Slow GEMM kernels |
 | HF single session simplified (onnxsim) | 916ms | 1.09 | ❌ Slow GEMM kernels |
 
+---
+
+## Optimization Attempts Summary
+
+### Tools tried
+
+| Tool | Nodes | Change | Key effect | MIGraphX result |
+|---|---|---|---|---|
+| onnxsim (fixed 504px) | 2202 | -76% | If→0, Shape 521→32 | 916ms (Split still 90) |
+| ORT transformer O2 | 1943 | -11% | BiasGelu fusion, Shape→0 | CPU fallback (BiasGelu unsupported by MIGraphX) |
+
+### Community precedent
+
+No published work found for AMD/MIGraphX-specific SAM3 window attention optimization.
+TensorRT (NVIDIA-only) achieves ~22ms for the SAM3 vision encoder at 512px on RTX 5090 FP16,
+as it can fuse window attention patterns natively via its own compiler.
+
+### Path to fix
+
+Resolving the 90 `Split` ops requires a **custom ONNX graph rewrite pass** that replaces the HF window partition pattern:
+
+```
+Reshape → Split(90) → [attention per window] → Concat → Reshape
+```
+
+with a Gather/Scatter-based pattern matching Meta's implementation:
+
+```
+Reshape → Gather(indices) → [attention per window] → ScatterND → Reshape
+```
+
+This is a non-trivial engineering effort targeting the HF `Sam3TrackerVideoModel`
+window attention export specifically. No generic tool automates this rewrite.
+
 **To unlock MIGraphX for HF backbone would require:**
-1. Remove `Transpose` ops around window attention (requires custom ONNX export pass)
-2. Or wait for MIGraphX to implement Transpose+MatMul fusion for these specific shapes
-3. Or rewrite the HF vision encoder forward to avoid shape-dynamic ops entirely
+1. Custom ONNX graph pass replacing Split-based window partition with Gather/Scatter
+2. Or rewrite the HF `vision_encoder.forward()` to avoid Split ops (requires modifying transformers source)
+3. Or wait for MIGraphX to support Split-based graph fusion
 
 All options are beyond the current project scope.
 
