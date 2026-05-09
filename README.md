@@ -128,6 +128,11 @@ the box-prompt pipeline.
 ---
 ## Setup
 
+> **One-command setup**: run `./setup.sh` to automate all steps below
+> (conda env, ROCm SDK, onnxruntime-migraphx, ONNX export, backbone compile, smoke test).
+> Flags: `--skip-apt`, `--skip-migraphx`, `--env NAME`, `--imgsz 1008`.
+> See [setup.sh](setup.sh) for details.
+
 ### Prerequisites
 
 | Requirement | Tested version | Notes |
