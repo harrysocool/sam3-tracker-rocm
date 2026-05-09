@@ -84,6 +84,21 @@ sudo apt-get install -y migraphx
 > and the GitHub release linked below. A plain `conda create` + the steps
 > below is sufficient — no TheRock pre-built environment is required.
 
+#### 0b. (Optional) Install patched MIGraphX for full performance
+
+The headline FPS numbers (9.46 / 2.39 at 504 / 1008 px) require two
+unreleased MIGraphX fixes (`find_splits` multi-arg + NHWC `offload_copy`).
+We refer to the resulting build as **`MIGraphX 2.15+patches`**.
+
+| Path | Performance | What you need |
+|---|---|---|
+| Stay on stock APT 2.15.0 | 5.72 / 1.35 FPS (504 / 1008 px) | Check out tag `v0.1-migraphx-2.15` |
+| **Install prebuilt tarball** | **9.46 / 2.39 FPS** | ~2 min — download release asset, run install script |
+| Build patched from source | 9.46 / 2.39 FPS | ~30 min — for non-`gfx1151` GPUs or different ROCm/Python |
+
+Both prebuilt and source paths are documented in [`docs/build_migraphx_patched.md`](docs/build_migraphx_patched.md).
+Patched source lives in the fork: [`harrysocool/AMDMIGraphX` branch `fix/offload-copy-contiguous-output`](https://github.com/harrysocool/AMDMIGraphX/tree/fix/offload-copy-contiguous-output) (both patches stacked).
+
 ### 1. Install ROCm SDK + PyTorch for gfx1151
 
 AMD provides official nightly wheels for gfx1151 at:
