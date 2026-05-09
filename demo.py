@@ -45,6 +45,9 @@ def parse_args():
                    help="Output video path (for --video mode)")
     p.add_argument("--max-frames", type=int, default=0,
                    help="Max frames to process from video (0 = all)")
+    p.add_argument("--backbone", type=str, default="auto",
+                   choices=["auto", "migraphx", "pytorch"],
+                   help="Backbone: auto (default), migraphx, or pytorch")
     return p.parse_args()
 
 
@@ -64,6 +67,7 @@ def main():
         checkpoint=args.checkpoint,
         onnx_dir=args.onnx_dir,
         imgsz=args.imgsz,
+        backbone=args.backbone,
     )
 
     if args.image:

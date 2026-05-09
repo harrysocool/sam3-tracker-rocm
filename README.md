@@ -1,7 +1,7 @@
 # SAM3 Video Tracker — ROCm / AMD
 
 Mask-level video tracking pipeline built on [SAM3](https://github.com/facebookresearch/sam3),
-optimized for AMD ROCm hardware. Achieves **5.72 FPS** (propagation frame) on an
+optimized for AMD ROCm hardware. Achieves **9.46 FPS** (propagation frame) on an
 AMD Ryzen AI Max+ 395 with a DAVIS 2017 val Mean J of **81.1%** (504px).
 
 > **Hardware requirement**: AMD gfx1151 (Radeon 8060S / Ryzen AI Max+ 395) with ROCm 7.x.
@@ -13,7 +13,20 @@ AMD Ryzen AI Max+ 395 with a DAVIS 2017 val Mean J of **81.1%** (504px).
 
 - **Frame 0**: user provides a bounding box → `mask_decoder_init.onnx` produces the initial mask
 - **Frames 1+**: memory bank drives `mask_decoder_propagate.onnx` — no prompt needed
-- **Backbone** runs as PyTorch on ROCm GPU (FP16); tracking modules run via ONNX Runtime
+- **Backbone** runs via MIGraphX 2.15+patches (ONNX, no PyTorch required); tracking modules run via ONNX Runtime
+
+```
+Input frame
+  → backbone_mxr_tuned.mxr (MIGraphX 2.15+patches)   ~95ms
+  → memory_attention_fixed_N7.onnx (MIGraphX)   ~7ms
+  → mask_decoder_propagate.onnx (MIGraphX)       ~2ms
+  → memory_encoder.onnx (MIGraphX)               ~1ms
+  ─────────────────────────────────────────────────
+  Total propagation frame: ~106ms → 9.46 FPS
+```
+
+<details>
+<summary>Previous PyTorch backbone pipeline (for reference)</summary>
 
 ```
 Input frame
@@ -25,8 +38,94 @@ Input frame
   Total propagation frame: ~175ms → 5.72 FPS
 ```
 
----
+</details>
 
+## Text-prompt tracking
+
+In addition to bounding-box prompts, SAM3 supports **open-vocabulary text prompts** —
+describe the object in plain language and the model finds and tracks it.
+
+```
+Text: "swan"
+  → Sam3VideoModel detector (PyTorch backbone + CLIP text encoder)
+       → detection mask on frame 0
+  → memory bank → propagation frames (same 9.46 FPS pipeline)
+```
+
+### How it works
+
+1. **Frame 0 (init)**: `Sam3VideoModel` runs a CLIP-powered detector on the first frame,
+   finding all instances matching the text description. The highest-scoring detection
+   seeds the memory bank.
+2. **Frames 1+**: identical to the box-prompt pipeline — the MIGraphX tracker propagates
+   the initial mask through subsequent frames with no further text processing.
+
+Text prompts are open-vocabulary short noun phrases. Examples that work well:
+`"swan"`, `"bicycle"`, `"person on a bike"`. Negative (absent) concepts correctly
+return zero detections.
+
+### Requirements
+
+Text-prompt tracking requires **PyTorch ROCm** (used for the detection step on frame 0)
+and **HuggingFace Transformers ≥ 5.7.0** with `Sam3VideoModel` support:
+
+```bash
+# DART transformers fork (included in this repo's .local_deps, or install from HuggingFace)
+# Already installed if you followed Setup steps 1–3
+pip install "transformers>=5.7.0"
+```
+
+Add the DART fork to your Python path (needed until SAM3 models are in mainline
+Transformers):
+```bash
+export PYTHONPATH=/path/to/sam3/repo/DART/.local_deps:$PYTHONPATH
+```
+
+### Usage
+
+```python
+import torch
+from transformers import Sam3VideoModel, AutoProcessor
+from PIL import Image
+
+processor = AutoProcessor.from_pretrained("model/sam3")
+model = Sam3VideoModel.from_pretrained("model/sam3").cuda().half().eval()
+
+# Init session with the first frame
+frame = Image.open("frame_0000.jpg").convert("RGB")
+session = processor.init_video_session(
+    video=[frame], inference_device="cuda", dtype=torch.float16
+)
+
+# Add a text prompt — returns a prompt ID
+processor.add_text_prompt(session, "swan")
+
+# Detect + initialise tracker on frame 0
+with torch.inference_mode():
+    out = model(inference_session=session, frame_idx=0)
+
+print("detected objects:", out.object_ids)
+print("scores:", out.obj_id_to_score)
+# out.obj_id_to_mask[obj_id] → float16 logit mask tensor; threshold at 0 for binary
+```
+
+For subsequent frames, call `model(inference_session=session, frame=next_frame_tensor)`
+— the tracker propagates the initial mask exactly as in the box-prompt pipeline.
+
+See [`eval/probe_text_prompt.py`](eval/probe_text_prompt.py) for a complete single-image
+example with visualisation.
+
+### Performance
+
+| Step | Latency | Note |
+|---|---|---|
+| Text detection (frame 0, warm) | ~1.6 s | PyTorch backbone + CLIP + DETR head |
+| Propagation (frames 1+) | ~106 ms → **9.46 FPS** | Same MIGraphX pipeline as box-prompt |
+
+The detection step runs once per video. Propagation performance is identical to
+the box-prompt pipeline.
+
+---
 ## Setup
 
 ### Prerequisites
@@ -69,6 +168,21 @@ sudo apt-get install -y migraphx
 > and the GitHub release linked below. A plain `conda create` + the steps
 > below is sufficient — no TheRock pre-built environment is required.
 
+#### 0b. (Optional) Install patched MIGraphX for full performance
+
+The headline FPS numbers (9.46 / 2.39 at 504 / 1008 px) require two
+unreleased MIGraphX fixes (`find_splits` multi-arg + NHWC `offload_copy`).
+We refer to the resulting build as **`MIGraphX 2.15+patches`**.
+
+| Path | Performance | What you need |
+|---|---|---|
+| Stay on stock APT 2.15.0 | 5.72 / 1.35 FPS (504 / 1008 px) | Check out tag `v0.1-migraphx-2.15` |
+| **Install prebuilt tarball** | **9.46 / 2.39 FPS** | ~2 min — download release asset, run install script |
+| Build patched from source | 9.46 / 2.39 FPS | ~30 min — for non-`gfx1151` GPUs or different ROCm/Python |
+
+Both prebuilt and source paths are documented in [`docs/build_migraphx_patched.md`](docs/build_migraphx_patched.md).
+Patched source lives in the fork: [`harrysocool/AMDMIGraphX` branch `fix/offload-copy-contiguous-output`](https://github.com/harrysocool/AMDMIGraphX/tree/fix/offload-copy-contiguous-output) (both patches stacked).
+
 ### 1. Install ROCm SDK + PyTorch for gfx1151
 
 AMD provides official nightly wheels for gfx1151 at:
@@ -99,6 +213,7 @@ Set the following environment variables (add to `~/.bashrc` or your run script):
 ```bash
 export HSA_OVERRIDE_GFX_VERSION=11.5.1
 export PYTORCH_ALLOC_CONF=expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:512
+export MIGRAPHX_GPU_HIP_FLAGS="-Wno-error -Wno-lifetime-safety-intra-tu-suggestions"
 ```
 
 > **BIOS tip (128 GB systems)**: set *UMA Frame Buffer Size* to **64 GB** in BIOS.
@@ -137,23 +252,50 @@ huggingface-cli download facebook/sam3 --local-dir model/sam3
 ### 5. Export ONNX tracking modules (~5 minutes)
 
 ```bash
-# 504px — recommended (5.72 FPS, DAVIS J=81.1%)
+# 504px — recommended (7.10 FPS, DAVIS J=81.1%)
 python export/export_tracker_modules.py --imgsz 504 --output-dir onnx_files
 
-# 1008px — higher quality (1.35 FPS, DAVIS J=85.8%)
+# 1008px — higher quality (2.39 FPS, DAVIS J=85.8%)
 python export/export_tracker_modules.py --imgsz 1008 --output-dir onnx_files_1008
 ```
 
 > `--fixed-slots 7` (default) also exports `memory_attention_fixed_N7.onnx` with static shapes.
-> The tracker automatically picks this file and attempts to run it on MIGraphX (falling back to CPU
-> if MIGraphX kernel compilation fails, which is known to happen on some builds).
+> The tracker automatically picks this file and runs it on MIGraphX.
+
+### 5b. Export and compile MIGraphX backbone (~10 minutes first time)
+
+```bash
+# Export backbone ONNX (single-session, simplified)
+# Then compile to .mxr with kernel autotuning — saved once, loaded in ~3s afterwards
+
+# 504px backbone
+python export/export_backbone_single.py --imgsz 504 --output-dir onnx_files
+# Creates: onnx_files/backbone_mxr_tuned.mxr  (~896 MB, one-time compile ~3 min)
+
+# 1008px backbone
+python export/export_backbone_single.py --imgsz 1008 --output-dir onnx_files_1008
+# Creates: onnx_files_1008/backbone_mxr_tuned.mxr  (~920 MB, one-time compile ~9 min)
+```
+
+> The `.mxr` cache encodes kernel-autotuned GPU programs. After first compile the backbone
+> loads in ~3s on subsequent runs. Pass `--backbone pytorch` to fall back to PyTorch.
 
 ### 6. Run the demo
 
 ```bash
+# MIGraphX backbone (default, fastest)
 python demo.py \
     --checkpoint model/sam3 \
     --onnx-dir onnx_files \
+    --backbone migraphx \
+    --image assets/demo.jpg \
+    --box 85,281,1710,850
+
+# PyTorch backbone (fallback if .mxr not yet compiled)
+python demo.py \
+    --checkpoint model/sam3 \
+    --onnx-dir onnx_files \
+    --backbone pytorch \
     --image assets/demo.jpg \
     --box 85,281,1710,850
 ```
@@ -180,26 +322,43 @@ python demo.py \
 
 ### Video tracking (propagation FPS)
 
-| Resolution | DAVIS 2017 val J | SG val J (50 seqs) | Propagation FPS |
-|---|---|---|---|
-| **504px** | **81.1%** | **39.6%** ¹ | **5.72** |
-| 1008px | 85.8% | 44.8% ¹ | 1.35 |
+| Resolution | DAVIS 2017 val J | SG val J (50 seqs) | Propagation FPS | Backbone |
+|---|---|---|---|---|
+| **504px** | **81.1%** | **39.6%** ¹ | **9.46** | MIGraphX 2.15+patches |
+| 1008px | 85.8% | 44.8% ¹ | **2.39** | MIGraphX 2.15+patches |
+| 504px (PyTorch) | 81.1% | 39.6% ¹ | 5.72 | PyTorch ROCm FP16 |
+| 1008px (PyTorch) | 85.8% | 44.8% ¹ | 1.35 | PyTorch ROCm FP16 |
 
-*Propagation FPS measured with `memory_attention_fixed_N7.onnx` on MIGraphX, after TunableOp warmup.*
+*MIGraphX backbone uses `backbone_mxr_tuned.mxr` (pre-compiled with kernel autotuning).
+PyTorch baseline uses TunableOp-autotuned GEMM kernels.*
 
 ¹ SG J (IoU) is a proxy metric on a random 50-sequence subset, not the official cgF1/pHOTA evaluation. See [`docs/project_summary.md`](docs/project_summary.md).
 
-### Single-frame pipeline (Pipeline A: box/point → mask, no tracking)
+### Per-module latency breakdown (504px, MIGraphX backbone)
 
-| Stage | 504px | 1008px |
-|---|---:|---:|
-| backbone `[PyTorch ROCm FP16]` | 139.8 ms | 525.5 ms |
-| mask_decoder_init `[ONNX CPU]` | 6.3 ms | 23.4 ms |
-| **Total → FPS** | **156 ms → 6.40 FPS** | **584 ms → 1.71 FPS** |
+| Stage | Latency | Backend |
+|---|---:|---|
+| backbone (`backbone_mxr_tuned.mxr`) | ~92 ms | MIGraphX 2.15+patches GPU (FP16 internal) |
+| memory_attention (`memory_attention_fp16.mxr`) | ~7 ms | MIGraphX direct API FP16 |
+| mask_decoder_propagate (`dec_prop_fp32.mxr`) | ~14 ms | MIGraphX direct API FP32 |
+| memory_encoder (`mem_enc_fp32.mxr`) | ~2 ms | MIGraphX direct API FP16 |
+| **Total propagation frame** | **~106 ms → 9.46 FPS** | |
+
+### Backbone speed comparison (504px)
+
+| Backbone | Latency | Speedup |
+|---|---|---|
+| MIGraphX 2.15+patches (autotuned) | **94 ms** | **1.5×** |
+| PyTorch ROCm FP16 + TunableOp | 139 ms | baseline |
+| MIGraphX 2.15.0 (stock, HF ONNX) | ~916 ms | 0.15× |
+
+The 1.5× backbone speedup comes from two patches on top of MIGraphX 2.15:
+1. A patch to `find_splits` ([AMDMIGraphX#4256](https://github.com/ROCm/AMDMIGraphX/issues/4256)) enabling fusion of the HF window-attention `Split` ops
+2. Kernel autotuning (analogous to PyTorch TunableOp) selecting optimal GEMM kernels
 
 Run `python eval/bench_pipeline.py --checkpoint model/sam3 --onnx-dir onnx_files` to reproduce.
 
-*Measured on AMD Ryzen AI Max+ 395 (gfx1151), after TunableOp warmup.*
+*Measured on AMD Ryzen AI Max+ 395 (gfx1151).*
 
 ---
 
@@ -272,10 +431,22 @@ sam3-tracker-rocm/
 ├── eval/
 │   ├── eval_davis.py               # DAVIS 2017 evaluation
 │   ├── eval_saco_sg.py             # Smartglass SG evaluation
-│   └── bench_pipeline.py           # Pipeline A vs B latency benchmark
+│   ├── bench_pipeline.py           # Pipeline A vs B latency benchmark
+│   ├── visualize_correctness.py    # Mask overlay grid for DAVIS sequences
+│   ├── probe_text_prompt.py        # SAM3 text-prompt probe (PyTorch)
+│   └── profile_text_prompt.py      # Per-module timing profiler
+├── analysis/                       # Detailed optimization deep-dives
+│   ├── backbone_optimization.md
+│   ├── module_optimization.md
+│   ├── 1008px_perf_analysis.md
+│   └── migraphx_backbone_investigation.md
+├── tools/
+│   └── install_migraphx_patched.sh # Install script for patched MIGraphX
 ├── demo.py                         # Single image / video demo
 ├── assets/demo.jpg                 # Sample image
-├── docs/project_summary.md         # Technical report
+├── docs/
+│   ├── project_summary.md          # Technical report
+│   └── build_migraphx_patched.md   # Patched MIGraphX build/install guide
 └── environment.yml
 ```
 
@@ -283,18 +454,19 @@ sam3-tracker-rocm/
 
 ## Known limitations
 
-- **MIGraphX cold-start**: the first run JIT-compiles `memory_attention_fixed_N7.onnx`
-  (~30s at 504px). Subsequent runs load from cache and are fast. TunableOp autotuning
-  adds ~8 warmup passes at startup.
-- **Only `memory_attention_fixed_N7.onnx` runs on MIGraphX**; mask decoder and memory
-  encoder fall back to CPU ONNX. See the MIGraphX Compatibility Summary in
-  [`docs/project_summary.md`](docs/project_summary.md) for root causes and next steps.
-- **Backbone runs as PyTorch** (not ONNX): `Sam3TrackerVideoModel.vision_encoder` must
-  run via PyTorch ROCm — the Meta-format `sam3_image_encoder.onnx` is numerically
-  incompatible with the HuggingFace mask decoder. See Finding #1 in
-  [`docs/project_summary.md`](docs/project_summary.md).
-- **MIGraphX initialisation order**: PyTorch must be initialised before MIGraphX ONNX
-  sessions are loaded in the same process. The tracker handles this automatically.
+- **MIGraphX backbone cold-start**: first compile of `backbone_mxr_tuned.mxr` takes
+  ~3 min (504px) or ~9 min (1008px) with kernel autotuning. Subsequent runs load in ~3s.
+  Run `export/export_backbone_single.py` once per resolution to pre-build the cache.
+- **MIGraphX memory_attention cold-start**: first run JIT-compiles
+  `memory_attention_fixed_N7.onnx` (~6s at 504px). Subsequent runs use the ORT cache.
+- **`dec_propagate` FP16 corrupts results**: ConvTranspose upsampling is numerically
+  sensitive — keep it at FP32 (`dec_prop_fp32.mxr`). All other modules run FP16.
+- **Backbone PYTHONPATH**: the MIGraphX backbone requires `/opt/rocm-7.2.0/lib` in
+  `PYTHONPATH` to find the MIGraphX 2.15+patches Python bindings. This is set in
+  the run scripts. The PyTorch backbone has no such requirement.
+- **MIGraphX 2.15+patches required**: the stock MIGraphX 2.15.0 from the ROCm 7.2
+  APT package produces ~916ms for the HF backbone (6.6× slower) due to a fusion
+  limitation in `find_splits`. See [`analysis/migraphx_backbone_investigation.md`](analysis/migraphx_backbone_investigation.md) for details.
 
 ---
 
