@@ -1,7 +1,7 @@
 # SAM3 Video Tracker — ROCm / AMD
 
 Mask-level video tracking pipeline built on [SAM3](https://github.com/facebookresearch/sam3),
-optimized for AMD ROCm hardware. Achieves **7.10 FPS** (propagation frame) on an
+optimized for AMD ROCm hardware. Achieves **9.46 FPS** (propagation frame) on an
 AMD Ryzen AI Max+ 395 with a DAVIS 2017 val Mean J of **81.1%** (504px).
 
 > **Hardware requirement**: AMD gfx1151 (Radeon 8060S / Ryzen AI Max+ 395) with ROCm 7.x.
@@ -17,12 +17,12 @@ AMD Ryzen AI Max+ 395 with a DAVIS 2017 val Mean J of **81.1%** (504px).
 
 ```
 Input frame
-  → backbone_mxr_tuned.mxr (MIGraphX 2.16.0)   ~94ms
-  → memory_attention_fixed_N7.onnx (MIGraphX)   ~19ms
-  → mask_decoder_propagate.onnx (CPU ONNX)       ~17ms
-  → memory_encoder.onnx (CPU ONNX)               ~8ms
+  → backbone_mxr_tuned.mxr (MIGraphX 2.16.0)   ~95ms
+  → memory_attention_fixed_N7.onnx (MIGraphX)   ~7ms
+  → mask_decoder_propagate.onnx (MIGraphX)       ~2ms
+  → memory_encoder.onnx (MIGraphX)               ~1ms
   ─────────────────────────────────────────────────
-  Total propagation frame: ~140ms → 7.10 FPS
+  Total propagation frame: ~106ms → 9.46 FPS
 ```
 
 <details>
@@ -224,8 +224,8 @@ python demo.py \
 
 | Resolution | DAVIS 2017 val J | SG val J (50 seqs) | Propagation FPS | Backbone |
 |---|---|---|---|---|
-| **504px** | **81.1%** | **39.6%** ¹ | **7.10** | MIGraphX 2.16.0 |
-| 1008px | 85.8% | 44.8% ¹ | **1.47** | MIGraphX 2.16.0 |
+| **504px** | **81.1%** | **39.6%** ¹ | **9.46** | MIGraphX 2.16.0 + NHWC fix |
+| 1008px | 85.8% | 44.8% ¹ | **2.39** | MIGraphX 2.16.0 + NHWC fix |
 | 504px (PyTorch) | 81.1% | 39.6% ¹ | 5.72 | PyTorch ROCm FP16 |
 | 1008px (PyTorch) | 85.8% | 44.8% ¹ | 1.35 | PyTorch ROCm FP16 |
 
