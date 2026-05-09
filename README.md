@@ -17,12 +17,13 @@ AMD Ryzen AI Max+ 395 with a DAVIS 2017 val Mean J of **81.1%** (504px).
 
 ```
 Input frame
-  → backbone_mxr_tuned.mxr (MIGraphX 2.15+patches)   ~95ms
-  → memory_attention_fixed_N7.onnx (MIGraphX)   ~7ms
-  → mask_decoder_propagate.onnx (MIGraphX)       ~2ms
-  → memory_encoder.onnx (MIGraphX)               ~1ms
-  ─────────────────────────────────────────────────
+  → backbone_mxr_tuned.mxr        (MIGraphX 2.15+patches)
+  → memory_attention_fp16.mxr     (MIGraphX)
+  → dec_prop_fp32.mxr             (MIGraphX)
+  → mem_enc_fp32.mxr              (MIGraphX)
+  ─────────────────────────────────────────────────────
   Total propagation frame: ~106ms → 9.46 FPS
+  (per-module breakdown: see Performance section)
 ```
 
 <details>
@@ -39,6 +40,8 @@ Input frame
 ```
 
 </details>
+
+---
 
 ## Text-prompt tracking
 
@@ -70,15 +73,14 @@ Text-prompt tracking requires **PyTorch ROCm** (used for the detection step on f
 and **HuggingFace Transformers ≥ 5.7.0** with `Sam3VideoModel` support:
 
 ```bash
-# DART transformers fork (included in this repo's .local_deps, or install from HuggingFace)
-# Already installed if you followed Setup steps 1–3
-pip install "transformers>=5.7.0"
+pip install "transformers>=5.8.0"
 ```
 
-Add the DART fork to your Python path (needed until SAM3 models are in mainline
-Transformers):
+If `Sam3VideoModel` is not yet in your installed transformers version, add the
+[DART transformers fork](https://arxiv.org/abs/2603.11441) to your Python path:
 ```bash
-export PYTHONPATH=/path/to/sam3/repo/DART/.local_deps:$PYTHONPATH
+# Clone the DART repo, then:
+export PYTHONPATH=/path/to/DART/.local_deps:$PYTHONPATH
 ```
 
 ### Usage
@@ -175,7 +177,7 @@ mv model/sam3/sam3.safetensors model/sam3/model.safetensors
 > For step-by-step manual install (APT, conda, pip, ONNX export, backbone compile)
 > see [`docs/manual_setup.md`](docs/manual_setup.md).
 
-### 6. Run the demo
+### Run the demo
 
 ```bash
 # MIGraphX backbone (default, fastest)
@@ -242,7 +244,7 @@ PyTorch baseline uses TunableOp-autotuned GEMM kernels.*
 
 | Backbone | Latency | Speedup |
 |---|---|---|
-| MIGraphX 2.15+patches (autotuned) | **94 ms** | **1.5×** |
+| MIGraphX 2.15+patches (autotuned) | **92 ms** | **1.5×** |
 | PyTorch ROCm FP16 + TunableOp | 139 ms | baseline |
 | MIGraphX 2.15.0 (stock, HF ONNX) | ~916 ms | 0.15× |
 
@@ -336,11 +338,14 @@ sam3-tracker-rocm/
 │   └── migraphx_backbone_investigation.md
 ├── tools/
 │   └── install_migraphx_patched.sh # Install script for patched MIGraphX
+├── model/sam3/                     # Config + tokenizer (weights downloaded separately)
 ├── demo.py                         # Single image / video demo
+├── setup.sh                        # One-command setup script
 ├── assets/demo.jpg                 # Sample image
 ├── docs/
 │   ├── project_summary.md          # Technical report
-│   └── build_migraphx_patched.md   # Patched MIGraphX build/install guide
+│   ├── build_migraphx_patched.md   # Patched MIGraphX build/install guide
+│   └── manual_setup.md             # Step-by-step manual setup reference
 └── environment.yml
 ```
 
