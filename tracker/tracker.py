@@ -172,12 +172,17 @@ class MIGraphXBackbone:
         img_cont = np.ascontiguousarray(img_np)
         arg      = self._mxr.argument(img_cont)
         outputs  = self._prog.run({"pixel_values": arg})
-        # MIGraphX GPU outputs NHWC (channel-last) strides for FPN tensors.
-        # Convert to C-contiguous NCHW here once, so all downstream MIGraphX modules
-        # receive the correct strides (each module requires exact stride matching).
-        return (np.ascontiguousarray(np.array(outputs[0])),
-                np.ascontiguousarray(np.array(outputs[1])),
-                np.ascontiguousarray(np.array(outputs[2])), None)
+        # With patched MIGraphX (fix/offload-copy-contiguous-output branch),
+        # backbone outputs are already C-contiguous (contiguous_kernel runs on GPU).
+        # Without the patch, outputs are NHWC non-contiguous and np.ascontiguousarray
+        # is needed (10ms at 504px, 94ms at 1008px CPU overhead).
+        fpn0, fpn1, fpn2 = np.array(outputs[0]), np.array(outputs[1]), np.array(outputs[2])
+        if not fpn0.flags.c_contiguous:
+            # Fallback: MIGraphX patch not applied, convert on CPU
+            fpn0 = np.ascontiguousarray(fpn0)
+            fpn1 = np.ascontiguousarray(fpn1)
+            fpn2 = np.ascontiguousarray(fpn2)
+        return fpn0, fpn1, fpn2, None
 
 
 # ---------------------------------------------------------------------------
