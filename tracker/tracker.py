@@ -34,10 +34,70 @@ os.environ.setdefault("MIGRAPHX_GPU_HIP_FLAGS", "-Wno-error -Wno-lifetime-safety
 
 
 # ---------------------------------------------------------------------------
-# MIGraphX backbone (patched MIGraphX 2.16.0, ~88ms at 504px)
+# MIGraphX direct-API helpers (backbone + memory_attention)
 # ---------------------------------------------------------------------------
 
 _MXR_BUILD_LIB = "/home/amd/project/tools/AMDMIGraphX/build_docker/lib"
+
+
+def _load_migraphx_module():
+    """Import the patched MIGraphX 2.16.0 Python binding."""
+    import sys
+    _mxr_py_dir = "/opt/rocm-7.2.0/lib"
+    if _mxr_py_dir not in sys.path:
+        sys.path.insert(0, _mxr_py_dir)
+    if _MXR_BUILD_LIB not in sys.path:
+        sys.path.append(_MXR_BUILD_LIB)
+    import migraphx
+    return migraphx
+
+
+class MIGraphXSession:
+    """
+    Thin wrapper around a migraphx compiled program that mimics the ORT session
+    interface (.run(None, inputs_dict) → [output_array]).
+
+    Used for memory_attention at 1008px where ORT's MIGraphX EP fails to keep
+    the inference on GPU when the backbone is also in GPU memory.
+    """
+
+    def __init__(self, onnx_path: str | Path, cache_path: str | Path,
+                 fp16: bool = True, label: str = "MIGraphX session") -> None:
+        _mxr = _load_migraphx_module()
+        self._mxr = _mxr
+
+        cache_path = Path(cache_path)
+        onnx_path  = Path(onnx_path)
+
+        if cache_path.exists():
+            print(f"  {label}: loading {cache_path.name} ...")
+            t0 = time.perf_counter()
+            self._prog = _mxr.load(str(cache_path))
+            print(f"  {label}: ready in {time.perf_counter()-t0:.1f}s")
+        elif onnx_path.exists():
+            print(f"  {label}: compiling {onnx_path.name} ...")
+            t0 = time.perf_counter()
+            prog = _mxr.parse_onnx(str(onnx_path))
+            if fp16:
+                _mxr.quantize_fp16(prog)
+            prog.compile(_mxr.get_target("gpu"), offload_copy=True)
+            print(f"  {label}: compiled in {time.perf_counter()-t0:.1f}s")
+            _mxr.save(prog, str(cache_path))
+            self._prog = prog
+        else:
+            raise FileNotFoundError(f"Neither {cache_path} nor {onnx_path} found")
+
+        # Discover ordered output names for run() return list
+        self._in_names  = self._prog.get_parameter_names()
+
+    def run(self, _output_names, inputs: dict) -> list:
+        """inputs: {name: np.ndarray}  →  [output_array, ...]"""
+        args = {k: self._mxr.argument(np.ascontiguousarray(v)) for k, v in inputs.items()}
+        outputs = self._prog.run(args)
+        return [np.array(o) for o in outputs]
+
+    def get_providers(self) -> list:
+        return ["MIGraphXExecutionProvider"]
 
 
 class MIGraphXBackbone:
@@ -312,32 +372,41 @@ class SAM3OnnxTracker:
         cpu_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 
         CPU = ["CPUExecutionProvider"]
-        MIG = ["MIGraphXExecutionProvider", "CPUExecutionProvider"]
-        # FP16 for MIGraphX sessions where it's numerically safe:
-        #   memory_attention: FP32→FP16 gives 2.76× speedup at 504px (max_diff=0.012, safe).
-        #     At 1008px, backbone holds ~1 GB GPU memory; FP16 compilation OOMs and falls
-        #     back to CPU (760ms), so we keep FP32 at 1008px (189ms on MIGraphX GPU).
-        #   dec_propagate:    FP16 corrupts ConvTranspose upsampling — always keep FP32.
-        #   memory_encoder:   FP16 gives ~1ms speedup, numerically safe.
-        MIG_FP16 = [("MIGraphXExecutionProvider", {"migraphx_fp16_enable": "1"}),
-                    ("CPUExecutionProvider", {})]
-        # Use FP16 for memory_attention only when feature map is small enough to avoid OOM.
-        # HW = 36×36 = 1296 at 504px; 72×72 = 5184 at 1008px.
-        _attn_prov = MIG_FP16 if self.HW <= 2000 else MIG
+
+        # MIGraphX provider helpers with persistent compile cache.
+        # Cache key includes model hash + fp16 flag, so FP16 and FP32 variants are stored
+        # separately. Run export/prewarm_ort_cache.py once per onnx_dir to populate.
+        _cache = str(onnx_dir / "mxr_cache")
+        def _mig(fp16: bool = False) -> list:
+            opts: dict = {"migraphx_model_cache_dir": _cache}
+            if fp16:
+                opts["migraphx_fp16_enable"] = "1"
+            return [("MIGraphXExecutionProvider", opts), ("CPUExecutionProvider", {})]
+
+        MIG     = _mig(fp16=False)
+        MIG_FP16 = _mig(fp16=True)
+
+        # FP16 memory_attention is 2.76× faster and numerically safe (max_diff=0.012).
+        # With a pre-compiled cache, FP16 is used at ALL resolutions (no OOM risk:
+        # cache loading does not trigger GPU compilation workspace allocation).
+        # Without a cache, FP16 at 1008px OOMs with backbone in memory → fall back to FP32.
+        _cache_exists = any(Path(_cache).glob("*")) if Path(_cache).exists() else False
+        _attn_prov = MIG_FP16 if (_cache_exists or self.HW <= 2000) else MIG
 
         # ---- Load ONNX modules ----
         print("  Loading ONNX tracking modules ...")
         self.dec_init = ort.InferenceSession(
             str(onnx_dir / "mask_decoder_init.onnx"), sess_options=cpu_opts, providers=CPU)
 
-        # dec_prop runs on MIGraphX FP32 (FP16 corrupts ConvTranspose upsampling results).
-        # mem_enc runs on MIGraphX FP16 (1.28× speedup, numerically safe).
-        def _mig_session(path, label, providers=MIG):
+        # dec_prop: MIGraphX FP32 — FP16 corrupts ConvTranspose upsampling (max_diff=15).
+        # mem_enc:  MIGraphX FP16 — 1.28× speedup, numerically safe.
+        def _mig_session(path, label, providers):
             try:
                 sess = ort.InferenceSession(str(path), providers=providers)
                 if sess.get_providers()[0].startswith("MIGraphX"):
                     fp16 = "FP16" if "migraphx_fp16_enable" in str(providers) else "FP32"
-                    print(f"  {label}: MIGraphX ({fp16})")
+                    cached = "(cached)" if _cache_exists else "(compiling)"
+                    print(f"  {label}: MIGraphX {fp16} {cached}")
                     return sess
             except Exception:
                 pass
@@ -349,14 +418,22 @@ class SAM3OnnxTracker:
         self.mem_enc  = _mig_session(onnx_dir / "memory_encoder.onnx", "memory_encoder",
                                      providers=MIG_FP16)
 
-        # memory_attention: FP16 at 504px (2.76× speedup), FP32 at 1008px (avoids OOM fallback)
-        mem_attn_fixed = onnx_dir / "memory_attention_fixed_N7.onnx"
+        # memory_attention: direct MIGraphX Python API (not ORT EP).
+        # ORT's MIGraphX EP silently falls back to CPU at 1008px when the backbone
+        # is in GPU memory, even with a pre-compiled cache. Direct API keeps it on GPU.
+        # FP16 gives 2.76× speedup, max_diff=0.012.
+        # .mxr cache: onnx_dir/mxr_cache/memory_attention_fp16.mxr (built by prewarm).
+        mem_attn_fixed  = onnx_dir / "memory_attention_fixed_N7.onnx"
+        _ma_mxr_cache   = onnx_dir / "mxr_cache" / "memory_attention_fp16.mxr"
         if mem_attn_fixed.exists():
             try:
-                self.mem_attn = ort.InferenceSession(str(mem_attn_fixed), providers=_attn_prov)
+                self.mem_attn = MIGraphXSession(
+                    onnx_path=mem_attn_fixed,
+                    cache_path=_ma_mxr_cache,
+                    fp16=True,
+                    label="memory_attention (MIGraphX FP16)",
+                )
                 self._mem_attn_slots = num_maskmem
-                fp16_str = "FP16" if _attn_prov is MIG_FP16 else "FP32"
-                print(f"  memory_attention: MIGraphX {fp16_str} (fixed N=7)")
             except Exception as e:
                 print(f"  memory_attention: MIGraphX failed ({str(e)[:60]}), falling back to CPU")
                 self.mem_attn = ort.InferenceSession(str(mem_attn_fixed), providers=CPU)
