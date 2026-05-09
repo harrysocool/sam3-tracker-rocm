@@ -17,12 +17,13 @@ AMD Ryzen AI Max+ 395 with a DAVIS 2017 val Mean J of **81.1%** (504px).
 
 ```
 Input frame
-  → backbone_mxr_tuned.mxr (MIGraphX 2.15+patches)   ~95ms
-  → memory_attention_fixed_N7.onnx (MIGraphX)   ~7ms
-  → mask_decoder_propagate.onnx (MIGraphX)       ~2ms
-  → memory_encoder.onnx (MIGraphX)               ~1ms
-  ─────────────────────────────────────────────────
+  → backbone_mxr_tuned.mxr        (MIGraphX 2.15+patches)
+  → memory_attention_fp16.mxr     (MIGraphX)
+  → dec_prop_fp32.mxr             (MIGraphX)
+  → mem_enc_fp32.mxr              (MIGraphX)
+  ─────────────────────────────────────────────────────
   Total propagation frame: ~106ms → 9.46 FPS
+  (per-module breakdown: see Performance section)
 ```
 
 <details>
@@ -39,6 +40,8 @@ Input frame
 ```
 
 </details>
+
+---
 
 ## Text-prompt tracking
 
@@ -70,15 +73,14 @@ Text-prompt tracking requires **PyTorch ROCm** (used for the detection step on f
 and **HuggingFace Transformers ≥ 5.7.0** with `Sam3VideoModel` support:
 
 ```bash
-# DART transformers fork (included in this repo's .local_deps, or install from HuggingFace)
-# Already installed if you followed Setup steps 1–3
-pip install "transformers>=5.7.0"
+pip install "transformers>=5.8.0"
 ```
 
-Add the DART fork to your Python path (needed until SAM3 models are in mainline
-Transformers):
+If `Sam3VideoModel` is not yet in your installed transformers version, add the
+[DART transformers fork](https://arxiv.org/abs/2603.11441) to your Python path:
 ```bash
-export PYTHONPATH=/path/to/sam3/repo/DART/.local_deps:$PYTHONPATH
+# Clone the DART repo, then:
+export PYTHONPATH=/path/to/DART/.local_deps:$PYTHONPATH
 ```
 
 ### Usage
@@ -128,6 +130,11 @@ the box-prompt pipeline.
 ---
 ## Setup
 
+> **One-command setup**: run `./setup.sh` to automate all steps below
+> (conda env, ROCm SDK, onnxruntime-migraphx, ONNX export, backbone compile, smoke test).
+> Flags: `--skip-apt`, `--skip-migraphx`, `--env NAME`, `--imgsz 1008`.
+> See [setup.sh](setup.sh) for details.
+
 ### Prerequisites
 
 | Requirement | Tested version | Notes |
@@ -135,152 +142,42 @@ the box-prompt pipeline.
 | Hardware | AMD Ryzen AI Max+ 395 (gfx1151) | Other ROCm-capable AMD GPUs may work but are untested |
 | OS | Ubuntu 24.04.4 LTS | Other Linux distros with ROCm 7.x support may work |
 | Kernel | 6.8+ (tested: 6.18.6) | Required for gfx1151 AMDGPU driver support |
-| **System ROCm 7.2 APT** | `migraphx 2.15.0` | Required for MIGraphX — see note below |
-| conda / miniforge | any recent | Used to create the Python environment |
-| BIOS | UMA Frame Buffer Size = **64 GB** | On 128 GB systems; see [Finding #7](docs/project_summary.md) |
+| **System ROCm 7.2 APT** | `migraphx 2.15.0` | `sudo apt install migraphx` (ROCm 7.2 repo) |
+| conda / miniforge | any recent | |
+| BIOS | UMA Frame Buffer Size = **64 GB** | On 128 GB systems — see [Finding #7](docs/project_summary.md) |
 
-> **Why two ROCm stacks?** AMD currently maintains two parallel release tracks:
-> the **stable APT release** (ROCm 7.2.x, includes MIGraphX) and the
-> **nightly pip wheels** (ROCm 7.13, includes PyTorch for gfx1151, but no MIGraphX).
-> gfx1151 support is only available in the nightly track, so both are required:
-> the APT install provides MIGraphX; the pip install provides PyTorch.
-> See [`docs/project_summary.md`](docs/project_summary.md) for details.
+> **Why two ROCm stacks?** AMD currently ships gfx1151 PyTorch support only in nightly
+> pip wheels (ROCm 7.13), while MIGraphX is only in the stable APT release (ROCm 7.2).
+> Both are required; `setup.sh` installs them in the right order.
 
-#### 0. Install system ROCm 7.2 APT packages (MIGraphX)
+### Patched MIGraphX (for full performance)
 
-```bash
-# Add AMD ROCm 7.2 APT repository
-sudo apt-get update
-sudo apt-get install -y wget gnupg
-wget -qO - https://repo.radeon.com/rocm/rocm.gpg.key | \
-    gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
-echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] \
-    https://repo.radeon.com/rocm/apt/7.2 noble main" | \
-    sudo tee /etc/apt/sources.list.d/rocm.list
+The headline FPS numbers require two unreleased MIGraphX fixes. `setup.sh` handles
+the download and install automatically (`--skip-migraphx` if already done).
 
-# Install MIGraphX
-sudo apt-get update
-sudo apt-get install -y migraphx
-```
-
-> **Important**: PyTorch for gfx1151 (ROCm 7.13) and `onnxruntime-migraphx`
-> are **not on standard PyPI**. Install them from AMD's nightly wheel index
-> and the GitHub release linked below. A plain `conda create` + the steps
-> below is sufficient — no TheRock pre-built environment is required.
-
-#### 0b. (Optional) Install patched MIGraphX for full performance
-
-The headline FPS numbers (9.46 / 2.39 at 504 / 1008 px) require two
-unreleased MIGraphX fixes (`find_splits` multi-arg + NHWC `offload_copy`).
-We refer to the resulting build as **`MIGraphX 2.15+patches`**.
-
-| Path | Performance | What you need |
+| Path | FPS (504 / 1008 px) | What you need |
 |---|---|---|
-| Stay on stock APT 2.15.0 | 5.72 / 1.35 FPS (504 / 1008 px) | Check out tag `v0.1-migraphx-2.15` |
-| **Install prebuilt tarball** | **9.46 / 2.39 FPS** | ~2 min — download release asset, run install script |
-| Build patched from source | 9.46 / 2.39 FPS | ~30 min — for non-`gfx1151` GPUs or different ROCm/Python |
+| Stock APT 2.15.0 | 5.72 / 1.35 | Checkout tag `v0.1-migraphx-2.15` |
+| **Prebuilt tarball** (recommended) | **9.46 / 2.39** | `setup.sh` downloads + installs (~2 min) |
+| Build from source | 9.46 / 2.39 | See [`docs/build_migraphx_patched.md`](docs/build_migraphx_patched.md) |
 
-Both prebuilt and source paths are documented in [`docs/build_migraphx_patched.md`](docs/build_migraphx_patched.md).
-Patched source lives in the fork: [`harrysocool/AMDMIGraphX` branch `fix/offload-copy-contiguous-output`](https://github.com/harrysocool/AMDMIGraphX/tree/fix/offload-copy-contiguous-output) (both patches stacked).
+### Model weights
 
-### 1. Install ROCm SDK + PyTorch for gfx1151
-
-AMD provides official nightly wheels for gfx1151 at:
-**`https://rocm.nightlies.amd.com/v2/gfx1151/`**
+Config and tokenizer files are already in this repo. Download `model.safetensors` (~3.3 GB):
 
 ```bash
-# Create a fresh conda environment
-conda create -n sam3-tracker python=3.12 -y
-conda activate sam3-tracker
+# Option A — Official (HuggingFace account + accepted terms required):
+huggingface-cli download facebook/sam3 model.safetensors --local-dir model/sam3
 
-# Step 1a: Install ROCm runtime Python packages (pin to 20260411 for onnxruntime-migraphx compatibility)
-pip install rocm "rocm-sdk-core==7.13.0a20260411" rocm-sdk-libraries-gfx1151 rocm-sdk-devel \
-    --index-url https://rocm.nightlies.amd.com/v2/gfx1151/
-
-# Step 1b: Install PyTorch matching the same ROCm build date
-pip install "torch==2.12.0a0+rocm7.13.0a20260411" \
-            "torchvision==0.27.0a0+rocm7.13.0a20260411" \
-            triton \
-    --index-url https://rocm.nightlies.amd.com/v2/gfx1151/
+# Option B — Community mirror (no account needed):
+huggingface-cli download 1038lab/sam3 sam3.safetensors --local-dir model/sam3
+mv model/sam3/sam3.safetensors model/sam3/model.safetensors
 ```
 
-> **Why pin to `20260411`?** `onnxruntime-migraphx 1.24.2` was compiled against the
-> ROCm SDK from that date. Mismatched ROCm versions (even a few days apart) can cause
-> MIGraphX kernel compilation to crash at runtime.
+> For step-by-step manual install (APT, conda, pip, ONNX export, backbone compile)
+> see [`docs/manual_setup.md`](docs/manual_setup.md).
 
-Set the following environment variables (add to `~/.bashrc` or your run script):
-
-```bash
-export HSA_OVERRIDE_GFX_VERSION=11.5.1
-export PYTORCH_ALLOC_CONF=expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:512
-export MIGRAPHX_GPU_HIP_FLAGS="-Wno-error -Wno-lifetime-safety-intra-tu-suggestions"
-```
-
-> **BIOS tip (128 GB systems)**: set *UMA Frame Buffer Size* to **64 GB** in BIOS.
-> This maximises the GPU's fast non-coherent memory pool. Setting it to 128 GB
-> starves the OS and paradoxically reduces GPU bandwidth. See
-> [`docs/project_summary.md`](docs/project_summary.md) Finding #7 for details.
-
-Verify:
-```bash
-python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
-# Expected: 2.12.0a0+rocm7.13.0a20260411  True
-```
-
-### 2. Install onnxruntime-migraphx
-
-The MIGraphX-enabled ONNX Runtime is provided by
-[Looong01/onnxruntime-rocm-build](https://github.com/Looong01/onnxruntime-rocm-build).
-
-```bash
-pip install https://github.com/Looong01/onnxruntime-rocm-build/releases/download/v1.24.2/onnxruntime_migraphx-1.24.2-cp312-cp312-manylinux_2_34_x86_64.whl
-```
-
-### 3. Install remaining dependencies
-
-```bash
-# Install additional packages needed by this project
-pip install -r requirements.txt
-```
-
-### 4. Download SAM3 model weights
-
-```bash
-huggingface-cli download facebook/sam3 --local-dir model/sam3
-```
-
-### 5. Export ONNX tracking modules (~5 minutes)
-
-```bash
-# 504px — recommended (7.10 FPS, DAVIS J=81.1%)
-python export/export_tracker_modules.py --imgsz 504 --output-dir onnx_files
-
-# 1008px — higher quality (2.39 FPS, DAVIS J=85.8%)
-python export/export_tracker_modules.py --imgsz 1008 --output-dir onnx_files_1008
-```
-
-> `--fixed-slots 7` (default) also exports `memory_attention_fixed_N7.onnx` with static shapes.
-> The tracker automatically picks this file and runs it on MIGraphX.
-
-### 5b. Export and compile MIGraphX backbone (~10 minutes first time)
-
-```bash
-# Export backbone ONNX (single-session, simplified)
-# Then compile to .mxr with kernel autotuning — saved once, loaded in ~3s afterwards
-
-# 504px backbone
-python export/export_backbone_single.py --imgsz 504 --output-dir onnx_files
-# Creates: onnx_files/backbone_mxr_tuned.mxr  (~896 MB, one-time compile ~3 min)
-
-# 1008px backbone
-python export/export_backbone_single.py --imgsz 1008 --output-dir onnx_files_1008
-# Creates: onnx_files_1008/backbone_mxr_tuned.mxr  (~920 MB, one-time compile ~9 min)
-```
-
-> The `.mxr` cache encodes kernel-autotuned GPU programs. After first compile the backbone
-> loads in ~3s on subsequent runs. Pass `--backbone pytorch` to fall back to PyTorch.
-
-### 6. Run the demo
+### Run the demo
 
 ```bash
 # MIGraphX backbone (default, fastest)
@@ -299,7 +196,6 @@ python demo.py \
     --image assets/demo.jpg \
     --box 85,281,1710,850
 ```
-
 ---
 
 ## Results
@@ -348,7 +244,7 @@ PyTorch baseline uses TunableOp-autotuned GEMM kernels.*
 
 | Backbone | Latency | Speedup |
 |---|---|---|
-| MIGraphX 2.15+patches (autotuned) | **94 ms** | **1.5×** |
+| MIGraphX 2.15+patches (autotuned) | **92 ms** | **1.5×** |
 | PyTorch ROCm FP16 + TunableOp | 139 ms | baseline |
 | MIGraphX 2.15.0 (stock, HF ONNX) | ~916 ms | 0.15× |
 
@@ -442,11 +338,14 @@ sam3-tracker-rocm/
 │   └── migraphx_backbone_investigation.md
 ├── tools/
 │   └── install_migraphx_patched.sh # Install script for patched MIGraphX
+├── model/sam3/                     # Config + tokenizer (weights downloaded separately)
 ├── demo.py                         # Single image / video demo
+├── setup.sh                        # One-command setup script
 ├── assets/demo.jpg                 # Sample image
 ├── docs/
 │   ├── project_summary.md          # Technical report
-│   └── build_migraphx_patched.md   # Patched MIGraphX build/install guide
+│   ├── build_migraphx_patched.md   # Patched MIGraphX build/install guide
+│   └── manual_setup.md             # Step-by-step manual setup reference
 └── environment.yml
 ```
 
