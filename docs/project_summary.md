@@ -308,16 +308,69 @@ Meta released SAM 3.1 with **Object Multiplex** — processes multiple objects i
 
 ---
 
+---
+
+## MIGraphX Backbone Optimization (2026-05-08)
+
+Full investigation and results: [](mig_inv.md) and
+[](1008px_perf_analysis.md).
+
+### Optimization journey
+
+| Step | Change | 504px FPS | 1008px FPS |
+|---|---|---|---|
+| Baseline (PyTorch backbone + CPU ORT) | — | 5.72 | 1.35 |
+| MIGraphX 2.16.0 backbone |  multi-arg patch (AMDMIGraphX#4256) + kernel autotuning | 7.10 | 1.47 |
+| dec_prop + mem_enc → MIGraphX GPU | Switch CPU ORT → MIGraphX ORT EP (FP32) | 7.71 | 1.56 |
+| FP16 for mem_enc + mem_attn (504px) | ORT  | 8.32 | 1.56 |
+| FP16 mem_attn via direct migraphx API |  class + autotuned  cache | **8.58** | **1.97** |
+
+**vs PyTorch baseline: +50% at 504px, +46% at 1008px**
+
+### Final per-module timing
+
+| Module | 504px | 1008px | Backend |
+|---|---|---|---|
+| backbone | 92ms | 342ms | MIGraphX 2.16.0 (FP16 internal, ) |
+| memory_attention | 6.5ms | 56ms | MIGraphX direct API FP16 () |
+| dec_propagate | 14ms | 98ms | MIGraphX ORT EP FP32 |
+| memory_encoder | 2ms | 7ms | MIGraphX ORT EP FP16 |
+| **Total → FPS** | **117ms → 8.58** | **507ms → 1.97** | |
+
+### Key technical findings
+
+- ** patch**: the 90  ops in the HF window-attention ONNX blocked
+  MIGraphX graph fusion (stock = 916ms). Extending  to handle multi-arg ops
+  unlocks fusion, and kernel autotuning brings backbone to 88–94ms (1.5× faster than PyTorch).
+- **Kernel autotuning critical for memory_attention**: 
+  gives 758ms; autotuning gives 56ms at 1008px (14× difference).
+- **ORT MIGraphX EP falls back to CPU at 1008px**: FP16 memory_attention via ORT EP
+  silently switches to CPU when backbone is in GPU memory. Fixed by using the direct
+   Python API ( class) instead.
+- **dec_propagate FP16 corrupts results**: ConvTranspose upsampling is numerically
+  sensitive in FP16 (max_diff=15.3). Kept FP32.
+- **Startup time**: 2+ minutes (ORT recompile per run) → ~5s (load from ).
+  Run  once to populate.
+
+### Remaining opportunities
+
+| Opportunity | Potential gain | Effort |
+|---|---|---|
+| Flash Attention in backbone (fuse Q@K + Softmax) | ~67ms at 1008px backbone | New MIGraphX fusion pass |
+| Memory bank N: 7→5 | ~42ms at 1008px mem_attn | Export fixed_N5 ONNX |
+| dec_init on MIGraphX GPU | ~70ms first-frame at 1008px | Test MIGraphX EP |
+| RoPE-GEMM fusion in backbone | ~12ms | New MIGraphX graph rewrite |
+
 ### Summary table
 
 | Next Step | Effort | Expected FPS gain | Status |
 |---|---|---|---|
-| HF backbone → MIGraphX | Investigated | No gain (9324 nodes, If ops block optimization) | **Closed** |
+| MIGraphX backbone (find_splits patch + autotuning) | Done | +50% at 504px, +46% at 1008px (see above) | **Done** |
 | MIGraphX JIT cache | Resolved | `migraphx_model_cache_dir` ORT option works | **Closed** |
 | Shared backbone for multi-object tracking | Low (Python host only) | ~N× for N objects | Pending |
 | Official SG cgF1/pHOTA eval | Medium (~4h runtime) | — (accuracy metric) | Pending |
-| memory_encoder on MIGraphX | Medium | ~10ms saved | Pending |
-| mask_decoder on MIGraphX | High (segfault to debug) | ~7ms saved | Pending |
+| memory_encoder on MIGraphX | Done | ~6ms saved (FP16 ORT EP) | **Done** |
+| dec_propagate on MIGraphX GPU | Done | ~15ms saved (FP32 ORT EP) | **Done** |
 | SAM 3.1 upgrade | Medium | Up to 7× (multi-object) | Pending |
 
 ---
