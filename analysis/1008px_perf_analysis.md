@@ -192,9 +192,11 @@ require retraining. Not pursued.
 |---|---|---|---|
 | PyTorch backbone + CPU ORT (baseline) | ~740ms | 1.35 | — |
 | MIGraphX backbone + CPU ORT | 678ms | 1.47 | +9% |
-| MIGraphX backbone + MIG dec/enc | **640ms** | **1.56** | +16% |
-| + N=4 memory bank (est., no eval) | ~560ms | ~1.78 | +32% |
-| + Flash Attention in backbone (est.) | ~510ms | ~1.96 | +45% |
+| MIGraphX backbone + MIG dec/enc | 640ms | 1.56 | +16% |
+| + FP16 mem_attn + direct MIG API | 507ms | 1.97 | +46% |
+| + NHWC fix (GPU contiguous_kernel) | **419ms** | **2.39** | **+77%** |
+| + N=4 memory bank (est., no eval) | ~350ms | ~2.86 | +112% est. |
+| + Flash Attention in backbone (est.) | ~280ms | ~3.57 | +165% est. |
 
 The current best (1.56 FPS) is limited by `memory_attention` (30%) and
 `backbone` (53%). Both bottlenecks are fundamentally compute-limited at 1008px

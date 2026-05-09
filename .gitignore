@@ -33,3 +33,6 @@ tunableop_results*.csv
 # IDE
 .vscode/
 .idea/
+
+# Local mxr cache (legacy 3-session compile artifacts)
+mxr_cache/

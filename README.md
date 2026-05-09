@@ -354,7 +354,7 @@ sam3-tracker-rocm/
   the run scripts. The PyTorch backbone has no such requirement.
 - **Patched MIGraphX 2.16.0 required**: the stock MIGraphX 2.15.0 from the ROCm 7.2
   APT package produces ~916ms for the HF backbone (6.6× slower) due to a fusion
-  limitation in `find_splits`. See [`docs/mig_inv.md`](docs/mig_inv.md) for details.
+  limitation in `find_splits`. See [`analysis/migraphx_backbone_investigation.md`](analysis/migraphx_backbone_investigation.md) for details.
 
 ---
 
