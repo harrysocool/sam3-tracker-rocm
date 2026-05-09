@@ -92,6 +92,9 @@ class MIGraphXSession:
 
     def run(self, _output_names, inputs: dict) -> list:
         """inputs: {name: np.ndarray}  →  [output_array, ...]"""
+        # np.ascontiguousarray: MIGraphX requires exact stride matching to compiled strides.
+        # Backbone FPN outputs are already contiguous (converted in MIGraphXBackbone.__call__).
+        # Other inputs (e.g. cur_feat from fpn2.transpose()) may be non-contiguous.
         args = {k: self._mxr.argument(np.ascontiguousarray(v)) for k, v in inputs.items()}
         outputs = self._prog.run(args)
         return [np.array(o) for o in outputs]
@@ -169,7 +172,12 @@ class MIGraphXBackbone:
         img_cont = np.ascontiguousarray(img_np)
         arg      = self._mxr.argument(img_cont)
         outputs  = self._prog.run({"pixel_values": arg})
-        return np.array(outputs[0]), np.array(outputs[1]), np.array(outputs[2]), None
+        # MIGraphX GPU outputs NHWC (channel-last) strides for FPN tensors.
+        # Convert to C-contiguous NCHW here once, so all downstream MIGraphX modules
+        # receive the correct strides (each module requires exact stride matching).
+        return (np.ascontiguousarray(np.array(outputs[0])),
+                np.ascontiguousarray(np.array(outputs[1])),
+                np.ascontiguousarray(np.array(outputs[2])), None)
 
 
 # ---------------------------------------------------------------------------
@@ -393,30 +401,29 @@ class SAM3OnnxTracker:
         _cache_exists = any(Path(_cache).glob("*")) if Path(_cache).exists() else False
         _attn_prov = MIG_FP16 if (_cache_exists or self.HW <= 2000) else MIG
 
-        # ---- Load ONNX modules ----
+        # ---- Load ONNX modules via direct migraphx Python API ----
+        # Direct API eliminates ORT EP's ReorderInput/Output CPU overhead (NCHW↔NCHWc),
+        # which dominated latency for all these modules:
+        #   dec_prop:  ORT EP FP32 = 99ms  → direct MIG FP32 = 4.7ms  (21×)
+        #   mem_enc:   ORT EP FP16 = 7ms   → direct MIG FP32 = 3.3ms
+        #   dec_init:  ORT CPU    = 118ms  → direct MIG FP32 = 4.9ms  (24×)
+        # FP16 corrupts ConvTranspose upsampling for all three — keep FP32.
+        def _mig_direct(onnx_path, cache_name, label):
+            cache_path = Path(_cache) / cache_name
+            return MIGraphXSession(
+                onnx_path=onnx_path,
+                cache_path=cache_path,
+                fp16=False,
+                label=label,
+            )
+
         print("  Loading ONNX tracking modules ...")
-        self.dec_init = ort.InferenceSession(
-            str(onnx_dir / "mask_decoder_init.onnx"), sess_options=cpu_opts, providers=CPU)
-
-        # dec_prop: MIGraphX FP32 — FP16 corrupts ConvTranspose upsampling (max_diff=15).
-        # mem_enc:  MIGraphX FP16 — 1.28× speedup, numerically safe.
-        def _mig_session(path, label, providers):
-            try:
-                sess = ort.InferenceSession(str(path), providers=providers)
-                if sess.get_providers()[0].startswith("MIGraphX"):
-                    fp16 = "FP16" if "migraphx_fp16_enable" in str(providers) else "FP32"
-                    cached = "(cached)" if _cache_exists else "(compiling)"
-                    print(f"  {label}: MIGraphX {fp16} {cached}")
-                    return sess
-            except Exception:
-                pass
-            print(f"  {label}: CPU (MIGraphX unavailable)")
-            return ort.InferenceSession(str(path), sess_options=cpu_opts, providers=CPU)
-
-        self.dec_prop = _mig_session(onnx_dir / "mask_decoder_propagate.onnx", "dec_propagate",
-                                     providers=MIG)
-        self.mem_enc  = _mig_session(onnx_dir / "memory_encoder.onnx", "memory_encoder",
-                                     providers=MIG_FP16)
+        self.dec_init = _mig_direct(
+            onnx_dir / "mask_decoder_init.onnx", "dec_init_fp32.mxr", "dec_init")
+        self.dec_prop = _mig_direct(
+            onnx_dir / "mask_decoder_propagate.onnx", "dec_prop_fp32.mxr", "dec_propagate")
+        self.mem_enc  = _mig_direct(
+            onnx_dir / "memory_encoder.onnx", "mem_enc_fp32.mxr", "memory_encoder")
 
         # memory_attention: direct MIGraphX Python API (not ORT EP).
         # ORT's MIGraphX EP silently falls back to CPU at 1008px when the backbone

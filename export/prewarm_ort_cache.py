@@ -123,36 +123,42 @@ def main():
     except Exception as e:
         print(f"FAILED: {e}")
 
-    # ── 2. ORT MIGraphX sessions (dec_prop FP32, mem_enc FP16) ────────────────
-    ort_sessions = [
-        ("mask_decoder_propagate (ORT FP32)",
+    # ── 2. Direct migrachx sessions (dec_prop, mem_enc, dec_init — all FP32) ──
+    # Direct MIG API eliminates ORT's ReorderInput/Output CPU overhead:
+    #   dec_prop: ORT 99ms → direct MIG 4.7ms | dec_init: ORT CPU 118ms → 4.9ms
+    direct_sessions = [
+        ("dec_propagate FP32 (direct migraphx)",
          str(onnx_dir / "mask_decoder_propagate.onnx"),
-         make_providers(fp16=False, cache_dir=cache_dir),
+         "dec_prop_fp32.mxr",
          {"fpn_2_cond": fpn2, "fpn_0": fpn0, "fpn_1": fpn1}),
-
-        ("memory_encoder (ORT FP16)",
+        ("memory_encoder FP32 (direct migraphx)",
          str(onnx_dir / "memory_encoder.onnx"),
-         make_providers(fp16=True, cache_dir=cache_dir),
+         "mem_enc_fp32.mxr",
          {"vision_features": fpn2, "masks": MK}),
-
-        ("mask_decoder_init (CPU — skipped)",
-         None, None, None),
+        ("dec_init FP32 (direct migraphx)",
+         str(onnx_dir / "mask_decoder_init.onnx"),
+         "dec_init_fp32.mxr",
+         {"fpn_2": fpn2, "fpn_0": fpn0, "fpn_1": fpn1,
+          "input_points": pts, "input_labels": lbl, "input_boxes": box}),
     ]
 
-    total_t = time.perf_counter() - t0  # include ma compile time
-    for label, path, providers, inputs in ort_sessions:
-        if path is None:
-            print(f"  {label}")
-            continue
+    total_t = time.perf_counter() - t0
+    for label, onnx_path, cache_name, inputs in direct_sessions:
+        mxr_cache_path = Path(cache_dir) / cache_name
         print(f"  {label} ...", end=" ", flush=True)
         t0 = time.perf_counter()
         try:
-            sess = ort.InferenceSession(path, providers=providers)
-            actual = sess.get_providers()[0]
-            warmup_session(sess, inputs, args.warmup)
-            elapsed = time.perf_counter() - t0
-            total_t += elapsed
-            print(f"done in {elapsed:.1f}s  [{actual[:10]}]")
+            if mxr_cache_path.exists():
+                prog = _mxr.load(str(mxr_cache_path))
+                print(f"loaded existing  ({time.perf_counter()-t0:.1f}s)")
+            else:
+                prog = _mxr.parse_onnx(onnx_path)
+                prog.compile(_mxr.get_target("gpu"), offload_copy=True)
+                _mxr.save(prog, str(mxr_cache_path))
+                print(f"compiled+saved  ({time.perf_counter()-t0:.1f}s)")
+            _args = {k: _mxr.argument(np.ascontiguousarray(v)) for k, v in inputs.items()}
+            for _ in range(args.warmup): prog.run(_args)
+            total_t += time.perf_counter() - t0
         except Exception as e:
             print(f"FAILED: {e}")
 
