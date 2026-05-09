@@ -276,8 +276,8 @@ python demo.py \
     --checkpoint "$MODEL_DIR" \
     --onnx-dir "$ONNX_DIR" \
     --image assets/demo.jpg \
+    --output /tmp/sam3_smoke_test.jpg \
     --box 85,281,1710,850 \
-    --output /tmp/sam3_smoke_test.jpg
 
 info "Smoke test passed → /tmp/sam3_smoke_test.jpg"
 
