@@ -129,6 +129,7 @@ Set the following environment variables (add to `~/.bashrc` or your run script):
 ```bash
 export HSA_OVERRIDE_GFX_VERSION=11.5.1
 export PYTORCH_ALLOC_CONF=expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:512
+export MIGRAPHX_GPU_HIP_FLAGS="-Wno-error -Wno-lifetime-safety-intra-tu-suggestions"
 ```
 
 > **BIOS tip (128 GB systems)**: set *UMA Frame Buffer Size* to **64 GB** in BIOS.
@@ -170,7 +171,7 @@ huggingface-cli download facebook/sam3 --local-dir model/sam3
 # 504px — recommended (7.10 FPS, DAVIS J=81.1%)
 python export/export_tracker_modules.py --imgsz 504 --output-dir onnx_files
 
-# 1008px — higher quality (1.47 FPS, DAVIS J=85.8%)
+# 1008px — higher quality (2.39 FPS, DAVIS J=85.8%)
 python export/export_tracker_modules.py --imgsz 1008 --output-dir onnx_files_1008
 ```
 
@@ -239,8 +240,8 @@ python demo.py \
 
 | Resolution | DAVIS 2017 val J | SG val J (50 seqs) | Propagation FPS | Backbone |
 |---|---|---|---|---|
-| **504px** | **81.1%** | **39.6%** ¹ | **9.46** | MIGraphX 2.15+patches + NHWC fix |
-| 1008px | 85.8% | 44.8% ¹ | **2.39** | MIGraphX 2.15+patches + NHWC fix |
+| **504px** | **81.1%** | **39.6%** ¹ | **9.46** | MIGraphX 2.15+patches |
+| 1008px | 85.8% | 44.8% ¹ | **2.39** | MIGraphX 2.15+patches |
 | 504px (PyTorch) | 81.1% | 39.6% ¹ | 5.72 | PyTorch ROCm FP16 |
 | 1008px (PyTorch) | 85.8% | 44.8% ¹ | 1.35 | PyTorch ROCm FP16 |
 
@@ -253,11 +254,11 @@ PyTorch baseline uses TunableOp-autotuned GEMM kernels.*
 
 | Stage | Latency | Backend |
 |---|---:|---|
-| backbone (`backbone_mxr_tuned.mxr`) | ~94 ms | MIGraphX 2.15+patches GPU |
-| memory_attention (`fixed_N7.onnx`) | ~19 ms | ORT MIGraphX EP |
-| mask_decoder_propagate | ~17 ms | ORT CPU |
-| memory_encoder | ~8 ms | ORT CPU |
-| **Total propagation frame** | **~140 ms → 7.10 FPS** | |
+| backbone (`backbone_mxr_tuned.mxr`) | ~92 ms | MIGraphX 2.15+patches GPU (FP16 internal) |
+| memory_attention (`memory_attention_fp16.mxr`) | ~7 ms | MIGraphX direct API FP16 |
+| mask_decoder_propagate (`dec_prop_fp32.mxr`) | ~14 ms | MIGraphX direct API FP32 |
+| memory_encoder (`mem_enc_fp32.mxr`) | ~2 ms | MIGraphX direct API FP16 |
+| **Total propagation frame** | **~106 ms → 9.46 FPS** | |
 
 ### Backbone speed comparison (504px)
 
@@ -346,10 +347,22 @@ sam3-tracker-rocm/
 ├── eval/
 │   ├── eval_davis.py               # DAVIS 2017 evaluation
 │   ├── eval_saco_sg.py             # Smartglass SG evaluation
-│   └── bench_pipeline.py           # Pipeline A vs B latency benchmark
+│   ├── bench_pipeline.py           # Pipeline A vs B latency benchmark
+│   ├── visualize_correctness.py    # Mask overlay grid for DAVIS sequences
+│   ├── probe_text_prompt.py        # SAM3 text-prompt probe (PyTorch)
+│   └── profile_text_prompt.py      # Per-module timing profiler
+├── analysis/                       # Detailed optimization deep-dives
+│   ├── backbone_optimization.md
+│   ├── module_optimization.md
+│   ├── 1008px_perf_analysis.md
+│   └── migraphx_backbone_investigation.md
+├── tools/
+│   └── install_migraphx_patched.sh # Install script for patched MIGraphX
 ├── demo.py                         # Single image / video demo
 ├── assets/demo.jpg                 # Sample image
-├── docs/project_summary.md         # Technical report
+├── docs/
+│   ├── project_summary.md          # Technical report
+│   └── build_migraphx_patched.md   # Patched MIGraphX build/install guide
 └── environment.yml
 ```
 
@@ -362,8 +375,8 @@ sam3-tracker-rocm/
   Run `export/export_backbone_single.py` once per resolution to pre-build the cache.
 - **MIGraphX memory_attention cold-start**: first run JIT-compiles
   `memory_attention_fixed_N7.onnx` (~6s at 504px). Subsequent runs use the ORT cache.
-- **Mask decoder and memory encoder run on CPU ONNX**: these are small modules
-  (<20ms each) and do not benefit from GPU acceleration.
+- **`dec_propagate` FP16 corrupts results**: ConvTranspose upsampling is numerically
+  sensitive — keep it at FP32 (`dec_prop_fp32.mxr`). All other modules run FP16.
 - **Backbone PYTHONPATH**: the MIGraphX backbone requires `/opt/rocm-7.2.0/lib` in
   `PYTHONPATH` to find the MIGraphX 2.15+patches Python bindings. This is set in
   the run scripts. The PyTorch backbone has no such requirement.
