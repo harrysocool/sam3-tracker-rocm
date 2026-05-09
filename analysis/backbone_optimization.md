@@ -30,7 +30,7 @@ Accuracy cost: DAVIS J 85.8% → 81.1% (−4.7 pp).
 8 warmup passes trigger per-operation GEMM kernel autotuning.
 Saves ~8.7ms on backbone (backbone: 154ms → 142ms after tuning).
 
-### 3. MIGraphX 2.16.0 Backbone (find_splits patch)
+### 3. MIGraphX 2.15+patches Backbone (find_splits patch)
 
 **Problem**: 90 `Split` ops from HF window-attention partition blocked MIGraphX graph fusion.
 Each Split created a fusion boundary → thousands of separate kernel launches → 916ms.
@@ -48,7 +48,7 @@ Profiling comparison (from rocprof):
 | Version | Kernel launches | Latency |
 |---|---|---|
 | Stock MIGraphX 2.15 | ~thousands (Gemm dominated, 45%) | 916ms |
-| Patched MIGraphX 2.16 + autotuning | 503 compute kernels | 88ms |
+| MIGraphX 2.15+patches + autotuning | 503 compute kernels | 88ms |
 | PyTorch FP16 + TunableOp | (not GPU profiled) | 94ms |
 
 ### 4. NHWC Output Fix

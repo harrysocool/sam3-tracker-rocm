@@ -13,7 +13,7 @@
 | OS / Kernel | Ubuntu 24.04.4 LTS / 6.18.6 | — |
 | ROCm HIP (PyTorch) | 7.13.0a20260411 | AMD nightly pip (`rocm-sdk-core`) |
 | PyTorch | 2.12.0a0+rocm7.13.0a20260411 | AMD nightly pip |
-| MIGraphX | 2.16.0 (patched) | System APT 7.2 + 3-file patch |
+| MIGraphX | 2.15+patches | System APT 7.2 + find_splits + NHWC patches |
 | ONNX Runtime (MIGraphX EP) | 1.24.2 | [Looong01/onnxruntime-rocm-build](https://github.com/Looong01/onnxruntime-rocm-build) |
 | Python | 3.12.13 | conda |
 
@@ -27,7 +27,7 @@
 
 ```
 Input frame
-  → backbone_mxr_tuned.mxr       [MIGraphX 2.16.0, GPU]   95ms / 347ms
+  → backbone_mxr_tuned.mxr       [MIGraphX 2.15+patches, GPU]   95ms / 347ms
   → memory_attention_fp16.mxr    [MIGraphX direct API]     7ms  /  58ms
   → mask_decoder_propagate.mxr   [MIGraphX direct API]     2ms  /   5ms
   → memory_encoder.mxr           [MIGraphX direct API]     1ms  /   4ms
@@ -45,7 +45,7 @@ Input frame
 | Backbone → PyTorch ROCm GPU FP16 | 1.14 | 1.14 |
 | memory_attention → MIGraphX fixed N=7 | 1.27 | 1.27 |
 | 504px resolution + TunableOp + ORT 8 threads | **5.72** | **1.35** |
-| MIGraphX 2.16.0 backbone (find_splits patch + autotuning) | 7.10 | 1.47 |
+| MIGraphX 2.15+patches backbone (find_splits patch + autotuning) | 7.10 | 1.47 |
 | dec_prop + mem_enc → MIGraphX GPU (ORT EP, FP32) | 7.71 | 1.56 |
 | FP16 enabled for mem_attn + mem_enc (ORT EP, migraphx_fp16_enable) | 8.32 | 1.56 |
 | FP16 mem_attn via direct MIGraphX API + autotuned mxr cache | 8.58 | 1.97 |
@@ -110,7 +110,7 @@ BIOS UMA=64GB maximizes the fast non-coherent GPU pool (see Finding #7 below).
 
 | Topic | File |
 |---|---|
-| Backbone optimization (find_splits patch, NHWC fix, MIGraphX 2.16.0) | [`analysis/backbone_optimization.md`](../analysis/backbone_optimization.md) |
+| Backbone optimization (find_splits patch, NHWC fix, MIGraphX 2.15+patches) | [`analysis/backbone_optimization.md`](../analysis/backbone_optimization.md) |
 | Tracking module optimization (memory_attention, dec/enc, ORT cache) | [`analysis/module_optimization.md`](../analysis/module_optimization.md) |
 | MIGraphX backbone investigation (detailed, pre-patch) | [`analysis/migraphx_backbone_investigation.md`](../analysis/migraphx_backbone_investigation.md) |
 | 1008px performance deep-dive (NHWC, rocprof, op analysis) | [`analysis/1008px_perf_analysis.md`](../analysis/1008px_perf_analysis.md) |

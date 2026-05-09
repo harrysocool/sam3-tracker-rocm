@@ -13,11 +13,11 @@ AMD Ryzen AI Max+ 395 with a DAVIS 2017 val Mean J of **81.1%** (504px).
 
 - **Frame 0**: user provides a bounding box → `mask_decoder_init.onnx` produces the initial mask
 - **Frames 1+**: memory bank drives `mask_decoder_propagate.onnx` — no prompt needed
-- **Backbone** runs via patched MIGraphX 2.16.0 (ONNX, no PyTorch required); tracking modules run via ONNX Runtime
+- **Backbone** runs via MIGraphX 2.15+patches (ONNX, no PyTorch required); tracking modules run via ONNX Runtime
 
 ```
 Input frame
-  → backbone_mxr_tuned.mxr (MIGraphX 2.16.0)   ~95ms
+  → backbone_mxr_tuned.mxr (MIGraphX 2.15+patches)   ~95ms
   → memory_attention_fixed_N7.onnx (MIGraphX)   ~7ms
   → mask_decoder_propagate.onnx (MIGraphX)       ~2ms
   → memory_encoder.onnx (MIGraphX)               ~1ms
@@ -224,8 +224,8 @@ python demo.py \
 
 | Resolution | DAVIS 2017 val J | SG val J (50 seqs) | Propagation FPS | Backbone |
 |---|---|---|---|---|
-| **504px** | **81.1%** | **39.6%** ¹ | **9.46** | MIGraphX 2.16.0 + NHWC fix |
-| 1008px | 85.8% | 44.8% ¹ | **2.39** | MIGraphX 2.16.0 + NHWC fix |
+| **504px** | **81.1%** | **39.6%** ¹ | **9.46** | MIGraphX 2.15+patches + NHWC fix |
+| 1008px | 85.8% | 44.8% ¹ | **2.39** | MIGraphX 2.15+patches + NHWC fix |
 | 504px (PyTorch) | 81.1% | 39.6% ¹ | 5.72 | PyTorch ROCm FP16 |
 | 1008px (PyTorch) | 85.8% | 44.8% ¹ | 1.35 | PyTorch ROCm FP16 |
 
@@ -238,7 +238,7 @@ PyTorch baseline uses TunableOp-autotuned GEMM kernels.*
 
 | Stage | Latency | Backend |
 |---|---:|---|
-| backbone (`backbone_mxr_tuned.mxr`) | ~94 ms | MIGraphX 2.16.0 GPU |
+| backbone (`backbone_mxr_tuned.mxr`) | ~94 ms | MIGraphX 2.15+patches GPU |
 | memory_attention (`fixed_N7.onnx`) | ~19 ms | ORT MIGraphX EP |
 | mask_decoder_propagate | ~17 ms | ORT CPU |
 | memory_encoder | ~8 ms | ORT CPU |
@@ -248,11 +248,11 @@ PyTorch baseline uses TunableOp-autotuned GEMM kernels.*
 
 | Backbone | Latency | Speedup |
 |---|---|---|
-| MIGraphX 2.16.0 (patched, autotuned) | **94 ms** | **1.5×** |
+| MIGraphX 2.15+patches (autotuned) | **94 ms** | **1.5×** |
 | PyTorch ROCm FP16 + TunableOp | 139 ms | baseline |
 | MIGraphX 2.15.0 (stock, HF ONNX) | ~916 ms | 0.15× |
 
-The 1.5× backbone speedup comes from two changes to MIGraphX 2.16.0:
+The 1.5× backbone speedup comes from two patches on top of MIGraphX 2.15:
 1. A patch to `find_splits` ([AMDMIGraphX#4256](https://github.com/ROCm/AMDMIGraphX/issues/4256)) enabling fusion of the HF window-attention `Split` ops
 2. Kernel autotuning (analogous to PyTorch TunableOp) selecting optimal GEMM kernels
 
@@ -350,9 +350,9 @@ sam3-tracker-rocm/
 - **Mask decoder and memory encoder run on CPU ONNX**: these are small modules
   (<20ms each) and do not benefit from GPU acceleration.
 - **Backbone PYTHONPATH**: the MIGraphX backbone requires `/opt/rocm-7.2.0/lib` in
-  `PYTHONPATH` to find the patched MIGraphX 2.16.0 Python bindings. This is set in
+  `PYTHONPATH` to find the MIGraphX 2.15+patches Python bindings. This is set in
   the run scripts. The PyTorch backbone has no such requirement.
-- **Patched MIGraphX 2.16.0 required**: the stock MIGraphX 2.15.0 from the ROCm 7.2
+- **MIGraphX 2.15+patches required**: the stock MIGraphX 2.15.0 from the ROCm 7.2
   APT package produces ~916ms for the HF backbone (6.6× slower) due to a fusion
   limitation in `find_splits`. See [`analysis/migraphx_backbone_investigation.md`](analysis/migraphx_backbone_investigation.md) for details.
 

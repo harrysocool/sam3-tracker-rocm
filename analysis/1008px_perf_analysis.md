@@ -2,7 +2,7 @@
 
 **Date**: 2026-05-08  
 **Hardware**: AMD Ryzen AI Max+ 395 (gfx1151), 128 GB UMA (64 GB GPU pool)  
-**Baseline**: MIGraphX 2.16.0 backbone + MIGraphX ORT sessions
+**Baseline**: MIGraphX 2.15+patches backbone + MIGraphX ORT sessions
 
 ---
 
