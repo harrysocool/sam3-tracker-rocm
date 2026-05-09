@@ -40,8 +40,92 @@ Input frame
 
 </details>
 
----
+## Text-prompt tracking
 
+In addition to bounding-box prompts, SAM3 supports **open-vocabulary text prompts** —
+describe the object in plain language and the model finds and tracks it.
+
+```
+Text: "swan"
+  → Sam3VideoModel detector (PyTorch backbone + CLIP text encoder)
+       → detection mask on frame 0
+  → memory bank → propagation frames (same 9.46 FPS pipeline)
+```
+
+### How it works
+
+1. **Frame 0 (init)**: `Sam3VideoModel` runs a CLIP-powered detector on the first frame,
+   finding all instances matching the text description. The highest-scoring detection
+   seeds the memory bank.
+2. **Frames 1+**: identical to the box-prompt pipeline — the MIGraphX tracker propagates
+   the initial mask through subsequent frames with no further text processing.
+
+Text prompts are open-vocabulary short noun phrases. Examples that work well:
+`"swan"`, `"bicycle"`, `"person on a bike"`. Negative (absent) concepts correctly
+return zero detections.
+
+### Requirements
+
+Text-prompt tracking requires **PyTorch ROCm** (used for the detection step on frame 0)
+and **HuggingFace Transformers ≥ 5.7.0** with `Sam3VideoModel` support:
+
+```bash
+# DART transformers fork (included in this repo's .local_deps, or install from HuggingFace)
+# Already installed if you followed Setup steps 1–3
+pip install "transformers>=5.7.0"
+```
+
+Add the DART fork to your Python path (needed until SAM3 models are in mainline
+Transformers):
+```bash
+export PYTHONPATH=/path/to/sam3/repo/DART/.local_deps:$PYTHONPATH
+```
+
+### Usage
+
+```python
+import torch
+from transformers import Sam3VideoModel, AutoProcessor
+from PIL import Image
+
+processor = AutoProcessor.from_pretrained("model/sam3")
+model = Sam3VideoModel.from_pretrained("model/sam3").cuda().half().eval()
+
+# Init session with the first frame
+frame = Image.open("frame_0000.jpg").convert("RGB")
+session = processor.init_video_session(
+    video=[frame], inference_device="cuda", dtype=torch.float16
+)
+
+# Add a text prompt — returns a prompt ID
+processor.add_text_prompt(session, "swan")
+
+# Detect + initialise tracker on frame 0
+with torch.inference_mode():
+    out = model(inference_session=session, frame_idx=0)
+
+print("detected objects:", out.object_ids)
+print("scores:", out.obj_id_to_score)
+# out.obj_id_to_mask[obj_id] → float16 logit mask tensor; threshold at 0 for binary
+```
+
+For subsequent frames, call `model(inference_session=session, frame=next_frame_tensor)`
+— the tracker propagates the initial mask exactly as in the box-prompt pipeline.
+
+See [`eval/probe_text_prompt.py`](eval/probe_text_prompt.py) for a complete single-image
+example with visualisation.
+
+### Performance
+
+| Step | Latency | Note |
+|---|---|---|
+| Text detection (frame 0, warm) | ~1.6 s | PyTorch backbone + CLIP + DETR head |
+| Propagation (frames 1+) | ~106 ms → **9.46 FPS** | Same MIGraphX pipeline as box-prompt |
+
+The detection step runs once per video. Propagation performance is identical to
+the box-prompt pipeline.
+
+---
 ## Setup
 
 ### Prerequisites
