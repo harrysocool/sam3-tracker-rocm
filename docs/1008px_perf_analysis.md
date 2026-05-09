@@ -199,3 +199,30 @@ require retraining. Not pursued.
 The current best (1.56 FPS) is limited by `memory_attention` (30%) and
 `backbone` (53%). Both bottlenecks are fundamentally compute-limited at 1008px
 and require compiler-level or architecture-level changes to reduce further.
+
+
+---
+
+## NHWC Output Issue (2026-05-09)
+
+MIGraphX compiles the backbone with NHWC (channel-last) GPU layout for efficiency.
+When offloading to CPU via `offload_copy=True`, the output has non-standard strides
+(e.g. stride={5308416, 1, 36864, 256} for shape={1, 256, 144, 144}, channel stride=1).
+
+**Impact**: `np.ascontiguousarray` (NHWC to NCHW layout transpose) costs:
+- 504px: ~11ms for 1.7 MB total FPN (absorbed into backbone timing)
+- 1008px: ~89ms for 27.6 MB total FPN (limits gains from direct MIG API switch)
+
+**Attempts to fix via ONNX modification** (`export/force_nchw_output.py`):
+- Adding Reshape(flatten) then Reshape(original) at ONNX outputs: MIGraphX eliminates as no-op
+- NumPy `moveaxis().copy().transpose()`: 5x faster HWC copy but result still NHWC view, not C-contiguous
+- `np.ascontiguousarray` directly: only correct option, costs 7.97ms per FPN set at 504px
+
+**Root cause**: MIGraphX `offload_copy=True` does not insert a `hip::contiguous`
+instruction before CPU offload. Fixing requires a MIGraphX compiler change or
+a new MIGraphX Python API to force NCHW layout on output.
+
+**Current workaround**: `np.ascontiguousarray` in `MIGraphXBackbone.__call__()`
+ensures downstream modules receive correct strides. At 1008px, this 89ms cost
+roughly offsets the dec_prop gains from direct MIG API (saves 93ms), giving
+minimal net FPS improvement for 1008px propagation FPS from the API switch.
