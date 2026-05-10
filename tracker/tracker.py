@@ -441,9 +441,18 @@ class SAM3OnnxTracker:
         if mem_attn_fixed.exists():
             ort_opts = ort.SessionOptions()
             ort_opts.intra_op_num_threads = 1
+            # Persist ORT-compiled .mxr to disk so subsequent runs skip the 5-min recompile.
+            # First run: ~5 min compilation → cache saved. Subsequent: ~1.3s load from cache.
+            _ort_cache_dir = onnx_dir / "ort_mig_cache"
+            _ort_cache_dir.mkdir(parents=True, exist_ok=True)
+            _attn_prov_cached = []
+            for (pname, popts) in _attn_prov:
+                if pname == "MIGraphXExecutionProvider":
+                    popts = dict(popts, migraphx_model_cache_dir=str(_ort_cache_dir))
+                _attn_prov_cached.append((pname, popts))
             try:
                 self.mem_attn = ort.InferenceSession(
-                    str(mem_attn_fixed), providers=_attn_prov, sess_options=ort_opts)
+                    str(mem_attn_fixed), providers=_attn_prov_cached, sess_options=ort_opts)
                 # Check which provider actually ran
                 prov = self.mem_attn.get_providers()[0]
                 fp16_on = "FP16" if _attn_prov == MIG_FP16 else ""
