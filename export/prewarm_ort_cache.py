@@ -95,33 +95,15 @@ def main():
     pts  = np.zeros((1, 1, 1, 2), dtype=np.float32)
     lbl  = np.full((1, 1, 1), -1, dtype=np.int32)
 
-    # ── 1. memory_attention: direct migraphx .mxr (FP16) ──────────────────────
-    # ORT's MIGraphX EP silently falls back to CPU when backbone is in GPU memory.
-    # Direct migraphx Python API avoids this: 148ms (ORT FP32) → 54ms (MIG FP16).
-    ma_mxr_cache = Path(cache_dir) / "memory_attention_fp16.mxr"
-    print(f"  memory_attention FP16 (direct migraphx .mxr) ...", end=" ", flush=True)
+    # ── 1. memory_attention: skipped — now uses ORT MIGraphX EP ──────────────
+    # NOTE: memory_attention was reverted from direct MIGraphX Python API back to
+    # ORT MIGraphX EP because the direct API has a numerical correctness bug for
+    # attention-type modules (similar to ROCm/AMDMIGraphX#3596 — incorrect results
+    # when attention is compiled via direct API, regardless of FP16/FP32).
+    # ORT EP handles the attention numerics correctly. ORT manages its own
+    # compilation cache internally; no explicit prewarm needed here.
+    print(f"  memory_attention: skipped (uses ORT MIGraphX EP, not direct API)")
     t0 = time.perf_counter()
-    try:
-        import sys
-        sys.path.insert(0, "/opt/rocm-7.2.0/lib")
-        import migraphx as _mxr
-        if ma_mxr_cache.exists():
-            _prog = _mxr.load(str(ma_mxr_cache))
-            print(f"loaded existing  ({time.perf_counter()-t0:.1f}s)")
-        else:
-            _prog = _mxr.parse_onnx(str(ma_path))
-            _mxr.quantize_fp16(_prog)
-            _prog.compile(_mxr.get_target("gpu"), offload_copy=True)
-            _mxr.save(_prog, str(ma_mxr_cache))
-            print(f"compiled+saved  ({time.perf_counter()-t0:.1f}s)")
-        # Verify with warmup
-        _cf = _mxr.argument(CF); _cp = _mxr.argument(CP)
-        _mf = _mxr.argument(MF); _mp = _mxr.argument(MP)
-        for _ in range(args.warmup):
-            _prog.run({"current_vision_features": _cf, "memory": _mf,
-                       "current_vis_pos_embed": _cp, "memory_pos_embed": _mp})
-    except Exception as e:
-        print(f"FAILED: {e}")
 
     # ── 2. Direct migrachx sessions (dec_prop, mem_enc, dec_init — all FP32) ──
     # Direct MIG API eliminates ORT's ReorderInput/Output CPU overhead:
