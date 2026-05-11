@@ -95,7 +95,7 @@ step "0a. ROCm 7.2 APT (stock MIGraphX)"
 # ─────────────────────────────────────────────────────────────────────────────
 if $SKIP_APT; then
     info "Skipping APT install (--skip-apt)"
-elif dpkg -s migraphx &>/dev/null 2>&1; then
+elif dpkg -s migraphx &>/dev/null; then
     info "migraphx already installed: $(dpkg -s migraphx | grep Version | awk '{print $2}')"
 else
     echo "  Installing ROCm 7.2 APT packages (requires sudo)..."
@@ -210,8 +210,13 @@ else
     echo "    huggingface-cli download 1038lab/sam3 sam3.safetensors --local-dir $MODEL_DIR"
     echo "    mv $MODEL_DIR/sam3.safetensors $MODEL_DIR/model.safetensors"
     echo ""
-    read -rp "  Download via Option B now? [Y/n] " yn
-    yn="${yn:-Y}"
+    if $AUTO_YES; then
+        yn="Y"
+        echo "  Download via Option B now? [Y/n] Y  (auto-yes)"
+    else
+        read -rp "  Download via Option B now? [Y/n] " yn
+        yn="${yn:-Y}"
+    fi
     if [[ "$yn" =~ ^[Yy] ]]; then
         mkdir -p "$MODEL_DIR"
         huggingface-cli download 1038lab/sam3 sam3.safetensors \
@@ -232,7 +237,7 @@ ONNX_DIR="onnx_files"
 export HSA_OVERRIDE_GFX_VERSION=11.5.1
 export MIGRAPHX_GPU_HIP_FLAGS="-Wno-error -Wno-lifetime-safety-intra-tu-suggestions"
 export PYTORCH_ALLOC_CONF=expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:512
-export PYTHONPATH=/opt/rocm-7.2.0/lib
+export PYTHONPATH=/opt/rocm-7.2.0/lib${PYTHONPATH:+:$PYTHONPATH}
 
 if [[ -f "$ONNX_DIR/memory_attention_fixed_N7.onnx" ]]; then
     info "ONNX modules already exported ($ONNX_DIR/)"
@@ -283,7 +288,7 @@ python demo.py \
     --onnx-dir "$ONNX_DIR" \
     --image assets/demo.jpg \
     --output /tmp/sam3_smoke_test.jpg \
-    --box 85,281,1710,850 \
+    --box 85,281,1710,850
 
 info "Smoke test passed → /tmp/sam3_smoke_test.jpg"
 
@@ -296,7 +301,7 @@ echo "  Activate and run:"
 echo "    conda activate $CONDA_ENV"
 echo "    export HSA_OVERRIDE_GFX_VERSION=11.5.1"
 echo "    export MIGRAPHX_GPU_HIP_FLAGS=\"-Wno-error -Wno-lifetime-safety-intra-tu-suggestions\""
-echo "    export PYTHONPATH=/opt/rocm-7.2.0/lib"
+echo "    export PYTHONPATH=/opt/rocm-7.2.0/lib\${PYTHONPATH:+:\$PYTHONPATH}"
 echo ""
 echo "    python demo.py --checkpoint $MODEL_DIR --onnx-dir $ONNX_DIR \\"
 echo "        --image YOUR_IMAGE.jpg --box x1,y1,x2,y2"
