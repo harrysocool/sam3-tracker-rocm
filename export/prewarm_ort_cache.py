@@ -29,6 +29,14 @@ os.environ["ORT_LOG_SEVERITY_LEVEL"] = "4"
 
 import onnxruntime as ort
 
+# Direct MIGraphX Python API for the dec_/mem_ sessions further down.
+# Imported with alias `_mxr` so the name doesn't clash with the cache path
+# variable (`mxr_cache_path`) or the cache directory.  The bindings live at
+# /opt/rocm-7.2.0/lib (added to PYTHONPATH by the wrapping setup.sh).
+import sys
+sys.path.insert(0, "/opt/rocm-7.2.0/lib")
+import migraphx as _mxr
+
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
