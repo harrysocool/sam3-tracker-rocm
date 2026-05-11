@@ -145,8 +145,11 @@ step "1. Conda environment: $CONDA_ENV"
 if conda env list | grep -q "^${CONDA_ENV} "; then
     info "Conda env '$CONDA_ENV' already exists — activating"
 else
-    echo "  Creating conda env '$CONDA_ENV' (Python 3.12)..."
-    conda create -n "$CONDA_ENV" python=3.12 -y -q
+    echo "  Creating conda env '$CONDA_ENV' (Python 3.12 + pip)..."
+    # pip is required explicitly: conda-forge's python=3.12 metapackage no longer
+    # ships pip by default. Without this `pip` falls through to the system Python's
+    # pip (which Ubuntu 24.04 protects with PEP 668 externally-managed-environment).
+    conda create -n "$CONDA_ENV" python=3.12 pip -y -q
     info "Conda env created"
 fi
 conda activate "$CONDA_ENV"
