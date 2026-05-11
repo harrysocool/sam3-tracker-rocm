@@ -580,11 +580,17 @@ def main() -> int:
     image_pe = get_image_pe(model, H, W)
     print(f"  image_pe: {image_pe.shape}")
 
+    temporal_pe_path = args.output_dir / "temporal_pe.npy"
+    temporal_pe = model.memory_temporal_positional_encoding.detach().cpu().numpy()
+    np.save(temporal_pe_path, temporal_pe)
+    print(f"  temporal_pe: {temporal_pe.shape} → {temporal_pe_path.name}")
+
     paths = {
         "mask_decoder_init":       args.output_dir / "mask_decoder_init.onnx",
         "mask_decoder_propagate":  args.output_dir / "mask_decoder_propagate.onnx",
         "memory_encoder":          args.output_dir / "memory_encoder.onnx",
         "memory_attention":        args.output_dir / "memory_attention.onnx",
+        "temporal_pe":             temporal_pe_path,
     }
 
     print("\n[1/4] Exporting mask_decoder_init ...")
