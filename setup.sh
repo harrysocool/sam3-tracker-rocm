@@ -155,7 +155,14 @@ conda activate "$CONDA_ENV"
 # env bin so subsequent `python` / `pip` invocations resolve to the right
 # binaries instead of the system Python (which on Ubuntu 24.04 PEP 668
 # refuses pip installs).
-export PATH="$CONDA_BASE/envs/$CONDA_ENV/bin:$PATH"
+ENV_BIN="$CONDA_BASE/envs/$CONDA_ENV/bin"
+export PATH="$ENV_BIN:$PATH"
+
+# Diagnostic: confirm the right python/pip resolved (1 line, low noise).
+info "  python=$(command -v python)  pip=$(command -v pip)"
+if [[ "$(command -v pip)" != "$ENV_BIN/pip" ]]; then
+    die "conda env activation did not put $ENV_BIN/pip on PATH first; got $(command -v pip). Aborting before installing into wrong python."
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 step "2. ROCm SDK + PyTorch (pinned $ROCM_SDK_VER)"
