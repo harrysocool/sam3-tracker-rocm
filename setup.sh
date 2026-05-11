@@ -29,10 +29,10 @@ TORCHVISION_VER="0.27.0a0+rocm7.13.0a20260411"
 NIGHTLY_INDEX="https://rocm.nightlies.amd.com/v2/gfx1151/"
 ORT_WHL="https://github.com/Looong01/onnxruntime-rocm-build/releases/download/v1.24.2/onnxruntime_migraphx-1.24.2-cp312-cp312-manylinux_2_34_x86_64.whl"
 
-MXR_TAG="v2.15+patches.20260509"
+MXR_TAG="v2.15+patches.20260511"
 MXR_ASSET="migraphx-2.15+patches-linux-x86_64-rocm7.2-py312.tar.gz"
 MXR_URL="https://github.com/harrysocool/AMDMIGraphX/releases/download/${MXR_TAG}/${MXR_ASSET}"
-MXR_SHA256="4278c10b255acd5215ccc6435ba2121af9dfd5c4324c34015df6beab6ffe2a6c"
+MXR_SHA256="a45cf7b8208b3807ea46ab9c57d449ed1c4033f387970c3e1ead5225692c1900"
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
