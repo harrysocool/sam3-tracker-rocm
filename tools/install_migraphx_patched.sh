@@ -63,6 +63,18 @@ for lib in libmigraphx libmigraphx_gpu libmigraphx_device libmigraphx_onnx libmi
 done
 
 echo
+echo "=== Installing bundled vendor libs (libdnnl, libomp) ==="
+# The migraphx Python binding and libmigraphx_cpu.so DT_NEEDED libdnnl.so.1
+# (OneDNN) and libomp.so. Stock ROCm 7.2 APT does NOT ship these — the
+# patched MIGraphX build provides them. Skip silently if not in BUILD.
+for f in libdnnl.so.1 libomp.so; do
+    if [[ -f "$BUILD/lib/$f" ]]; then
+        cp "$BUILD/lib/$f" "$ROCM/lib/migraphx/lib/"
+        echo "  installed: $f"
+    fi
+done
+
+echo
 echo "=== Registering migraphx lib path with dynamic linker ==="
 # /opt/rocm-7.2.0/lib/migraphx/lib/ is not on the default ld search path.
 # Without this, libmigraphx_tf.so.2016000 (and friends) cannot be located
