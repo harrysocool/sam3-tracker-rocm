@@ -1,8 +1,8 @@
 # SAM3 Video Tracker — ROCm / AMD
 
 Mask-level video tracking pipeline built on [SAM3](https://github.com/facebookresearch/sam3),
-optimized for AMD ROCm hardware. Achieves **9.46 FPS** (propagation frame) on an
-AMD Ryzen AI Max+ 395 with a DAVIS 2017 val Mean J of **81.1%** (504px).
+optimized for AMD ROCm hardware. Achieves **8.21 FPS** (propagation frame) on an
+AMD Ryzen AI Max+ 395 with a DAVIS 2017 val Mean J of **81.5%** (504px).
 
 > **Hardware requirement**: AMD gfx1151 (Radeon 8060S / Ryzen AI Max+ 395) with ROCm 7.x.
 > Other AMD GPUs supporting ROCm may work but are untested.
@@ -22,7 +22,7 @@ Input frame
   → dec_prop_fp32.mxr             (MIGraphX)
   → mem_enc_fp32.mxr              (MIGraphX)
   ─────────────────────────────────────────────────────
-  Total propagation frame: ~106ms → 9.46 FPS
+  Total propagation frame: ~115ms → 8.21 FPS
   (per-module breakdown: see Performance section)
 ```
 
@@ -122,7 +122,7 @@ example with visualisation.
 | Step | Latency | Note |
 |---|---|---|
 | Text detection (frame 0, warm) | ~1.6 s | PyTorch backbone + CLIP + DETR head |
-| Propagation (frames 1+) | ~106 ms → **9.46 FPS** | Same MIGraphX pipeline as box-prompt |
+| Propagation (frames 1+) | ~115 ms → **8.21 FPS** | Same MIGraphX pipeline as box-prompt |
 
 The detection step runs once per video. Propagation performance is identical to
 the box-prompt pipeline.
@@ -158,8 +158,8 @@ the download and install automatically (`--skip-migraphx` if already done).
 | Path | FPS (504 / 1008 px) | What you need |
 |---|---|---|
 | Stock APT 2.15.0 | 5.72 / 1.35 | Checkout tag `v0.1-migraphx-2.15` |
-| **Prebuilt tarball** (recommended) | **9.46 / 2.39** | `setup.sh` downloads + installs (~2 min) |
-| Build from source | 9.46 / 2.39 | See [`docs/build_migraphx_patched.md`](docs/build_migraphx_patched.md) |
+| **Prebuilt tarball** (recommended) | **8.21 / 2.31** | `setup.sh` downloads + installs (~2 min) |
+| Build from source | 8.21 / 2.31 | See [`docs/build_migraphx_patched.md`](docs/build_migraphx_patched.md) |
 
 ### Model weights
 
@@ -218,27 +218,31 @@ python demo.py \
 
 ### Video tracking (propagation FPS)
 
-| Resolution | DAVIS 2017 val J | SG val J (50 seqs) | Propagation FPS | Backbone |
-|---|---|---|---|---|
-| **504px** | **81.1%** | **39.6%** ¹ | **9.46** | MIGraphX 2.15+patches |
-| 1008px | 85.8% | 44.8% ¹ | **2.39** | MIGraphX 2.15+patches |
-| 504px (PyTorch) | 81.1% | 39.6% ¹ | 5.72 | PyTorch ROCm FP16 |
-| 1008px (PyTorch) | 85.8% | 44.8% ¹ | 1.35 | PyTorch ROCm FP16 |
+| Resolution | DAVIS 2017 val J | SG proxy J (50 seqs) ² | SG HOTA (mask) ³ | Propagation FPS | Backbone |
+|---|---|---|---|---|---|
+| **504px** | **81.5%** | **40.4%** | **0.179** | **8.21** | MIGraphX 2.15+patches |
+| 1008px | 84.8% | 44.0% | 0.183 | **2.31** | MIGraphX 2.15+patches |
+| 504px (PyTorch) | 81.5% | 40.4% | — | 5.72 | PyTorch ROCm FP16 |
+| 1008px (PyTorch) | 84.8% | 44.0% | — | 1.35 | PyTorch ROCm FP16 |
 
 *MIGraphX backbone uses `backbone_mxr_tuned.mxr` (pre-compiled with kernel autotuning).
 PyTorch baseline uses TunableOp-autotuned GEMM kernels.*
 
-¹ SG J (IoU) is a proxy metric on a random 50-sequence subset, not the official cgF1/pHOTA evaluation. See [`docs/project_summary.md`](docs/project_summary.md).
+² SG proxy J (IoU) is a Mean J metric on a random 50-sequence subset; not the official evaluation.
+³ SG HOTA (mask) is from the official SA-Co/VEval evaluator (`saco_veval_eval.py`) on a random
+300-sequence subset, using box prompts. cgF1 is low (~0.05) because our tracker uses box prompts
+(not concept/text prompts), so concept-gating penalises all predictions. HOTA reflects tracking
+quality independently of concept grounding. See [`results/saco_sg_300seq_504px_eval_res.json`](results/saco_sg_300seq_504px_eval_res.json).
 
 ### Per-module latency breakdown (504px, MIGraphX backbone)
 
 | Stage | Latency | Backend |
 |---|---:|---|
 | backbone (`backbone_mxr_tuned.mxr`) | ~92 ms | MIGraphX 2.15+patches GPU (FP16 internal) |
-| memory_attention (`memory_attention_fp16.mxr`) | ~7 ms | MIGraphX direct API FP16 |
+| memory_attention (ORT MIGraphX EP FP16) | ~7 ms | ORT MIGraphX EP (direct API has kernel bug) |
 | mask_decoder_propagate (`dec_prop_fp32.mxr`) | ~14 ms | MIGraphX direct API FP32 |
 | memory_encoder (`mem_enc_fp32.mxr`) | ~2 ms | MIGraphX direct API FP16 |
-| **Total propagation frame** | **~106 ms → 9.46 FPS** | |
+| **Total propagation frame** | **~115 ms → 8.21 FPS** | |
 
 ### Backbone speed comparison (504px)
 
