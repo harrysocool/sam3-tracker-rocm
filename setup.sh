@@ -251,19 +251,42 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-step "7. Compile MIGraphX backbone (~3 min 504px / ~9 min 1008px)"
+step "7. Build MIGraphX backbone cache (~5 min 504px / ~12 min 1008px, one-time)"
 # ─────────────────────────────────────────────────────────────────────────────
 MXR_CACHE="$ONNX_DIR/backbone_mxr_tuned.mxr"
+SINGLE_FP32="$ONNX_DIR/backbone_single_fp32.onnx"
+SINGLE_SIMP="$ONNX_DIR/backbone_single_simplified.onnx"
 
 if [[ -f "$MXR_CACHE" ]]; then
     info "Backbone cache already present ($MXR_CACHE)"
 else
-    echo "  Compiling + autotuning backbone (runs once, then loads in ~3s)..."
-    python export/export_backbone_single.py \
-        --checkpoint "$MODEL_DIR" \
-        --imgsz "$IMGSZ" \
-        --output-dir "$ONNX_DIR"
-    info "Backbone compiled → $MXR_CACHE"
+    # 7a. Single-session export (~1 min)
+    if [[ -f "$SINGLE_FP32" || -f "$SINGLE_SIMP" ]]; then
+        info "Step 7a skipped — single-session ONNX already exists"
+    else
+        echo "  [7a/3] Exporting single-session backbone ONNX (~1 min)..."
+        python export/export_backbone_single.py \
+            --checkpoint "$MODEL_DIR" \
+            --imgsz "$IMGSZ" \
+            --output-dir "$ONNX_DIR"
+    fi
+
+    # 7b. onnxsim (~1 min)
+    if [[ -f "$SINGLE_SIMP" ]]; then
+        info "Step 7b skipped — simplified ONNX already exists"
+    else
+        echo "  [7b/3] Simplifying ONNX with onnxsim (~1 min)..."
+        python export/simplify_backbone.py \
+            --onnx-dir "$ONNX_DIR" \
+            --imgsz "$IMGSZ"
+    fi
+
+    # 7c. MIGraphX compile + autotune (the slow step)
+    echo "  [7c/3] Compiling + autotuning with MIGraphX (~3 min @504 / ~9 min @1008)..."
+    python export/compile_backbone_mxr.py \
+        --onnx-dir "$ONNX_DIR" \
+        --imgsz "$IMGSZ"
+    info "Backbone cache built → $MXR_CACHE"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
