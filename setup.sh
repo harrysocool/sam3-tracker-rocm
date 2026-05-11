@@ -218,12 +218,16 @@ else
     echo "  SAM3 model weights (~3.3 GB) are required."
     echo "  Config/tokenizer files are already included in this repo."
     echo ""
+    # huggingface_hub >=1.0 ships the new `hf` CLI and removes huggingface-cli.
+    # Older versions only ship huggingface-cli. Pick whichever is available.
+    if command -v hf >/dev/null 2>&1; then HF=hf; else HF=huggingface-cli; fi
+
     echo "  Option A — Official (requires HuggingFace account + accepted terms):"
     echo "    https://huggingface.co/facebook/sam3"
-    echo "    huggingface-cli download facebook/sam3 model.safetensors --local-dir $MODEL_DIR"
+    echo "    $HF download facebook/sam3 model.safetensors --local-dir $MODEL_DIR"
     echo ""
     echo "  Option B — Community mirror (no account needed, same weights):"
-    echo "    huggingface-cli download 1038lab/sam3 sam3.safetensors --local-dir $MODEL_DIR"
+    echo "    $HF download 1038lab/sam3 sam3.safetensors --local-dir $MODEL_DIR"
     echo "    mv $MODEL_DIR/sam3.safetensors $MODEL_DIR/model.safetensors"
     echo ""
     if $AUTO_YES; then
@@ -235,8 +239,14 @@ else
     fi
     if [[ "$yn" =~ ^[Yy] ]]; then
         mkdir -p "$MODEL_DIR"
-        huggingface-cli download 1038lab/sam3 sam3.safetensors \
-            --local-dir "$MODEL_DIR" --local-dir-use-symlinks False
+        # --local-dir-use-symlinks was removed in huggingface_hub 1.0; only pass
+        # to old huggingface-cli.
+        if [[ "$HF" == "huggingface-cli" ]]; then
+            "$HF" download 1038lab/sam3 sam3.safetensors \
+                --local-dir "$MODEL_DIR" --local-dir-use-symlinks False
+        else
+            "$HF" download 1038lab/sam3 sam3.safetensors --local-dir "$MODEL_DIR"
+        fi
         mv "$MODEL_DIR/sam3.safetensors" "$MODEL_DIR/model.safetensors"
         info "Weights downloaded → $WEIGHT_FILE"
     else
