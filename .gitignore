@@ -26,8 +26,9 @@ outputs/*
 *.gif
 *_tracked.*
 *_demo.*
-# Whitelist source images (assets/) and committed doc visuals (docs/images/)
+# Whitelist source media (assets/) and committed doc visuals (docs/images/)
 !assets/*.jpg
+!assets/*.mp4
 !docs/images/*.jpg
 !docs/images/*.gif
 !docs/images/*.mp4
