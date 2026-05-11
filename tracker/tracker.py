@@ -430,27 +430,37 @@ class SAM3OnnxTracker:
         self.mem_enc  = _mig_direct(
             onnx_dir / "memory_encoder.onnx", "mem_enc_fp32.mxr", "memory_encoder")
 
-        # memory_attention: direct MIGraphX Python API (not ORT EP).
-        # ORT's MIGraphX EP silently falls back to CPU at 1008px when the backbone
-        # is in GPU memory, even with a pre-compiled cache. Direct API keeps it on GPU.
-        # FP16 gives 2.76× speedup, max_diff=0.012.
-        # .mxr cache: onnx_dir/mxr_cache/memory_attention_fp16.mxr (built by prewarm).
+        # memory_attention: ORT MIGraphX EP.
+        # NOTE: direct MIGraphX Python API produces numerically wrong cond output
+        # (max_diff~6.7 vs CPU ORT reference) for this model — root cause is a
+        # MIGraphX compiler difference for this specific attention architecture.
+        # ORT MIGraphX EP gives correct results. At 1008px with backbone in GPU
+        # memory, ORT EP may fall back to CPU (silent); acceptable since this
+        # module contributes <10% of total latency. FP16 via migraphx_fp16_enable.
         mem_attn_fixed  = onnx_dir / "memory_attention_fixed_N7.onnx"
-        _ma_mxr_cache   = onnx_dir / "mxr_cache" / "memory_attention_fp16.mxr"
         if mem_attn_fixed.exists():
+            ort_opts = ort.SessionOptions()
+            ort_opts.intra_op_num_threads = 1
+            # Persist ORT-compiled .mxr to disk so subsequent runs skip the 5-min recompile.
+            # First run: ~5 min compilation → cache saved. Subsequent: ~1.3s load from cache.
+            _ort_cache_dir = onnx_dir / "ort_mig_cache"
+            _ort_cache_dir.mkdir(parents=True, exist_ok=True)
+            _attn_prov_cached = []
+            for (pname, popts) in _attn_prov:
+                if pname == "MIGraphXExecutionProvider":
+                    popts = dict(popts, migraphx_model_cache_dir=str(_ort_cache_dir))
+                _attn_prov_cached.append((pname, popts))
             try:
-                self.mem_attn = MIGraphXSession(
-                    onnx_path=mem_attn_fixed,
-                    cache_path=_ma_mxr_cache,
-                    fp16=True,
-                    label="memory_attention (MIGraphX FP16)",
-                )
-                self._mem_attn_slots = num_maskmem
+                self.mem_attn = ort.InferenceSession(
+                    str(mem_attn_fixed), providers=_attn_prov_cached, sess_options=ort_opts)
+                # Check which provider actually ran
+                prov = self.mem_attn.get_providers()[0]
+                fp16_on = "FP16" if _attn_prov == MIG_FP16 else ""
+                print(f"  memory_attention (ORT {prov[:3]} {fp16_on}): loaded")
             except Exception as e:
-                print(f"  memory_attention: MIGraphX failed ({str(e)[:60]}), falling back to CPU")
                 self.mem_attn = ort.InferenceSession(str(mem_attn_fixed), providers=CPU)
-                self._mem_attn_slots = num_maskmem
-                print("  memory_attention: CPU (fixed N=7)")
+                print(f"  memory_attention: CPU fallback ({str(e)[:50]})")
+            self._mem_attn_slots = num_maskmem
         else:
             self.mem_attn = ort.InferenceSession(
                 str(onnx_dir / "memory_attention.onnx"), providers=CPU)
