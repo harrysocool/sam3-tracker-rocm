@@ -150,6 +150,12 @@ else
     info "Conda env created"
 fi
 conda activate "$CONDA_ENV"
+# Belt-and-braces: `conda activate` from inside a script doesn't always
+# update PATH (depends on conda init / shell type). Explicitly prepend the
+# env bin so subsequent `python` / `pip` invocations resolve to the right
+# binaries instead of the system Python (which on Ubuntu 24.04 PEP 668
+# refuses pip installs).
+export PATH="$CONDA_BASE/envs/$CONDA_ENV/bin:$PATH"
 
 # ─────────────────────────────────────────────────────────────────────────────
 step "2. ROCm SDK + PyTorch (pinned $ROCM_SDK_VER)"
