@@ -32,7 +32,7 @@ ORT_WHL="https://github.com/Looong01/onnxruntime-rocm-build/releases/download/v1
 MXR_TAG="v2.15+patches.20260512"
 MXR_ASSET="migraphx-2.15+patches-linux-x86_64-rocm7.2-py312.tar.gz"
 MXR_URL="https://github.com/harrysocool/AMDMIGraphX/releases/download/${MXR_TAG}/${MXR_ASSET}"
-MXR_SHA256="4deb61642f5eecc0137fd2746ac241696467f57491b29a5439e7d99a8ed66fd4"
+MXR_SHA256="18b8fc856b145972f30ccfb5f22a03ccdb718e04661538454278a28de23859dc"
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
