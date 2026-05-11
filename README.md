@@ -108,27 +108,69 @@ mv model/sam3/sam3.safetensors model/sam3/model.safetensors
 
 ## Run the demo
 
-The MIGraphX backbone needs `/opt/rocm-7.2.0/lib` on `PYTHONPATH` to find the
-patched MIGraphX 2.15 Python bindings (the PyTorch backbone does not):
+Two demo entry points — pick the one matching your prompt type:
+
+| Demo | Prompt | Backbone | Latency @504px | Use for |
+|---|---|---|---|---|
+| `demo.py`      | bounding box  | MIGraphX (fastest)        | ~115 ms (8.21 FPS) | known target, real-time |
+| `demo_text.py` | text          | PyTorch (CLIP detector)   | ~2 s init + slow propagation | open-vocabulary, prototyping |
+
+All commands assume you ran `./setup.sh` and are in the project root. The MIGraphX
+backbone requires `/opt/rocm-7.2.0/lib` on `PYTHONPATH`; PyTorch path doesn't:
+```bash
+export PYTHONPATH=/opt/rocm-7.2.0/lib${PYTHONPATH:+:$PYTHONPATH}
+```
+
+### Box-prompt (`demo.py`) — fastest
 
 ```bash
-export PYTHONPATH=/opt/rocm-7.2.0/lib:$PYTHONPATH
+# Image — MIGraphX backbone (default, ~115 ms / frame)
+python demo.py --checkpoint model/sam3 --onnx-dir onnx_files \
+    --image assets/demo.jpg --box 85,281,1710,850
 
-# MIGraphX backbone (default, fastest)
-python demo.py \
-    --checkpoint model/sam3 \
-    --onnx-dir onnx_files \
-    --backbone migraphx \
-    --image assets/demo.jpg \
-    --box 85,281,1710,850
-
-# PyTorch backbone (fallback if .mxr not yet compiled — no PYTHONPATH needed)
-python demo.py \
-    --checkpoint model/sam3 \
-    --onnx-dir onnx_files \
+# Image — PyTorch backbone fallback (no MIGraphX needed)
+python demo.py --checkpoint model/sam3 --onnx-dir onnx_files \
     --backbone pytorch \
-    --image assets/demo.jpg \
-    --box 85,281,1710,850
+    --image assets/demo.jpg --box 85,281,1710,850
+
+# Video (any mp4) — same FPS as image, written to outputs/<stem>_tracked.mp4
+python demo.py --checkpoint model/sam3 --onnx-dir onnx_files \
+    --video assets/demo.mp4 --box <x1,y1,x2,y2>
+```
+
+### Text-prompt (`demo_text.py`) — open-vocabulary
+
+```bash
+# Image — text → CLIP detection → mask
+python demo_text.py --checkpoint model/sam3 \
+    --image assets/demo.jpg --text "truck"
+
+# Video — text init on frame 0, then PyTorch tracker propagates
+python demo_text.py --checkpoint model/sam3 \
+    --video assets/demo.mp4 --text "swan" --max-frames 60
+```
+
+Outputs default to `outputs/<input-stem>_{tracked,text}.{jpg,mp4}` (overridable
+with `--output`). Try short noun phrases: `"swan"`, `"a person on a bike"`,
+`"yellow taxi"`.
+
+### Quick checks (no dataset needed)
+
+After `setup.sh`, four small scripts smoke-test specific aspects of the pipeline
+using only `assets/demo.jpg`:
+
+| Script | What it checks | Time |
+|---|---|---|
+| `eval/bench_pipeline.py`        | Per-module latency + total FPS — does your machine match the headline 8.21 FPS? | ~30 s |
+| `eval/probe_text_prompt.py`     | Text-prompt detection works (PyTorch path)             | ~10 s |
+| `eval/probe_text_prompt_mxr.py` | Text-prompt with MIGraphX backbone                     | ~15 s |
+| `eval/profile_text_prompt.py`   | Per-stage latency of text-prompt path                  | ~30 s |
+
+```bash
+python eval/bench_pipeline.py        --checkpoint model/sam3 --onnx-dir onnx_files
+python eval/probe_text_prompt.py     --checkpoint model/sam3 --image assets/demo.jpg --text "truck"
+python eval/probe_text_prompt_mxr.py --checkpoint model/sam3 --onnx-dir onnx_files --image assets/demo.jpg --text "truck"
+python eval/profile_text_prompt.py   --checkpoint model/sam3 --image assets/demo.jpg --text "truck"
 ```
 
 ---
@@ -304,12 +346,16 @@ sam3-tracker-rocm/
 ├── analysis/           # optimization deep-dives (markdown)
 ├── tools/              # patched MIGraphX install helper
 ├── docs/               # setup guide, technical report
+│   └── images/         # README/doc visuals (committed)
 ├── model/sam3/         # config + tokenizer (weights downloaded separately)
+├── assets/             # source inputs for demos: demo.jpg, demo.mp4
 ├── onnx_files/         # generated, gitignored — 504px ONNX modules
 ├── onnx_files_1008/    # generated, gitignored — 1008px ONNX modules
+├── outputs/            # demo / probe outputs (gitignored, auto-created)
 ├── results/            # eval outputs (json, plots)
 ├── dataset/            # downloaded datasets (DAVIS, saco_sg)
-├── demo.py             # ← entry point: single image / video demo
+├── demo.py             # ← entry point: box-prompt image / video demo
+├── demo_text.py        # ← entry point: text-prompt image / video demo
 ├── setup.sh            # ← entry point: one-command setup
 └── environment.yml
 ```
