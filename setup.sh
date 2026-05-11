@@ -119,8 +119,10 @@ if $SKIP_MIGRAPHX; then
 elif [[ -f /opt/rocm-7.2.0/lib/libmigraphx_c.so.3.0.2016000 \
      && -f /opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx_ref.so.2016000.0 \
      && -f /opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx_cpu.so.2016000.0 \
+     && -f /opt/rocm-7.2.0/lib/migraphx/lib/libdnnl.so.1 \
+     && -f /opt/rocm-7.2.0/lib/migraphx/lib/libomp.so \
      && -f /etc/ld.so.conf.d/rocm-migraphx-2016.conf ]]; then
-    # Marker + the two libs older releases (<=20260509) shipped without + the
+    # Marker + libs that older releases (<=20260511) shipped without + the
     # ldconfig conf the older install script forgot to write. Reinstall if any
     # of these is missing so users with broken older installs auto-recover.
     info "Patched MIGraphX already installed"
