@@ -180,13 +180,13 @@ The detection step runs once per video.
 
 | truck (demo) | drift-straight (J = 95.2%) | parkour (J = 92.2%) |
 |:---:|:---:|:---:|
-| <img src="assets/demo_tracked.jpg" width="320" alt="truck"> | <img src="assets/demo_drift-straight.jpg" width="320" alt="drift-straight"> | <img src="assets/demo_parkour.jpg" width="320" alt="parkour"> |
+| <img src="docs/images/demo_tracked.jpg" width="320" alt="truck"> | <img src="docs/images/demo_drift-straight.jpg" width="320" alt="drift-straight"> | <img src="docs/images/demo_parkour.jpg" width="320" alt="parkour"> |
 
 ### Video tracking (DAVIS 2017 val, 504px)
 
 | blackswan  (J = 93.0%) | dog  (J = 94.7%) | camel  (J = 96.0%) |
 |:---:|:---:|:---:|
-| <img src="assets/demo_blackswan.gif" width="320" alt="blackswan"> | <img src="assets/demo_dog.gif" width="320" alt="dog"> | <img src="assets/demo_camel.gif" width="320" alt="camel"> |
+| <img src="docs/images/demo_blackswan.gif" width="320" alt="blackswan"> | <img src="docs/images/demo_dog.gif" width="320" alt="dog"> | <img src="docs/images/demo_camel.gif" width="320" alt="camel"> |
 
 ---
 
