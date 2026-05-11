@@ -336,6 +336,20 @@ sam3-tracker-rocm/
 - **MIGraphX 2.15+patches required**: the stock MIGraphX 2.15.0 from the ROCm 7.2
   APT package produces ~916ms for the HF backbone (6.6× slower) due to a fusion
   limitation in `find_splits`. See [`analysis/migraphx_backbone_investigation.md`](analysis/migraphx_backbone_investigation.md) for details.
+- **Text-prompt path is PyTorch-only** (no MIGraphX acceleration yet). `demo_text.py`
+  runs the entire pipeline on PyTorch, so propagation drops from box-prompt's
+  8.21 FPS to ~0.5 FPS. Bringing text-prompt up to box-prompt FPS requires
+  MIGraphX-izing the detector module — concretely:
+    1. Re-export the backbone with `last_hidden_state` (the detector needs the
+       1024-d ViT features, not just the 256-d FPN).
+    2. Wire the CLIP text encoder + DETR head into a hybrid path
+       (PyTorch on frame 0, MIGraphX after).
+    3. Port `Sam3VideoModel`'s NMS + presence gating to the OnnxTracker side.
+    4. Resolve the torch ROCm 7.13 nightly vs patched MIGraphX 7.2 library
+       conflict (LD_PRELOAD workaround already documented in memory).
+
+  Estimated 2–3 days of work. Until then, treat `demo_text.py` as a prototyping
+  / open-vocabulary tool, not a real-time path.
 
 ---
 

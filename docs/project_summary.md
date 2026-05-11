@@ -137,7 +137,8 @@ BIOS UMA=64GB maximizes the fast non-coherent GPU pool (see Finding #7 below).
 | Item | Effort | Notes |
 |---|---|---|
 | Recover 9.46 FPS: fix mem_attn direct-API path | 1–2 days | Exclude softmax from FP16 quantization when re-exporting ONNX, or wait for upstream MIGraphX fix |
-| Full SG eval (1686 annotations) + text-prompt path | ~half day runtime | 300-seq subset done (HOTA 0.179 / 0.183); text-prompt requires Sam3VideoModel detector integration |
+| **MIGraphX-ize the text-prompt detector path** | 2–3 days | `demo_text.py` is PyTorch-only (~0.5 FPS prop vs 8.21 box). Steps: (a) re-export backbone with `last_hidden_state` — detector needs the 1024-d ViT features, current backbone outputs only 256-d FPN; (b) wire CLIP text encoder + DETR head into a hybrid path (PyTorch on frame 0, MIGraphX after); (c) port `Sam3VideoModel` NMS + presence gating to the OnnxTracker side; (d) resolve torch-ROCm-7.13-nightly vs patched-MIGraphX-7.2 lib conflict (LD_PRELOAD workaround works). Brings text-prompt to box-prompt FPS — unlocks open-vocabulary real-time tracking. |
+| Full SG eval on 1686 annotations (text-prompt) | ~half day runtime | 300-seq box-prompt subset done (HOTA 0.179 / 0.183). The official cgF1 / pHOTA numbers reported in the SAM3 paper require text prompts and the full split — depends on text-prompt MIGraphX path above, or accept slow PyTorch eval (~1h per 100 seqs) |
 | Shared backbone for multi-object | Low (Python host only) | O(N×frames) → O(frames + N×decoder) |
 | Memory bank N: 7→5 | Low (re-export) | ~42ms saving at 1008px; check accuracy |
 | SAM 3.1 (Object Multiplex) | Medium | Up to 7× faster multi-object |
