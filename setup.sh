@@ -265,7 +265,11 @@ export MIGRAPHX_GPU_HIP_FLAGS="-Wno-error -Wno-lifetime-safety-intra-tu-suggesti
 export PYTORCH_ALLOC_CONF=expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:512
 export PYTHONPATH=/opt/rocm-7.2.0/lib${PYTHONPATH:+:$PYTHONPATH}
 
-if [[ -f "$ONNX_DIR/memory_attention_fixed_N7.onnx" ]]; then
+# Sentinel: BOTH the ONNX module AND the temporal_pe.npy must exist. Older
+# checkouts that ran the broken export (before temporal_pe.npy was added)
+# have memory_attention_fixed_N7.onnx but no temporal_pe.npy, and the tracker
+# refuses to start without it.
+if [[ -f "$ONNX_DIR/memory_attention_fixed_N7.onnx" && -f "$ONNX_DIR/temporal_pe.npy" ]]; then
     info "ONNX modules already exported ($ONNX_DIR/)"
 else
     echo "  Exporting ONNX tracking modules (${IMGSZ}px, ~5 min)..."
