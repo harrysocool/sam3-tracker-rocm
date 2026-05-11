@@ -29,10 +29,10 @@ TORCHVISION_VER="0.27.0a0+rocm7.13.0a20260411"
 NIGHTLY_INDEX="https://rocm.nightlies.amd.com/v2/gfx1151/"
 ORT_WHL="https://github.com/Looong01/onnxruntime-rocm-build/releases/download/v1.24.2/onnxruntime_migraphx-1.24.2-cp312-cp312-manylinux_2_34_x86_64.whl"
 
-MXR_TAG="v2.15+patches.20260509"
+MXR_TAG="v2.15+patches.20260512"
 MXR_ASSET="migraphx-2.15+patches-linux-x86_64-rocm7.2-py312.tar.gz"
 MXR_URL="https://github.com/harrysocool/AMDMIGraphX/releases/download/${MXR_TAG}/${MXR_ASSET}"
-MXR_SHA256="4278c10b255acd5215ccc6435ba2121af9dfd5c4324c34015df6beab6ffe2a6c"
+MXR_SHA256="18b8fc856b145972f30ccfb5f22a03ccdb718e04661538454278a28de23859dc"
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -95,7 +95,7 @@ step "0a. ROCm 7.2 APT (stock MIGraphX)"
 # ─────────────────────────────────────────────────────────────────────────────
 if $SKIP_APT; then
     info "Skipping APT install (--skip-apt)"
-elif dpkg -s migraphx &>/dev/null 2>&1; then
+elif dpkg -s migraphx &>/dev/null; then
     info "migraphx already installed: $(dpkg -s migraphx | grep Version | awk '{print $2}')"
 else
     echo "  Installing ROCm 7.2 APT packages (requires sudo)..."
@@ -116,7 +116,15 @@ step "0b. Patched MIGraphX 2.15+patches"
 # ─────────────────────────────────────────────────────────────────────────────
 if $SKIP_MIGRAPHX; then
     info "Skipping patched MIGraphX install (--skip-migraphx)"
-elif [[ -f /opt/rocm-7.2.0/lib/libmigraphx_c.so.3.0.2016000 ]]; then
+elif [[ -f /opt/rocm-7.2.0/lib/libmigraphx_c.so.3.0.2016000 \
+     && -f /opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx_ref.so.2016000.0 \
+     && -f /opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx_cpu.so.2016000.0 \
+     && -f /opt/rocm-7.2.0/lib/migraphx/lib/libdnnl.so.1 \
+     && -f /opt/rocm-7.2.0/lib/migraphx/lib/libomp.so \
+     && -f /etc/ld.so.conf.d/rocm-migraphx-2016.conf ]]; then
+    # Marker + libs that older releases (<=20260511) shipped without + the
+    # ldconfig conf the older install script forgot to write. Reinstall if any
+    # of these is missing so users with broken older installs auto-recover.
     info "Patched MIGraphX already installed"
 else
     echo "  Downloading patched MIGraphX (~85 MB)..."
@@ -139,11 +147,27 @@ step "1. Conda environment: $CONDA_ENV"
 if conda env list | grep -q "^${CONDA_ENV} "; then
     info "Conda env '$CONDA_ENV' already exists — activating"
 else
-    echo "  Creating conda env '$CONDA_ENV' (Python 3.12)..."
-    conda create -n "$CONDA_ENV" python=3.12 -y -q
+    echo "  Creating conda env '$CONDA_ENV' (Python 3.12 + pip)..."
+    # pip is required explicitly: conda-forge's python=3.12 metapackage no longer
+    # ships pip by default. Without this `pip` falls through to the system Python's
+    # pip (which Ubuntu 24.04 protects with PEP 668 externally-managed-environment).
+    conda create -n "$CONDA_ENV" python=3.12 pip -y -q
     info "Conda env created"
 fi
 conda activate "$CONDA_ENV"
+# Belt-and-braces: `conda activate` from inside a script doesn't always
+# update PATH (depends on conda init / shell type). Explicitly prepend the
+# env bin so subsequent `python` / `pip` invocations resolve to the right
+# binaries instead of the system Python (which on Ubuntu 24.04 PEP 668
+# refuses pip installs).
+ENV_BIN="$CONDA_BASE/envs/$CONDA_ENV/bin"
+export PATH="$ENV_BIN:$PATH"
+
+# Diagnostic: confirm the right python/pip resolved (1 line, low noise).
+info "  python=$(command -v python)  pip=$(command -v pip)"
+if [[ "$(command -v pip)" != "$ENV_BIN/pip" ]]; then
+    die "conda env activation did not put $ENV_BIN/pip on PATH first; got $(command -v pip). Aborting before installing into wrong python."
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 step "2. ROCm SDK + PyTorch (pinned $ROCM_SDK_VER)"
@@ -196,20 +220,35 @@ else
     echo "  SAM3 model weights (~3.3 GB) are required."
     echo "  Config/tokenizer files are already included in this repo."
     echo ""
+    # huggingface_hub >=1.0 ships the new `hf` CLI and removes huggingface-cli.
+    # Older versions only ship huggingface-cli. Pick whichever is available.
+    if command -v hf >/dev/null 2>&1; then HF=hf; else HF=huggingface-cli; fi
+
     echo "  Option A — Official (requires HuggingFace account + accepted terms):"
     echo "    https://huggingface.co/facebook/sam3"
-    echo "    huggingface-cli download facebook/sam3 model.safetensors --local-dir $MODEL_DIR"
+    echo "    $HF download facebook/sam3 model.safetensors --local-dir $MODEL_DIR"
     echo ""
     echo "  Option B — Community mirror (no account needed, same weights):"
-    echo "    huggingface-cli download 1038lab/sam3 sam3.safetensors --local-dir $MODEL_DIR"
+    echo "    $HF download 1038lab/sam3 sam3.safetensors --local-dir $MODEL_DIR"
     echo "    mv $MODEL_DIR/sam3.safetensors $MODEL_DIR/model.safetensors"
     echo ""
-    read -rp "  Download via Option B now? [Y/n] " yn
-    yn="${yn:-Y}"
+    if $AUTO_YES; then
+        yn="Y"
+        echo "  Download via Option B now? [Y/n] Y  (auto-yes)"
+    else
+        read -rp "  Download via Option B now? [Y/n] " yn
+        yn="${yn:-Y}"
+    fi
     if [[ "$yn" =~ ^[Yy] ]]; then
         mkdir -p "$MODEL_DIR"
-        huggingface-cli download 1038lab/sam3 sam3.safetensors \
-            --local-dir "$MODEL_DIR" --local-dir-use-symlinks False
+        # --local-dir-use-symlinks was removed in huggingface_hub 1.0; only pass
+        # to old huggingface-cli.
+        if [[ "$HF" == "huggingface-cli" ]]; then
+            "$HF" download 1038lab/sam3 sam3.safetensors \
+                --local-dir "$MODEL_DIR" --local-dir-use-symlinks False
+        else
+            "$HF" download 1038lab/sam3 sam3.safetensors --local-dir "$MODEL_DIR"
+        fi
         mv "$MODEL_DIR/sam3.safetensors" "$MODEL_DIR/model.safetensors"
         info "Weights downloaded → $WEIGHT_FILE"
     else
@@ -226,9 +265,13 @@ ONNX_DIR="onnx_files"
 export HSA_OVERRIDE_GFX_VERSION=11.5.1
 export MIGRAPHX_GPU_HIP_FLAGS="-Wno-error -Wno-lifetime-safety-intra-tu-suggestions"
 export PYTORCH_ALLOC_CONF=expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:512
-export PYTHONPATH=/opt/rocm-7.2.0/lib
+export PYTHONPATH=/opt/rocm-7.2.0/lib${PYTHONPATH:+:$PYTHONPATH}
 
-if [[ -f "$ONNX_DIR/memory_attention_fixed_N7.onnx" ]]; then
+# Sentinel: BOTH the ONNX module AND the temporal_pe.npy must exist. Older
+# checkouts that ran the broken export (before temporal_pe.npy was added)
+# have memory_attention_fixed_N7.onnx but no temporal_pe.npy, and the tracker
+# refuses to start without it.
+if [[ -f "$ONNX_DIR/memory_attention_fixed_N7.onnx" && -f "$ONNX_DIR/temporal_pe.npy" ]]; then
     info "ONNX modules already exported ($ONNX_DIR/)"
 else
     echo "  Exporting ONNX tracking modules (${IMGSZ}px, ~5 min)..."
@@ -240,19 +283,42 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-step "7. Compile MIGraphX backbone (~3 min 504px / ~9 min 1008px)"
+step "7. Build MIGraphX backbone cache (~5 min 504px / ~12 min 1008px, one-time)"
 # ─────────────────────────────────────────────────────────────────────────────
 MXR_CACHE="$ONNX_DIR/backbone_mxr_tuned.mxr"
+SINGLE_FP32="$ONNX_DIR/backbone_single_fp32.onnx"
+SINGLE_SIMP="$ONNX_DIR/backbone_single_simplified.onnx"
 
 if [[ -f "$MXR_CACHE" ]]; then
     info "Backbone cache already present ($MXR_CACHE)"
 else
-    echo "  Compiling + autotuning backbone (runs once, then loads in ~3s)..."
-    python export/export_backbone_single.py \
-        --checkpoint "$MODEL_DIR" \
-        --imgsz "$IMGSZ" \
-        --output-dir "$ONNX_DIR"
-    info "Backbone compiled → $MXR_CACHE"
+    # 7a. Single-session export (~1 min)
+    if [[ -f "$SINGLE_FP32" || -f "$SINGLE_SIMP" ]]; then
+        info "Step 7a skipped — single-session ONNX already exists"
+    else
+        echo "  [7a/3] Exporting single-session backbone ONNX (~1 min)..."
+        python export/export_backbone_single.py \
+            --checkpoint "$MODEL_DIR" \
+            --imgsz "$IMGSZ" \
+            --output-dir "$ONNX_DIR"
+    fi
+
+    # 7b. onnxsim (~1 min)
+    if [[ -f "$SINGLE_SIMP" ]]; then
+        info "Step 7b skipped — simplified ONNX already exists"
+    else
+        echo "  [7b/3] Simplifying ONNX with onnxsim (~1 min)..."
+        python export/simplify_backbone.py \
+            --onnx-dir "$ONNX_DIR" \
+            --imgsz "$IMGSZ"
+    fi
+
+    # 7c. MIGraphX compile + autotune (the slow step)
+    echo "  [7c/3] Compiling + autotuning with MIGraphX (~3 min @504 / ~9 min @1008)..."
+    python export/compile_backbone_mxr.py \
+        --onnx-dir "$ONNX_DIR" \
+        --imgsz "$IMGSZ"
+    info "Backbone cache built → $MXR_CACHE"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -277,7 +343,7 @@ python demo.py \
     --onnx-dir "$ONNX_DIR" \
     --image assets/demo.jpg \
     --output /tmp/sam3_smoke_test.jpg \
-    --box 85,281,1710,850 \
+    --box 85,281,1710,850
 
 info "Smoke test passed → /tmp/sam3_smoke_test.jpg"
 
@@ -290,7 +356,7 @@ echo "  Activate and run:"
 echo "    conda activate $CONDA_ENV"
 echo "    export HSA_OVERRIDE_GFX_VERSION=11.5.1"
 echo "    export MIGRAPHX_GPU_HIP_FLAGS=\"-Wno-error -Wno-lifetime-safety-intra-tu-suggestions\""
-echo "    export PYTHONPATH=/opt/rocm-7.2.0/lib"
+echo "    export PYTHONPATH=/opt/rocm-7.2.0/lib\${PYTHONPATH:+:\$PYTHONPATH}"
 echo ""
 echo "    python demo.py --checkpoint $MODEL_DIR --onnx-dir $ONNX_DIR \\"
 echo "        --image YOUR_IMAGE.jpg --box x1,y1,x2,y2"

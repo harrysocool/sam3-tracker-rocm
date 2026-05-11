@@ -8,6 +8,7 @@
 
 transformers>=5.8.0
 onnx>=1.16
+onnx-simplifier>=0.4
 onnxconverter-common>=1.13
 opencv-python>=4.8
 numpy>=1.26,<2.0

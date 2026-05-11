@@ -41,8 +41,9 @@ def parse_args():
                    help="Single image input")
     p.add_argument("--video", type=Path, default=None,
                    help="Video file input")
-    p.add_argument("--output", type=Path, default=Path("tracked_output.mp4"),
-                   help="Output video path (for --video mode)")
+    p.add_argument("--output", type=Path, default=None,
+                   help="Output path. Image mode default: outputs/<image-stem>_tracked.jpg. "
+                        "Video mode default: outputs/tracked_output.mp4.")
     p.add_argument("--max-frames", type=int, default=0,
                    help="Max frames to process from video (0 = all)")
     p.add_argument("--backbone", type=str, default="auto",
@@ -87,7 +88,13 @@ def main():
         vis = overlay_mask(img, mask_orig)
         cv2.rectangle(vis, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), (0, 255, 255), 3)
 
-        out_path = args.image.with_name(args.image.stem + "_tracked.jpg")
+        # Default to outputs/ to avoid overwriting committed assets/docs/.
+        # Honor --output if user passes one explicitly.
+        if args.output is not None:
+            out_path = args.output
+        else:
+            out_path = Path("outputs") / f"{args.image.stem}_tracked.jpg"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(out_path), vis)
         print(f"Score: {score:.2f}  Mask: {mask.mean()*100:.1f}%  Latency: {elapsed:.0f}ms")
         print(f"Saved: {out_path}")
@@ -100,7 +107,10 @@ def main():
         sx, sy = args.imgsz / orig_w, args.imgsz / orig_h
         box_s = [box[0]*sx, box[1]*sy, box[2]*sx, box[3]*sy]
 
-        writer = cv2.VideoWriter(str(args.output),
+        # Default to outputs/ when --output not given (mirrors image-mode behavior).
+        out_path = args.output if args.output is not None else Path("outputs") / "tracked_output.mp4"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        writer = cv2.VideoWriter(str(out_path),
                                  cv2.VideoWriter_fourcc(*"mp4v"),
                                  fps_in, (orig_w, orig_h))
         fi = 0
@@ -125,7 +135,7 @@ def main():
             fi += 1
 
         cap.release(); writer.release()
-        print(f"\nSaved: {args.output}")
+        print(f"\nSaved: {out_path}")
         tracker.print_timings()
     else:
         print("Provide --image or --video")

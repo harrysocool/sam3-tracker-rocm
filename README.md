@@ -12,7 +12,6 @@ AMD Ryzen AI Max+ 395 with a DAVIS 2017 val Mean J of **81.5%** (504px).
 - [How it works](#how-it-works)
 - [Setup](#setup)
 - [Run the demo](#run-the-demo)
-- [Text-prompt tracking](#text-prompt-tracking)
 - [Results](#results)
 - [Performance](#performance)
 - [Evaluation](#evaluation)
@@ -94,12 +93,15 @@ Config and tokenizer files are already in this repo. Download `model.safetensors
 
 ```bash
 # Option A — Official (HuggingFace account + accepted terms required):
-huggingface-cli download facebook/sam3 model.safetensors --local-dir model/sam3
+hf download facebook/sam3 model.safetensors --local-dir model/sam3
 
 # Option B — Community mirror (no account needed):
-huggingface-cli download 1038lab/sam3 sam3.safetensors --local-dir model/sam3
+hf download 1038lab/sam3 sam3.safetensors --local-dir model/sam3
 mv model/sam3/sam3.safetensors model/sam3/model.safetensors
 ```
+
+> `hf` is the new CLI in `huggingface_hub ≥ 1.0` (installed via `requirements.txt`).
+> If you have an older hub, the legacy `huggingface-cli` works the same way.
 
 > For step-by-step manual install (APT, conda, pip, ONNX export, backbone compile)
 > see [`docs/manual_setup.md`](docs/manual_setup.md).
@@ -108,69 +110,71 @@ mv model/sam3/sam3.safetensors model/sam3/model.safetensors
 
 ## Run the demo
 
-The MIGraphX backbone needs `/opt/rocm-7.2.0/lib` on `PYTHONPATH` to find the
-patched MIGraphX 2.15 Python bindings (the PyTorch backbone does not):
+Two demo entry points — pick the one matching your prompt type:
+
+| Demo | Prompt | Backbone | Latency @504px | Use for |
+|---|---|---|---|---|
+| `demo.py`      | bounding box  | MIGraphX (fastest)        | ~115 ms (8.21 FPS) | known target, real-time |
+| `demo_text.py` | text          | PyTorch (CLIP detector)   | ~2 s init + slow propagation | open-vocabulary, prototyping |
+
+All commands assume you ran `./setup.sh` and are in the project root. The MIGraphX
+backbone requires `/opt/rocm-7.2.0/lib` on `PYTHONPATH`; PyTorch path doesn't:
+```bash
+export PYTHONPATH=/opt/rocm-7.2.0/lib${PYTHONPATH:+:$PYTHONPATH}
+```
+
+### Box-prompt (`demo.py`) — fastest
 
 ```bash
-export PYTHONPATH=/opt/rocm-7.2.0/lib:$PYTHONPATH
+# Image — MIGraphX backbone (default, ~115 ms / frame)
+python demo.py --checkpoint model/sam3 --onnx-dir onnx_files \
+    --image assets/demo.jpg --box 85,281,1710,850
 
-# MIGraphX backbone (default, fastest)
-python demo.py \
-    --checkpoint model/sam3 \
-    --onnx-dir onnx_files \
-    --backbone migraphx \
-    --image assets/demo.jpg \
-    --box 85,281,1710,850
-
-# PyTorch backbone (fallback if .mxr not yet compiled — no PYTHONPATH needed)
-python demo.py \
-    --checkpoint model/sam3 \
-    --onnx-dir onnx_files \
+# Image — PyTorch backbone fallback (no MIGraphX needed)
+python demo.py --checkpoint model/sam3 --onnx-dir onnx_files \
     --backbone pytorch \
-    --image assets/demo.jpg \
-    --box 85,281,1710,850
+    --image assets/demo.jpg --box 85,281,1710,850
+
+# Video (any mp4) — same FPS as image, written to outputs/<stem>_tracked.mp4
+# (assets/demo.mp4 is 854x480; box catches the swan in frame 0)
+python demo.py --checkpoint model/sam3 --onnx-dir onnx_files \
+    --video assets/demo.mp4 --box 320,170,650,400
 ```
 
----
-
-## Text-prompt tracking
-
-In addition to bounding-box prompts, SAM3 supports **open-vocabulary text prompts** —
-describe the object in plain language and the model finds and tracks it. Frame 0 is
-detected by `Sam3VideoModel` (PyTorch backbone + CLIP text encoder); all subsequent
-frames run the same MIGraphX pipeline as box-prompt tracking (8.21 FPS @ 504px).
-
-Text prompts are open-vocabulary short noun phrases. Examples that work well:
-`"swan"`, `"bicycle"`, `"person on a bike"`. Negative (absent) concepts correctly
-return zero detections.
-
-### Requirements
-
-Text-prompt tracking requires **PyTorch ROCm** and **HuggingFace Transformers ≥ 5.7.0**
-with `Sam3VideoModel` support:
+### Text-prompt (`demo_text.py`) — open-vocabulary
 
 ```bash
-pip install "transformers>=5.8.0"
+# Image — text → CLIP detection → mask
+python demo_text.py --checkpoint model/sam3 \
+    --image assets/demo.jpg --text "truck"
+
+# Video — text init on frame 0, then PyTorch tracker propagates
+python demo_text.py --checkpoint model/sam3 \
+    --video assets/demo.mp4 --text "swan" --max-frames 60
 ```
 
-If `Sam3VideoModel` is not yet in your installed transformers version, add the
-[DART transformers fork](https://arxiv.org/abs/2603.11441) to your Python path:
-```bash
-# Clone the DART repo, then:
-export PYTHONPATH=/path/to/DART/.local_deps:$PYTHONPATH
-```
+Outputs default to `outputs/<input-stem>_{tracked,text}.{jpg,mp4}` (overridable
+with `--output`). Try short noun phrases: `"swan"`, `"a person on a bike"`,
+`"yellow taxi"`.
 
-See [`eval/probe_text_prompt.py`](eval/probe_text_prompt.py) for a complete runnable
-example (text prompt → detection → mask, with visualisation).
+### Quick checks (no dataset needed)
 
-### Performance
+After `setup.sh`, four small scripts smoke-test specific aspects of the pipeline
+using only `assets/demo.jpg`:
 
-| Step | Latency | Note |
+| Script | What it checks | Time |
 |---|---|---|
-| Text detection (frame 0, warm) | ~1.6 s | PyTorch backbone + CLIP + DETR head |
-| Propagation (frames 1+) | ~115 ms → **8.21 FPS** | Same MIGraphX pipeline as box-prompt |
+| `eval/bench_pipeline.py`        | Per-module latency + total FPS — does your machine match the headline 8.21 FPS? | ~30 s |
+| `eval/probe_text_prompt.py`     | Text-prompt detection works (PyTorch path)             | ~10 s |
+| `eval/probe_text_prompt_mxr.py` | Text-prompt with MIGraphX backbone                     | ~15 s |
+| `eval/profile_text_prompt.py`   | Per-stage latency of text-prompt path                  | ~30 s |
 
-The detection step runs once per video.
+```bash
+python eval/bench_pipeline.py        --checkpoint model/sam3 --onnx-dir onnx_files
+python eval/probe_text_prompt.py     --checkpoint model/sam3 --image assets/demo.jpg --text "truck"
+python eval/probe_text_prompt_mxr.py --checkpoint model/sam3 --onnx-dir onnx_files --image assets/demo.jpg --text "truck"
+python eval/profile_text_prompt.py   --checkpoint model/sam3 --image assets/demo.jpg --text "truck"
+```
 
 ---
 
@@ -180,13 +184,13 @@ The detection step runs once per video.
 
 | truck (demo) | drift-straight (J = 95.2%) | parkour (J = 92.2%) |
 |:---:|:---:|:---:|
-| <img src="assets/demo_tracked.jpg" width="320" alt="truck"> | <img src="assets/demo_drift-straight.jpg" width="320" alt="drift-straight"> | <img src="assets/demo_parkour.jpg" width="320" alt="parkour"> |
+| <img src="docs/images/demo_tracked.jpg" width="320" alt="truck"> | <img src="docs/images/demo_drift-straight.jpg" width="320" alt="drift-straight"> | <img src="docs/images/demo_parkour.jpg" width="320" alt="parkour"> |
 
 ### Video tracking (DAVIS 2017 val, 504px)
 
 | blackswan  (J = 93.0%) | dog  (J = 94.7%) | camel  (J = 96.0%) |
 |:---:|:---:|:---:|
-| <img src="assets/demo_blackswan.gif" width="320" alt="blackswan"> | <img src="assets/demo_dog.gif" width="320" alt="dog"> | <img src="assets/demo_camel.gif" width="320" alt="camel"> |
+| <img src="docs/images/demo_blackswan.gif" width="320" alt="blackswan"> | <img src="docs/images/demo_dog.gif" width="320" alt="dog"> | <img src="docs/images/demo_camel.gif" width="320" alt="camel"> |
 
 ---
 
@@ -304,12 +308,16 @@ sam3-tracker-rocm/
 ├── analysis/           # optimization deep-dives (markdown)
 ├── tools/              # patched MIGraphX install helper
 ├── docs/               # setup guide, technical report
+│   └── images/         # README/doc visuals (committed)
 ├── model/sam3/         # config + tokenizer (weights downloaded separately)
+├── assets/             # source inputs for demos: demo.jpg, demo.mp4
 ├── onnx_files/         # generated, gitignored — 504px ONNX modules
 ├── onnx_files_1008/    # generated, gitignored — 1008px ONNX modules
+├── outputs/            # demo / probe outputs (gitignored, auto-created)
 ├── results/            # eval outputs (json, plots)
 ├── dataset/            # downloaded datasets (DAVIS, saco_sg)
-├── demo.py             # ← entry point: single image / video demo
+├── demo.py             # ← entry point: box-prompt image / video demo
+├── demo_text.py        # ← entry point: text-prompt image / video demo
 ├── setup.sh            # ← entry point: one-command setup
 └── environment.yml
 ```
@@ -328,6 +336,20 @@ sam3-tracker-rocm/
 - **MIGraphX 2.15+patches required**: the stock MIGraphX 2.15.0 from the ROCm 7.2
   APT package produces ~916ms for the HF backbone (6.6× slower) due to a fusion
   limitation in `find_splits`. See [`analysis/migraphx_backbone_investigation.md`](analysis/migraphx_backbone_investigation.md) for details.
+- **Text-prompt path is PyTorch-only** (no MIGraphX acceleration yet). `demo_text.py`
+  runs the entire pipeline on PyTorch, so propagation drops from box-prompt's
+  8.21 FPS to ~0.5 FPS. Bringing text-prompt up to box-prompt FPS requires
+  MIGraphX-izing the detector module — concretely:
+    1. Re-export the backbone with `last_hidden_state` (the detector needs the
+       1024-d ViT features, not just the 256-d FPN).
+    2. Wire the CLIP text encoder + DETR head into a hybrid path
+       (PyTorch on frame 0, MIGraphX after).
+    3. Port `Sam3VideoModel`'s NMS + presence gating to the OnnxTracker side.
+    4. Resolve the torch ROCm 7.13 nightly vs patched MIGraphX 7.2 library
+       conflict (LD_PRELOAD workaround already documented in memory).
+
+  Estimated 2–3 days of work. Until then, treat `demo_text.py` as a prototyping
+  / open-vocabulary tool, not a real-time path.
 
 ---
 
