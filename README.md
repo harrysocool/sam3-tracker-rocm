@@ -12,7 +12,6 @@ AMD Ryzen AI Max+ 395 with a DAVIS 2017 val Mean J of **81.5%** (504px).
 - [How it works](#how-it-works)
 - [Setup](#setup)
 - [Run the demo](#run-the-demo)
-- [Text-prompt tracking](#text-prompt-tracking)
 - [Results](#results)
 - [Performance](#performance)
 - [Evaluation](#evaluation)
@@ -94,12 +93,15 @@ Config and tokenizer files are already in this repo. Download `model.safetensors
 
 ```bash
 # Option A — Official (HuggingFace account + accepted terms required):
-huggingface-cli download facebook/sam3 model.safetensors --local-dir model/sam3
+hf download facebook/sam3 model.safetensors --local-dir model/sam3
 
 # Option B — Community mirror (no account needed):
-huggingface-cli download 1038lab/sam3 sam3.safetensors --local-dir model/sam3
+hf download 1038lab/sam3 sam3.safetensors --local-dir model/sam3
 mv model/sam3/sam3.safetensors model/sam3/model.safetensors
 ```
+
+> `hf` is the new CLI in `huggingface_hub ≥ 1.0` (installed via `requirements.txt`).
+> If you have an older hub, the legacy `huggingface-cli` works the same way.
 
 > For step-by-step manual install (APT, conda, pip, ONNX export, backbone compile)
 > see [`docs/manual_setup.md`](docs/manual_setup.md).
@@ -134,8 +136,9 @@ python demo.py --checkpoint model/sam3 --onnx-dir onnx_files \
     --image assets/demo.jpg --box 85,281,1710,850
 
 # Video (any mp4) — same FPS as image, written to outputs/<stem>_tracked.mp4
+# (assets/demo.mp4 is 854x480; box catches the swan in frame 0)
 python demo.py --checkpoint model/sam3 --onnx-dir onnx_files \
-    --video assets/demo.mp4 --box <x1,y1,x2,y2>
+    --video assets/demo.mp4 --box 320,170,650,400
 ```
 
 ### Text-prompt (`demo_text.py`) — open-vocabulary
@@ -172,47 +175,6 @@ python eval/probe_text_prompt.py     --checkpoint model/sam3 --image assets/demo
 python eval/probe_text_prompt_mxr.py --checkpoint model/sam3 --onnx-dir onnx_files --image assets/demo.jpg --text "truck"
 python eval/profile_text_prompt.py   --checkpoint model/sam3 --image assets/demo.jpg --text "truck"
 ```
-
----
-
-## Text-prompt tracking
-
-In addition to bounding-box prompts, SAM3 supports **open-vocabulary text prompts** —
-describe the object in plain language and the model finds and tracks it. Frame 0 is
-detected by `Sam3VideoModel` (PyTorch backbone + CLIP text encoder); all subsequent
-frames run the same MIGraphX pipeline as box-prompt tracking (8.21 FPS @ 504px).
-
-Text prompts are open-vocabulary short noun phrases. Examples that work well:
-`"swan"`, `"bicycle"`, `"person on a bike"`. Negative (absent) concepts correctly
-return zero detections.
-
-### Requirements
-
-Text-prompt tracking requires **PyTorch ROCm** and **HuggingFace Transformers ≥ 5.7.0**
-with `Sam3VideoModel` support:
-
-```bash
-pip install "transformers>=5.8.0"
-```
-
-If `Sam3VideoModel` is not yet in your installed transformers version, add the
-[DART transformers fork](https://arxiv.org/abs/2603.11441) to your Python path:
-```bash
-# Clone the DART repo, then:
-export PYTHONPATH=/path/to/DART/.local_deps:$PYTHONPATH
-```
-
-See [`eval/probe_text_prompt.py`](eval/probe_text_prompt.py) for a complete runnable
-example (text prompt → detection → mask, with visualisation).
-
-### Performance
-
-| Step | Latency | Note |
-|---|---|---|
-| Text detection (frame 0, warm) | ~1.6 s | PyTorch backbone + CLIP + DETR head |
-| Propagation (frames 1+) | ~115 ms → **8.21 FPS** | Same MIGraphX pipeline as box-prompt |
-
-The detection step runs once per video.
 
 ---
 
