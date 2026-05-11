@@ -32,7 +32,8 @@ backup_if_missing() {
     fi
 }
 backup_if_missing "$ROCM/lib/libmigraphx_c.so.3.0.70200"
-for lib in libmigraphx libmigraphx_gpu libmigraphx_device libmigraphx_onnx libmigraphx_tf; do
+# libmigraphx_cpu is new in 2.16+ (no stock 2.15 file to back up).
+for lib in libmigraphx libmigraphx_gpu libmigraphx_device libmigraphx_onnx libmigraphx_tf libmigraphx_ref; do
     backup_if_missing "$ROCM/lib/migraphx/lib/${lib}.so.2015000.0.70200"
 done
 
@@ -43,18 +44,36 @@ ln -sf libmigraphx_c.so.3.0.2016000 "$ROCM/lib/libmigraphx_c.so.3.0.70200"
 
 echo
 echo "=== Installing patched internal libs to $ROCM/lib/migraphx/lib ==="
-for lib in libmigraphx libmigraphx_gpu libmigraphx_device libmigraphx_onnx libmigraphx_tf; do
+# libmigraphx_ref and libmigraphx_cpu are required by the Python binding's
+# DT_NEEDED — `import migraphx` fails immediately without them.
+for lib in libmigraphx libmigraphx_gpu libmigraphx_device libmigraphx_onnx libmigraphx_tf libmigraphx_ref libmigraphx_cpu; do
     src="$BUILD/lib/${lib}.so.2016000.0"
     if [[ -f "$src" ]]; then
         cp "$src" "$ROCM/lib/migraphx/lib/"
-        # Re-point the .2015000 symlinks the system loader uses
-        (cd "$ROCM/lib/migraphx/lib" && \
-            ln -sf "${lib}.so.2016000.0" "${lib}.so.2015000.0.70200")
+        # Re-point the stock-version symlink only if there was a stock backup
+        # (skip for libmigraphx_cpu which is new in 2.16+).
+        if [[ -e "$ROCM/lib/migraphx/lib/${lib}.so.2015000.0.70200.bak" ]]; then
+            (cd "$ROCM/lib/migraphx/lib" && \
+                ln -sf "${lib}.so.2016000.0" "${lib}.so.2015000.0.70200")
+        fi
         echo "  installed: ${lib}.so.2016000.0"
     else
         echo "  WARNING: $src not found, skipping"
     fi
 done
+
+echo
+echo "=== Registering migraphx lib path with dynamic linker ==="
+# /opt/rocm-7.2.0/lib/migraphx/lib/ is not on the default ld search path.
+# Without this, libmigraphx_tf.so.2016000 (and friends) cannot be located
+# at runtime — the Python binding fails with ImportError.
+LD_CONF="/etc/ld.so.conf.d/rocm-migraphx-2016.conf"
+if [[ ! -f "$LD_CONF" ]] || ! grep -q "$ROCM/lib/migraphx/lib" "$LD_CONF"; then
+    echo "$ROCM/lib/migraphx/lib" > "$LD_CONF"
+    echo "  wrote: $LD_CONF"
+else
+    echo "  $LD_CONF already includes $ROCM/lib/migraphx/lib"
+fi
 
 echo
 echo "=== Installing Python 3.12 binding ==="
