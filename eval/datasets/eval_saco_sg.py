@@ -69,7 +69,7 @@ def main():
     if args.onnx_dir is None:
         args.onnx_dir = WORKSPACE_ROOT / (f"onnx_files_{args.imgsz}")
     if args.out is None:
-        args.out = WORKSPACE_ROOT / f"results/tracker_demo/baseline_50seq_{args.imgsz}px.json"
+        args.out = WORKSPACE_ROOT / f"results/eval/saco_sg/baseline_50seq_{args.imgsz}px.json"
 
     with open(args.gt_json) as f:
         gt = json.load(f)

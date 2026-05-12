@@ -9,13 +9,13 @@ Usage:
         --img-root dataset/saco_sg/JPEGImages_6fps \
         --onnx-dir onnx_files \
         --imgsz 504 \
-        --out results/saco_sg_val_504px_preds.json
+        --out results/eval/saco_sg/saco_sg_val_504px_preds.json
 
 Then run official eval:
     python3 /home/amd/project/sam3-repo-sparse/sam3/eval/saco_veval_eval.py one \
         --gt_annot_file dataset/gt-annotations/saco_veval_smartglasses_val.json \
-        --pred_file results/saco_sg_val_504px_preds.json \
-        --eval_res_file results/saco_sg_val_504px_eval_res.json
+        --pred_file results/eval/saco_sg/saco_sg_val_504px_preds.json \
+        --eval_res_file results/eval/saco_sg/saco_sg_val_504px_eval_res.json
 """
 from __future__ import annotations
 
@@ -82,7 +82,7 @@ def main():
     if args.onnx_dir is None:
         args.onnx_dir = WORKSPACE / (f"onnx_files_{args.imgsz}")
     if args.out is None:
-        args.out = WORKSPACE / f"results/saco_sg_val_{args.imgsz}px_preds.json"
+        args.out = WORKSPACE / f"results/eval/saco_sg/saco_sg_val_{args.imgsz}px_preds.json"
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     checkpoint_path = args.out.with_suffix(".partial.json")

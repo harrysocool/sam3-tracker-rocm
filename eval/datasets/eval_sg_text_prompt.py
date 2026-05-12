@@ -52,7 +52,7 @@ def main():
     ap.add_argument("--max-frames", type=int, default=0,
                     help="Max frames per annotation (0=all, recommend 20 for quick test)")
     ap.add_argument("--out", type=Path,
-                    default=WORKSPACE/"results/saco_sg_30seq_textprompt_preds.json")
+                    default=WORKSPACE/"results/eval/saco_sg/saco_sg_30seq_textprompt_preds.json")
     args = ap.parse_args()
 
     args.out.parent.mkdir(parents=True, exist_ok=True)

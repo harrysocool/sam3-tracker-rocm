@@ -72,7 +72,7 @@ def main():
     if args.onnx_dir is None:
         args.onnx_dir = WORKSPACE_ROOT / f"onnx_files_{args.imgsz}"
     if args.out is None:
-        args.out = WORKSPACE_ROOT / f"results/tracker_demo/davis_{args.split}_{args.imgsz}px.json"
+        args.out = WORKSPACE_ROOT / f"results/eval/davis/davis_{args.split}_{args.imgsz}px.json"
 
     img_dir  = args.davis / "JPEGImages" / "480p"
     ann_dir  = args.davis / "Annotations" / "480p"

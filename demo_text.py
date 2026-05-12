@@ -23,7 +23,7 @@ Usage:
       --text "swan" \\
       --max-frames 60
 
-Output goes to outputs/<input-stem>_text.{jpg,mp4} unless --output is given.
+Output goes to outputs/text/<input-stem>_text.{jpg,mp4} unless --output is given.
 """
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ def parse_args():
     p.add_argument("--video", type=Path, default=None,
                    help="Video input — any mp4 readable by OpenCV")
     p.add_argument("--output", type=Path, default=None,
-                   help="Output path. Default: outputs/<input-stem>_text.{jpg,mp4}")
+                   help="Output path. Default: outputs/text/<input-stem>_text.{jpg,mp4}")
     p.add_argument("--max-frames", type=int, default=120,
                    help="Cap video frames loaded into the session (default 120)")
     p.add_argument("--dtype", choices=["fp16", "fp32"], default="fp16")
@@ -196,9 +196,9 @@ def main():
     if args.output is not None:
         out_path = args.output
     elif args.image is not None:
-        out_path = Path("outputs") / f"{args.image.stem}_text.jpg"
+        out_path = Path("outputs/text") / f"{args.image.stem}_text.jpg"
     else:
-        out_path = Path("outputs") / f"{args.video.stem}_text.mp4"
+        out_path = Path("outputs/text") / f"{args.video.stem}_text.mp4"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Single image — done
