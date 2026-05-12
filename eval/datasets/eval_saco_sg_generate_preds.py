@@ -20,6 +20,9 @@ Then run official eval:
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
+
+_TS = datetime.now().strftime("%Y%m%d_%H%M%S")  # one stamp per run; passed in default --out names
 import json
 import os
 import sys
@@ -82,7 +85,7 @@ def main():
     if args.onnx_dir is None:
         args.onnx_dir = WORKSPACE / (f"onnx_files_{args.imgsz}")
     if args.out is None:
-        args.out = WORKSPACE / f"results/eval/saco_sg/saco_sg_val_{args.imgsz}px_preds.json"
+        args.out = WORKSPACE / f"results/eval/saco_sg/saco_sg_val_{args.imgsz}px_preds_{_TS}.json"
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     checkpoint_path = args.out.with_suffix(".partial.json")

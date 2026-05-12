@@ -15,6 +15,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
+
+_TS = datetime.now().strftime("%Y%m%d_%H%M%S")  # one stamp per run; passed in default --out names
 import json
 import os
 import sys
@@ -72,7 +75,7 @@ def main():
     if args.onnx_dir is None:
         args.onnx_dir = WORKSPACE_ROOT / f"onnx_files_{args.imgsz}"
     if args.out is None:
-        args.out = WORKSPACE_ROOT / f"results/eval/davis/davis_{args.split}_{args.imgsz}px.json"
+        args.out = WORKSPACE_ROOT / f"results/eval/davis/davis_{args.split}_{args.imgsz}px_{_TS}.json"
 
     img_dir  = args.davis / "JPEGImages" / "480p"
     ann_dir  = args.davis / "Annotations" / "480p"

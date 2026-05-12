@@ -10,6 +10,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
+
+_TS = datetime.now().strftime("%Y%m%d_%H%M%S")  # one stamp per run; passed in default --out names
 import json
 import os
 import random
@@ -69,7 +72,7 @@ def main():
     if args.onnx_dir is None:
         args.onnx_dir = WORKSPACE_ROOT / (f"onnx_files_{args.imgsz}")
     if args.out is None:
-        args.out = WORKSPACE_ROOT / f"results/eval/saco_sg/baseline_50seq_{args.imgsz}px.json"
+        args.out = WORKSPACE_ROOT / f"results/eval/saco_sg/baseline_50seq_{args.imgsz}px_{_TS}.json"
 
     with open(args.gt_json) as f:
         gt = json.load(f)
