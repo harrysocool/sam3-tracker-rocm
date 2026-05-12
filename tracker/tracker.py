@@ -111,9 +111,10 @@ class MIGraphXBackbone:
     Uses backbone_single_simplified.onnx with kernel autotuning baked into
     the .mxr cache file; first-time compilation takes ~3 minutes.
 
-    Outputs: (fpn_0, fpn_1, fpn_2, None) as float32 numpy arrays.
-    pos_2 is None because the ONNX does not export position encodings;
-    SAM3OnnxTracker.propagate_frame() uses zeros when pos_2 is None.
+    Outputs: (fpn_0, fpn_1, fpn_2, fpn_3_or_None) as float32 numpy arrays.
+    fpn_3 (smallest, scale=0.5) is needed by the SAM3 detector path
+    (text-prompt). Returns None for the 4th slot when running an older
+    3-output backbone .mxr — the box-prompt tracker doesn't read it either way.
     """
 
     def __init__(self, onnx_path: str | Path, cache_path: str | Path) -> None:
@@ -167,7 +168,18 @@ class MIGraphXBackbone:
             self._prog.run({"pixel_values": _arg})
 
     def __call__(self, img_np: np.ndarray):
-        """img_np: (1, 3, H, W) float32  →  (fpn_0, fpn_1, fpn_2, pos_2=None)"""
+        """img_np: (1, 3, H, W) float32  →  tuple of all backbone outputs.
+
+        Length depends on which `.mxr` was loaded:
+          3 outputs: legacy box-prompt tracker (fpn_0, fpn_1, fpn_2)
+          4 outputs: detector-compatible backbone with fpn_3 (scale=0.5)
+          5 outputs: detector backbone + last_hidden_state (Sam3VideoModel pipeline)
+
+        For backward compat with callers that hardcode 4-tuple unpacking, the
+        return is right-padded with None to at least length 4. Callers that
+        need last_hidden_state should index `outputs[4]` directly and check
+        for None.
+        """
         # Keep explicit references to prevent GC of data/argument before GPU finishes.
         img_cont = np.ascontiguousarray(img_np)
         arg      = self._mxr.argument(img_cont)
@@ -176,13 +188,15 @@ class MIGraphXBackbone:
         # backbone outputs are already C-contiguous (contiguous_kernel runs on GPU).
         # Without the patch, outputs are NHWC non-contiguous and np.ascontiguousarray
         # is needed (10ms at 504px, 94ms at 1008px CPU overhead).
-        fpn0, fpn1, fpn2 = np.array(outputs[0]), np.array(outputs[1]), np.array(outputs[2])
-        if not fpn0.flags.c_contiguous:
+        out_arrs = [np.array(o) for o in outputs]
+        if out_arrs and not out_arrs[0].flags.c_contiguous:
             # Fallback: MIGraphX patch not applied, convert on CPU
-            fpn0 = np.ascontiguousarray(fpn0)
-            fpn1 = np.ascontiguousarray(fpn1)
-            fpn2 = np.ascontiguousarray(fpn2)
-        return fpn0, fpn1, fpn2, None
+            out_arrs = [np.ascontiguousarray(a) for a in out_arrs]
+        # Right-pad with None so callers expecting at least 4 entries (older
+        # MIGraphXBackbone API) keep working.
+        while len(out_arrs) < 4:
+            out_arrs.append(None)
+        return tuple(out_arrs)
 
 
 # ---------------------------------------------------------------------------

@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
-Stage 3 integration probe: SAM3 text→mask using our MIGraphX backbone in
-place of the PyTorch ViT backbone.
+Stage A integration probe: SAM3 text→mask using our MIGraphX backbone in
+place of the PyTorch ViT backbone, with the official `Sam3VideoModel.run_detection`
+postproc (presence-aware scores + mask-IoU NMS) ported to host code.
 
-Approach: bypass Sam3VideoModel (which needs `last_hidden_state` for its
-tracker_neck — not exported by our current MIGraphX .mxr) and call
-`Sam3Model.forward(vision_embeds=..., text_embeds=...)` directly. That's the
-official single-image `text -> mask` entry point and is sufficient to
-demonstrate the backbone speedup and mask quality.
+Bypasses `Sam3VideoModel` and calls `Sam3Model.forward` directly. That's the
+official single-image text→mask entry point and is sufficient to validate the
+backbone speedup *and* mask quality (vs. the PyTorch reference path).
 
-Side-by-side timing vs. the pure-PyTorch path (probe_text_prompt.py).
+Outputs:
+  - <output-stem>_pt.jpg    PyTorch backbone + detector + new postproc
+  - <output-stem>_mxr.jpg   MIGraphX backbone + detector + new postproc
+  - Per-detection IoU between the two paths (numerical equivalence check)
 
 Requires:
     PYTHONPATH=/home/amd/project/sam3/repo/DART/.local_deps:<sam3-tracker-rocm>
@@ -31,6 +33,12 @@ from transformers import AutoProcessor, Sam3VideoModel
 from transformers.models.sam3.modeling_sam3 import Sam3VisionEncoderOutput
 
 from tracker.tracker import MIGraphXBackbone
+from tracker.text_detector_postproc import (
+    Detection,
+    bbox_from_mask,
+    mask_logits_to_image,
+    postprocess_detector_outputs,
+)
 
 
 def build_mxr_vision_features(
@@ -41,51 +49,80 @@ def build_mxr_vision_features(
     """Run our MIGraphX backbone and wrap output in Sam3VisionEncoderOutput.
 
     pixel_values: (1, 3, H, W) torch fp16/fp32 on cuda
-    Returns Sam3VisionEncoderOutput with 4-level FPN (4th is dummy — Sam3Model
-    discards it via `[:-1]`).
+    Returns Sam3VisionEncoderOutput with all 4 FPN levels. If the backbone is
+    an older 3-output build, fpn_3 falls back to zeros (detector path will
+    misbehave — re-run export/export_backbone_single.py to fix).
     """
     device = pixel_values.device
     dtype = pixel_values.dtype
 
-    # MIGraphX wants float32 numpy on CPU
     np_in = pixel_values.detach().float().cpu().numpy().astype(np.float32, copy=False)
-    fpn0, fpn1, fpn2, _ = mxr_backbone(np_in)
-    # back to torch on cuda matching the model dtype
+    fpn0, fpn1, fpn2, fpn3 = mxr_backbone(np_in)
+
     fpn = [
         torch.from_numpy(np.ascontiguousarray(t)).to(device=device, dtype=dtype)
         for t in (fpn0, fpn1, fpn2)
     ]
 
+    if fpn3 is None:
+        # Backward compat: older 3-output backbone. Detector will produce garbage.
+        h4, w4 = fpn[2].shape[2] // 2, fpn[2].shape[3] // 2
+        fpn.append(torch.zeros(1, 256, h4, w4, device=device, dtype=dtype))
+    else:
+        fpn.append(torch.from_numpy(np.ascontiguousarray(fpn3)).to(device=device, dtype=dtype))
+
     pe = [pos_enc_module(f.shape, f.device, f.dtype) for f in fpn]
 
-    # Dummy 4th level — Sam3Model.forward slices [:-1] so values don't matter,
-    # but the tuple must have the expected length
-    h4, w4 = fpn[2].shape[2] // 2, fpn[2].shape[3] // 2
-    dummy = torch.zeros(1, 256, h4, w4, device=device, dtype=dtype)
-    dummy_pe = pos_enc_module(dummy.shape, device, dtype)
-
     return Sam3VisionEncoderOutput(
-        fpn_hidden_states=tuple(fpn) + (dummy,),
-        fpn_position_encoding=tuple(pe) + (dummy_pe,),
+        fpn_hidden_states=tuple(fpn),
+        fpn_position_encoding=tuple(pe),
     )
 
 
-def detector_inference(
-    detector_model,
-    vision_embeds: Sam3VisionEncoderOutput,
-    input_ids: torch.Tensor,
-    attention_mask: torch.Tensor,
-    score_threshold: float = 0.5,
-) -> tuple[list[np.ndarray], list[float]]:
-    """Run text→mask via Sam3Model.forward, return masks above score threshold."""
-    with torch.inference_mode():
-        out = detector_model(
-            vision_embeds=vision_embeds,
-            input_ids=input_ids,
-            attention_mask=attention_mask,
+def overlay_detections(
+    img_bgr: np.ndarray,
+    detections: list[Detection],
+    text: str,
+    label: str,
+) -> np.ndarray:
+    """Draw masks + scores + bboxes on a copy of img_bgr."""
+    H, W = img_bgr.shape[:2]
+    vis = img_bgr.copy()
+    palette = [(0, 200, 80), (200, 80, 0), (80, 0, 200), (200, 200, 0), (0, 200, 200)]
+
+    for i, det in enumerate(detections):
+        mask = mask_logits_to_image(det.mask_logits, (H, W))
+        bbox = bbox_from_mask(mask)
+        color = palette[i % len(palette)]
+
+        layer = np.zeros_like(vis)
+        layer[mask] = color
+        vis = cv2.addWeighted(vis, 0.55, layer, 0.45, 0)
+
+        contours, _ = cv2.findContours(
+            mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
-    # out has pred_masks, pred_boxes, pred_scores (or similar — print first time to confirm)
-    return out
+        cv2.drawContours(vis, contours, -1, color, 2)
+
+        if bbox is not None:
+            x1, y1, x2, y2 = bbox
+            cv2.rectangle(vis, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(
+                vis, f"#{i} {det.score:.2f}", (x1, max(y1 - 6, 16)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2,
+            )
+
+    cv2.putText(
+        vis, f"{label}  text='{text}'  N={len(detections)}",
+        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (0, 255, 255), 2,
+    )
+    return vis
+
+
+def mask_iou_pair(a: np.ndarray, b: np.ndarray) -> float:
+    inter = np.logical_and(a, b).sum()
+    union = np.logical_or(a, b).sum()
+    return float(inter) / float(union) if union > 0 else 0.0
 
 
 def main():
@@ -95,19 +132,25 @@ def main():
     ap.add_argument("--onnx-dir", type=Path,
                     default=Path("onnx_files_1008"),
                     help="Dir with backbone_mxr_tuned.mxr at SAM3 default 1008px")
+    ap.add_argument("--mxr-name", type=str, default="backbone_mxr_tuned.mxr",
+                    help="Filename of the .mxr cache inside --onnx-dir")
     ap.add_argument("--image", type=Path, required=True)
     ap.add_argument("--text", type=str, required=True)
-    ap.add_argument("--output", type=Path, default=Path("text_probe_mxr_out.jpg"))
+    ap.add_argument("--output-stem", type=Path, default=Path("outputs/text_probe"))
     ap.add_argument("--score-threshold", type=float, default=0.5)
+    ap.add_argument("--nms-iou", type=float, default=0.1,
+                    help="Mask-IoU threshold for NMS (0 to disable)")
     ap.add_argument("--warmup", type=int, default=3)
     ap.add_argument("--iters", type=int, default=5)
     args = ap.parse_args()
+
+    args.output_stem.parent.mkdir(parents=True, exist_ok=True)
 
     device = torch.device("cuda")
     dtype = torch.float16
     print(f"Device: {device}, dtype: {dtype}\n")
 
-    # 1. Load SAM3 + processor (we'll use detector_model + tokenizer)
+    # 1. Load SAM3 + processor
     print("[1/5] Loading Sam3VideoModel ...")
     t = time.perf_counter()
     processor = AutoProcessor.from_pretrained(str(args.checkpoint))
@@ -119,15 +162,15 @@ def main():
     print(f"      took {time.perf_counter() - t:.1f}s\n")
 
     # 2. Load MIGraphX backbone
-    print(f"[2/5] Loading MIGraphX backbone from {args.onnx_dir} ...")
+    print(f"[2/5] Loading MIGraphX backbone from {args.onnx_dir / args.mxr_name} ...")
     mxr = MIGraphXBackbone(
         onnx_path=args.onnx_dir / "backbone_single_simplified.onnx",
-        cache_path=args.onnx_dir / "backbone_mxr_tuned.mxr",
+        cache_path=args.onnx_dir / args.mxr_name,
     )
     mxr.warmup(n=3)
     print()
 
-    # 3. Preprocess via SAM3 processor (gives us pixel_values at the right size + normalization)
+    # 3. Preprocess
     img_pil = Image.open(args.image).convert("RGB")
     img_bgr = cv2.imread(str(args.image))
     H, W = img_pil.height, img_pil.width
@@ -136,16 +179,15 @@ def main():
     session = processor.init_video_session(video=[img_pil], inference_device=device, dtype=dtype)
     pixel_values = session.get_frame(0).unsqueeze(0)  # (1, 3, 1008, 1008) fp16
 
-    # Tokenize text
     text_inputs = processor.tokenizer(
         args.text, return_tensors="pt", padding="max_length", max_length=32,
     ).to(device)
 
-    # 4. Time both paths side-by-side
+    # 4. Time both paths
     print(f"[4/5] Timing (warmup={args.warmup}, iters={args.iters}):")
 
-    # Path A: pure PyTorch (vision_encoder + detector head)
     pt_times = []
+    out_pt = None
     for i in range(args.warmup + args.iters):
         torch.cuda.synchronize(); t = time.perf_counter()
         with torch.inference_mode():
@@ -160,8 +202,8 @@ def main():
     pt_mean = statistics.mean(pt_times[args.warmup:]) * 1000
     print(f"      PyTorch backbone + detector: {pt_mean:.1f} ms (mean of {args.iters})")
 
-    # Path B: MIGraphX backbone + detector
     mxr_times = []
+    out_mxr = None
     for i in range(args.warmup + args.iters):
         torch.cuda.synchronize(); t = time.perf_counter()
         with torch.inference_mode():
@@ -178,45 +220,50 @@ def main():
     speedup = pt_mean / mxr_mean if mxr_mean > 0 else float("nan")
     print(f"      Speedup: {speedup:.2f}x  ({pt_mean - mxr_mean:.0f} ms saved)\n")
 
-    # 5. Inspect / visualize MIGraphX-path output
-    print("[5/5] Output structure:")
-    pred_logits = out_mxr.pred_logits     # (1, 200) raw scores
-    pred_masks = out_mxr.pred_masks       # (1, 200, 288, 288) logits
-    presence = torch.sigmoid(out_mxr.presence_logits).item()
-    print(f"      pred_logits: shape={tuple(pred_logits.shape)}, max={float(pred_logits.max()):.3f}")
-    print(f"      pred_masks:  shape={tuple(pred_masks.shape)} dtype={pred_masks.dtype}")
-    print(f"      presence:    {presence:.3f}")
+    # 5. Postproc + viz + comparison
+    print("[5/5] Postprocessing (presence-aware scores + mask-IoU NMS) and comparing ...")
 
-    # Apply sigmoid → probabilities, threshold to keep candidates
-    scores = torch.sigmoid(pred_logits).detach().float().cpu().numpy().squeeze()
-    keep = np.where(scores >= args.score_threshold)[0]
-    print(f"      Detections above {args.score_threshold}: {len(keep)}  (top-5 scores={sorted(scores, reverse=True)[:5]})")
+    presence_pt = float(torch.sigmoid(out_pt.presence_logits[0, 0]))
+    presence_mxr = float(torch.sigmoid(out_mxr.presence_logits[0, 0]))
+    print(f"      presence:  PyTorch={presence_pt:.3f}  MIGraphX={presence_mxr:.3f}")
+
+    det_pt = postprocess_detector_outputs(
+        out_pt.pred_logits, out_pt.presence_logits,
+        out_pt.pred_masks, out_pt.pred_boxes,
+        score_threshold=args.score_threshold,
+        nms_iou_threshold=args.nms_iou,
+    )
+    det_mxr = postprocess_detector_outputs(
+        out_mxr.pred_logits, out_mxr.presence_logits,
+        out_mxr.pred_masks, out_mxr.pred_boxes,
+        score_threshold=args.score_threshold,
+        nms_iou_threshold=args.nms_iou,
+    )
+
+    print(f"      Detections kept: PyTorch={len(det_pt)}  MIGraphX={len(det_mxr)}")
+    for i, d in enumerate(det_pt[:5]):
+        print(f"        PT  #{i}: score={d.score:.3f}")
+    for i, d in enumerate(det_mxr[:5]):
+        print(f"        MXR #{i}: score={d.score:.3f}")
+
+    # IoU between top detections (paired by rank)
+    pair_n = min(len(det_pt), len(det_mxr))
+    if pair_n > 0:
+        print(f"\n      Pairwise mask IoU (top {pair_n} by score, both paths use same postproc):")
+        for i in range(pair_n):
+            mask_pt = mask_logits_to_image(det_pt[i].mask_logits, (H, W))
+            mask_mxr = mask_logits_to_image(det_mxr[i].mask_logits, (H, W))
+            iou = mask_iou_pair(mask_pt, mask_mxr)
+            score_diff = abs(det_pt[i].score - det_mxr[i].score)
+            tag = "OK" if iou > 0.9 else ("FAIR" if iou > 0.7 else "FAIL")
+            print(f"        rank {i}: IoU={iou:.4f}  score Δ={score_diff:.4f}  [{tag}]")
 
     # Visualize
-    vis = img_bgr.copy()
-    palette = [(0, 200, 80), (200, 80, 0), (80, 0, 200), (200, 200, 0), (0, 200, 200)]
-    for i, det_idx in enumerate(keep):
-        mask = pred_masks[0, det_idx].detach().float().cpu().numpy()
-        mask = (mask > 0).astype(bool)
-        if mask.shape != (H, W):
-            mask = cv2.resize(mask.astype(np.uint8), (W, H),
-                              interpolation=cv2.INTER_NEAREST).astype(bool)
-        score = float(scores[det_idx])
-        color = palette[i % len(palette)]
-        layer = np.zeros_like(vis); layer[mask] = color
-        vis = cv2.addWeighted(vis, 0.55, layer, 0.45, 0)
-        contours, _ = cv2.findContours(mask.astype(np.uint8),
-                                       cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        cv2.drawContours(vis, contours, -1, color, 2)
-        if contours:
-            x, y, _w, _h = cv2.boundingRect(contours[0])
-            cv2.putText(vis, f"#{i} {score:.2f}", (x, max(y - 6, 16)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-
-    cv2.putText(vis, f"text='{args.text}'  N={len(keep)}  MIGraphX backbone",
-                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (0, 255, 255), 2)
-    cv2.imwrite(str(args.output), vis)
-    print(f"\nSaved: {args.output}")
+    pt_path = args.output_stem.with_name(args.output_stem.name + "_pt.jpg")
+    mxr_path = args.output_stem.with_name(args.output_stem.name + "_mxr.jpg")
+    cv2.imwrite(str(pt_path), overlay_detections(img_bgr, det_pt, args.text, "PyTorch"))
+    cv2.imwrite(str(mxr_path), overlay_detections(img_bgr, det_mxr, args.text, "MIGraphX"))
+    print(f"\nSaved: {pt_path}\n       {mxr_path}")
     return 0
 
 

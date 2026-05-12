@@ -58,6 +58,15 @@ def parse_args():
     p.add_argument("--max-frames", type=int, default=120,
                    help="Cap video frames loaded into the session (default 120)")
     p.add_argument("--dtype", choices=["fp16", "fp32"], default="fp16")
+    p.add_argument("--mig", action="store_true",
+                   help="Use MIGraphX backbone for vision_encoder (≈2× faster init "
+                        "and per-frame backbone). Requires backbone_detector_lhs_mxr_tuned.mxr "
+                        "in --onnx-dir (build with export/export_backbone_single.py "
+                        "--backbone-source detector).")
+    p.add_argument("--onnx-dir", type=Path, default=Path("onnx_files_1008"),
+                   help="Where the MIG backbone .mxr lives (only used with --mig)")
+    p.add_argument("--mxr-name", type=str, default="backbone_detector_lhs_mxr_tuned.mxr",
+                   help="MIG backbone filename inside --onnx-dir")
     args = p.parse_args()
     if (args.image is None) == (args.video is None):
         sys.exit("Pass exactly one of --image or --video")
@@ -125,6 +134,19 @@ def main():
     if device.type == "cuda":
         torch.cuda.synchronize()
     print(f"  loaded in {time.perf_counter() - t:.1f}s")
+
+    if args.mig:
+        print(f"Patching detector_model.vision_encoder with MIGraphX backbone ...")
+        t = time.perf_counter()
+        from tracker.tracker import MIGraphXBackbone
+        from tracker.mig_vision_encoder import patch_sam3_video_model_with_mig
+        mxr = MIGraphXBackbone(
+            onnx_path=args.onnx_dir / "backbone_detector_lhs_simplified.onnx",
+            cache_path=args.onnx_dir / args.mxr_name,
+        )
+        mxr.warmup(n=2)
+        patch_sam3_video_model_with_mig(model, mxr)
+        print(f"  MIG backbone ready in {time.perf_counter() - t:.1f}s")
 
     # Collect frames
     if args.image is not None:
