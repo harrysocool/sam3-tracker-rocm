@@ -49,62 +49,86 @@ optimization opportunity.
 
 ## Setup
 
+### Prerequisites
+
+Have these in place **before** running `./setup.sh`:
+
+| Requirement | Handled by | Notes |
+|---|---|---|
+| Hardware: AMD Ryzen AI Max+ 395 (gfx1151) | You | Other ROCm-capable AMD GPUs may work but are untested |
+| OS: Ubuntu 24.04.4 LTS | You | Other Linux distros with ROCm 7.x support may work |
+| Kernel: 6.8+ (tested: 6.18.6) | You | Required for gfx1151 AMDGPU driver support |
+| **conda / miniforge** (any recent) | ⚠️ You — install before running setup.sh | `setup.sh` errors out if conda is not found. [Install miniforge](https://github.com/conda-forge/miniforge) |
+| **BIOS UMA Frame Buffer Size = 64 GB** | ⚠️ You — set in BIOS | **128 GB systems only** — without this, backbone OOMs at 1008px. See [Finding #7](docs/project_summary.md). |
+| **System ROCm 7.2 APT** (`migraphx 2.15.0`) | ✅ setup.sh step 0a | Installs automatically; skip with `--skip-apt` if already done |
+
+> **Why two ROCm stacks?** AMD currently ships gfx1151 PyTorch support only in nightly
+> pip wheels (ROCm 7.13), while MIGraphX is only in the stable APT release (ROCm 7.2).
+> Both are required; `setup.sh` installs them in the right order.
+
 ### Quick start (one command)
 
 ```bash
 ./setup.sh
 ```
 
-This script wraps everything: conda env, ROCm SDK, onnxruntime-migraphx, patched
-MIGraphX install, ONNX export, backbone compile, and a smoke test.
-
-Useful flags: `--skip-apt`, `--skip-migraphx`, `--env NAME`, `--imgsz 1008`.
+Useful flags: `--skip-apt`, `--skip-migraphx`, `--env NAME`, `--imgsz 504/1008`.
 See [setup.sh](setup.sh) for details.
 
-### Prerequisites
+### What setup.sh does
 
-| Requirement | Tested version | Notes |
-|---|---|---|
-| Hardware | AMD Ryzen AI Max+ 395 (gfx1151) | Other ROCm-capable AMD GPUs may work but are untested |
-| OS | Ubuntu 24.04.4 LTS | Other Linux distros with ROCm 7.x support may work |
-| Kernel | 6.8+ (tested: 6.18.6) | Required for gfx1151 AMDGPU driver support |
-| **System ROCm 7.2 APT** | `migraphx 2.15.0` | `sudo apt install migraphx` (ROCm 7.2 repo) |
-| conda / miniforge | any recent | |
-| **BIOS UMA Frame Buffer Size** | **64 GB** | **Required on 128 GB systems** — without this, backbone OOMs at 1008px. See [Finding #7](docs/project_summary.md). |
+1. APT: ROCm 7.2 stack + stock MIGraphX 2.15.0 (`--skip-apt` to bypass)
+2. Patched MIGraphX tarball (~2 min, two unreleased fixes for the headline FPS — `--skip-migraphx` to bypass)
+3. Conda env (`sam3-tracker` by default; override with `--env`) with Python 3.12
+4. ROCm 7.13 nightly SDK + PyTorch (gfx1151 wheels, ~2–5 min)
+5. ONNX Runtime MIGraphX EP wheel (1.24.2)
+6. Python dependencies from `requirements.txt`
+7. Model weights from community mirror `1038lab/sam3` (no HF account needed)
+8. Tracker module ONNX export — `memory_attention`, `mask_decoder_*`, `memory_encoder` (~5 min)
+9. Backbone `.mxr` compile (single-session export → onnxsim → MIGraphX autotune; ~5 min @ 504px, ~12 min @ 1008px)
+10. Pre-warm ORT MIGraphX cache (~1 min)
+11. Smoke test (`demo.py` on `assets/demo.jpg`)
 
-> **Why two ROCm stacks?** AMD currently ships gfx1151 PyTorch support only in nightly
-> pip wheels (ROCm 7.13), while MIGraphX is only in the stable APT release (ROCm 7.2).
-> Both are required; `setup.sh` installs them in the right order.
+### Manual / alternative paths
 
-### Patched MIGraphX (for full performance)
+<details>
+<summary><b>Patched MIGraphX — build from source</b></summary>
 
-The headline FPS numbers require two unreleased MIGraphX fixes. `setup.sh` handles
-the download and install automatically (`--skip-migraphx` if already done).
+The headline FPS requires two unreleased MIGraphX fixes (a `find_splits` patch +
+NHWC output fix). `setup.sh` installs a prebuilt tarball; if you'd rather build:
 
 | Path | FPS (504 / 1008 px) | What you need |
 |---|---|---|
 | Stock APT 2.15.0 | 5.72 / 1.35 | Checkout tag `v0.1-migraphx-2.15` |
-| **Prebuilt tarball** (recommended) | **8.21 / 2.31** | `setup.sh` downloads + installs (~2 min) |
+| **Prebuilt tarball** (default) | **8.21 / 2.31** | `setup.sh` downloads + installs |
 | Build from source | 8.21 / 2.31 | See [`docs/build_migraphx_patched.md`](docs/build_migraphx_patched.md) |
 
-### Model weights
+</details>
 
-Config and tokenizer files are already in this repo. Download `model.safetensors` (~3.3 GB):
+<details>
+<summary><b>Model weights — download from official HF source</b></summary>
+
+`setup.sh` pulls `1038lab/sam3` (community mirror, no account). To use the
+official `facebook/sam3` repo instead (HuggingFace account + accepted terms
+required), download manually before running `setup.sh`:
 
 ```bash
-# Option A — Official (HuggingFace account + accepted terms required):
 hf download facebook/sam3 model.safetensors --local-dir model/sam3
-
-# Option B — Community mirror (no account needed):
-hf download 1038lab/sam3 sam3.safetensors --local-dir model/sam3
-mv model/sam3/sam3.safetensors model/sam3/model.safetensors
 ```
 
-> `hf` is the new CLI in `huggingface_hub ≥ 1.0` (installed via `requirements.txt`).
-> If you have an older hub, the legacy `huggingface-cli` works the same way.
+`setup.sh` skips the download step if `model/sam3/model.safetensors` already exists.
 
-> For step-by-step manual install (APT, conda, pip, ONNX export, backbone compile)
-> see [`docs/manual_setup.md`](docs/manual_setup.md).
+> `hf` is the new CLI in `huggingface_hub ≥ 1.0`. Older versions ship `huggingface-cli` (same arguments).
+
+</details>
+
+<details>
+<summary><b>Step-by-step manual install (no setup.sh)</b></summary>
+
+For full control over each step (APT, conda, pip, ONNX export, backbone compile)
+see [`docs/manual_setup.md`](docs/manual_setup.md).
+
+</details>
 
 ---
 
