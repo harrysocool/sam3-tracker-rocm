@@ -15,8 +15,8 @@ Key design decisions:
 
 Usage:
     PYTHONPATH not required (transformers>=5.8.0 includes sam3_tracker_video)\
-        python scripts/onnx/export/export_tracker_modules.py \\
-        [--output-dir results/onnx/tracker] [--imgsz 1008] [--opset 17] [--verify]
+        python export/tracker_modules/export_tracker_modules.py \\
+        [--onnx-dir onnx_files_1008] [--imgsz 1008] [--opset 17] [--verify]
 """
 
 from __future__ import annotations
@@ -31,7 +31,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
+# Script lives at <repo>/export/tracker_modules/<this>.py — go up THREE levels.
+WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
 LOCAL_HF_MODEL  = WORKSPACE_ROOT / "model" / "sam3"
 
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
@@ -39,14 +40,20 @@ os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--output-dir", type=Path, default=WORKSPACE_ROOT / "results" / "onnx" / "tracker")
+    p.add_argument("--onnx-dir", type=Path, default=None,
+                   help="Resolution root (e.g. onnx_files_504). Outputs go to "
+                        "<onnx-dir>/tracker_modules/. Defaults based on --imgsz.")
     p.add_argument("--imgsz", type=int, default=1008)
     p.add_argument("--checkpoint", type=Path, default=LOCAL_HF_MODEL)
     p.add_argument("--opset", type=int, default=17)
     p.add_argument("--verify", action="store_true", help="Run CPU accuracy test after export")
     p.add_argument("--fixed-slots", type=int, default=7, metavar="N",
                    help="Also export memory_attention_fixed_N<N>.onnx with static shapes for MIGraphX (0=skip)")
-    return p.parse_args()
+    args = p.parse_args()
+    if args.onnx_dir is None:
+        args.onnx_dir = WORKSPACE_ROOT / f"onnx_files_{args.imgsz}"
+    args.output_dir = args.onnx_dir / "tracker_modules"
+    return args
 
 
 # ---------------------------------------------------------------------------

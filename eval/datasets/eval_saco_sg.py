@@ -10,6 +10,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
+
+_TS = datetime.now().strftime("%Y%m%d_%H%M%S")  # one stamp per run; passed in default --out names
 import json
 import os
 import random
@@ -21,7 +24,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
+WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(WORKSPACE_ROOT))
 os.environ.setdefault("MIGRAPHX_SKIP_BENCHMARKING", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
@@ -67,9 +70,9 @@ def main():
 
     # Auto-select paths based on imgsz
     if args.onnx_dir is None:
-        args.onnx_dir = WORKSPACE_ROOT / ("onnx_files_1008" if args.imgsz == 1008 else "onnx_files")
+        args.onnx_dir = WORKSPACE_ROOT / (f"onnx_files_{args.imgsz}")
     if args.out is None:
-        args.out = WORKSPACE_ROOT / f"results/tracker_demo/baseline_50seq_{args.imgsz}px.json"
+        args.out = WORKSPACE_ROOT / f"results/eval/saco_sg/baseline_50seq_{args.imgsz}px_{_TS}.json"
 
     with open(args.gt_json) as f:
         gt = json.load(f)

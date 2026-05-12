@@ -4,13 +4,16 @@ SG eval using Sam3VideoModel text prompts — proper cgF1-compatible eval.
 Uses noun_phrase from GT annotations as text prompt → detect → track.
 """
 from __future__ import annotations
-import argparse, json, os, random, sys, time
+import argparse
+from datetime import datetime, json, os, random, sys, time
+
+_TS = datetime.now().strftime("%Y%m%d_%H%M%S")  # one stamp per run; passed in default --out names
 from pathlib import Path
 import cv2, numpy as np
 from PIL import Image
 from pycocotools import mask as mask_utils
 
-WORKSPACE = Path(__file__).resolve().parent.parent
+WORKSPACE = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(WORKSPACE))
 os.environ.setdefault("HSA_OVERRIDE_GFX_VERSION", "11.5.1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
@@ -52,7 +55,7 @@ def main():
     ap.add_argument("--max-frames", type=int, default=0,
                     help="Max frames per annotation (0=all, recommend 20 for quick test)")
     ap.add_argument("--out", type=Path,
-                    default=WORKSPACE/"results/saco_sg_30seq_textprompt_preds.json")
+                    default=WORKSPACE/f"results/eval/saco_sg/saco_sg_30seq_textprompt_preds_{_TS}.json")
     args = ap.parse_args()
 
     args.out.parent.mkdir(parents=True, exist_ok=True)

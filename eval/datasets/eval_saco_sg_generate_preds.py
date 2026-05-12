@@ -9,17 +9,20 @@ Usage:
         --img-root dataset/saco_sg/JPEGImages_6fps \
         --onnx-dir onnx_files \
         --imgsz 504 \
-        --out results/saco_sg_val_504px_preds.json
+        --out results/eval/saco_sg/saco_sg_val_504px_preds.json
 
 Then run official eval:
     python3 /home/amd/project/sam3-repo-sparse/sam3/eval/saco_veval_eval.py one \
         --gt_annot_file dataset/gt-annotations/saco_veval_smartglasses_val.json \
-        --pred_file results/saco_sg_val_504px_preds.json \
-        --eval_res_file results/saco_sg_val_504px_eval_res.json
+        --pred_file results/eval/saco_sg/saco_sg_val_504px_preds.json \
+        --eval_res_file results/eval/saco_sg/saco_sg_val_504px_eval_res.json
 """
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
+
+_TS = datetime.now().strftime("%Y%m%d_%H%M%S")  # one stamp per run; passed in default --out names
 import json
 import os
 import sys
@@ -30,7 +33,7 @@ import cv2
 import numpy as np
 from pycocotools import mask as mask_utils
 
-WORKSPACE = Path(__file__).resolve().parent.parent
+WORKSPACE = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(WORKSPACE))
 os.environ.setdefault("MIGRAPHX_SKIP_BENCHMARKING", "1")
 
@@ -80,9 +83,9 @@ def main():
     args = ap.parse_args()
 
     if args.onnx_dir is None:
-        args.onnx_dir = WORKSPACE / ("onnx_files_1008" if args.imgsz == 1008 else "onnx_files")
+        args.onnx_dir = WORKSPACE / (f"onnx_files_{args.imgsz}")
     if args.out is None:
-        args.out = WORKSPACE / f"results/saco_sg_val_{args.imgsz}px_preds.json"
+        args.out = WORKSPACE / f"results/eval/saco_sg/saco_sg_val_{args.imgsz}px_preds_{_TS}.json"
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     checkpoint_path = args.out.with_suffix(".partial.json")

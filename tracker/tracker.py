@@ -7,7 +7,7 @@ Pipeline:
                    mask_decoder_propagate.onnx → mask + object pointer
   Every frame:     memory_encoder.onnx → memory entry → FIFO bank (max 7 frames)
 
-Backbone: MIGraphX compiled (backbone_mxr_tuned.mxr, ~88ms at 504px) when available,
+Backbone: MIGraphX compiled (backbone_<source>/tuned.mxr, ~88ms at 504px) when available,
           falling back to PyTorch ROCm FP16 (139ms). Pass backbone="pytorch" to force
           PyTorch. All other modules are CPU ONNX, except memory_attention which runs
           on MIGraphX when the fixed-N7 file is present.
@@ -108,12 +108,13 @@ class MIGraphXBackbone:
     SAM3 vision encoder compiled with patched MIGraphX 2.16.0.
 
     Achieves ~88ms at 504px vs PyTorch ROCm's 139ms (1.6× speedup).
-    Uses backbone_single_simplified.onnx with kernel autotuning baked into
+    Uses backbone_<source>/single_simplified.onnx with kernel autotuning baked into
     the .mxr cache file; first-time compilation takes ~3 minutes.
 
-    Outputs: (fpn_0, fpn_1, fpn_2, None) as float32 numpy arrays.
-    pos_2 is None because the ONNX does not export position encodings;
-    SAM3OnnxTracker.propagate_frame() uses zeros when pos_2 is None.
+    Outputs: (fpn_0, fpn_1, fpn_2, fpn_3_or_None) as float32 numpy arrays.
+    fpn_3 (smallest, scale=0.5) is needed by the SAM3 detector path
+    (text-prompt). Returns None for the 4th slot when running an older
+    3-output backbone .mxr — the box-prompt tracker doesn't read it either way.
     """
 
     def __init__(self, onnx_path: str | Path, cache_path: str | Path) -> None:
@@ -167,7 +168,18 @@ class MIGraphXBackbone:
             self._prog.run({"pixel_values": _arg})
 
     def __call__(self, img_np: np.ndarray):
-        """img_np: (1, 3, H, W) float32  →  (fpn_0, fpn_1, fpn_2, pos_2=None)"""
+        """img_np: (1, 3, H, W) float32  →  tuple of all backbone outputs.
+
+        Length depends on which `.mxr` was loaded:
+          3 outputs: legacy box-prompt tracker (fpn_0, fpn_1, fpn_2)
+          4 outputs: detector-compatible backbone with fpn_3 (scale=0.5)
+          5 outputs: detector backbone + last_hidden_state (Sam3VideoModel pipeline)
+
+        For backward compat with callers that hardcode 4-tuple unpacking, the
+        return is right-padded with None to at least length 4. Callers that
+        need last_hidden_state should index `outputs[4]` directly and check
+        for None.
+        """
         # Keep explicit references to prevent GC of data/argument before GPU finishes.
         img_cont = np.ascontiguousarray(img_np)
         arg      = self._mxr.argument(img_cont)
@@ -176,13 +188,15 @@ class MIGraphXBackbone:
         # backbone outputs are already C-contiguous (contiguous_kernel runs on GPU).
         # Without the patch, outputs are NHWC non-contiguous and np.ascontiguousarray
         # is needed (10ms at 504px, 94ms at 1008px CPU overhead).
-        fpn0, fpn1, fpn2 = np.array(outputs[0]), np.array(outputs[1]), np.array(outputs[2])
-        if not fpn0.flags.c_contiguous:
+        out_arrs = [np.array(o) for o in outputs]
+        if out_arrs and not out_arrs[0].flags.c_contiguous:
             # Fallback: MIGraphX patch not applied, convert on CPU
-            fpn0 = np.ascontiguousarray(fpn0)
-            fpn1 = np.ascontiguousarray(fpn1)
-            fpn2 = np.ascontiguousarray(fpn2)
-        return fpn0, fpn1, fpn2, None
+            out_arrs = [np.ascontiguousarray(a) for a in out_arrs]
+        # Right-pad with None so callers expecting at least 4 entries (older
+        # MIGraphXBackbone API) keep working.
+        while len(out_arrs) < 4:
+            out_arrs.append(None)
+        return tuple(out_arrs)
 
 
 # ---------------------------------------------------------------------------
@@ -311,11 +325,17 @@ class SAM3OnnxTracker:
         self.HW            = self.H * self.W
         self.num_maskmem   = num_maskmem
         self.mask_mem_size = self.H * 16
+        # onnx_dir is the resolution root (onnx_files_504 / onnx_files_1008).
+        # Files live in fixed subdirectories:
+        #   <onnx_dir>/backbone_tracker/  — backbone .onnx + .mxr (tracker FPN weights)
+        #   <onnx_dir>/tracker_modules/   — mask_decoder_*, memory_*, temporal_pe, caches
         onnx_dir = Path(onnx_dir)
+        backbone_dir = onnx_dir / "backbone_tracker"
+        modules_dir  = onnx_dir / "tracker_modules"
 
-        _mxr_cache  = onnx_dir / "backbone_mxr_tuned.mxr"
-        _mxr_onnx   = onnx_dir / "backbone_single_simplified.onnx"
-        _temporal_pe = onnx_dir / "temporal_pe.npy"
+        _mxr_cache  = backbone_dir / "tuned.mxr"
+        _mxr_onnx   = backbone_dir / "single_simplified.onnx"
+        _temporal_pe = modules_dir / "temporal_pe.npy"
         _use_mxr    = (backbone == "migraphx") or (
             backbone == "auto" and (_mxr_cache.exists() or _mxr_onnx.exists())
         )
@@ -325,8 +345,9 @@ class SAM3OnnxTracker:
             # temporal_pe is loaded from a pre-saved .npy file (generated once during export).
             if not _temporal_pe.exists():
                 raise FileNotFoundError(
-                    f"{_temporal_pe} not found. Run export/export_tracker_modules.py once "
-                    f"to generate it, or copy it from another onnx_files directory."
+                    f"{_temporal_pe} not found. Run export/tracker_modules/export_tracker_modules.py "
+                    f"once to generate it, or copy it from another onnx_files_<RES>/tracker_modules/ "
+                    f"directory."
                 )
             temporal_pe = np.load(str(_temporal_pe))
 
@@ -388,8 +409,8 @@ class SAM3OnnxTracker:
 
         # MIGraphX provider helpers with persistent compile cache.
         # Cache key includes model hash + fp16 flag, so FP16 and FP32 variants are stored
-        # separately. Run export/prewarm_ort_cache.py once per onnx_dir to populate.
-        _cache = str(onnx_dir / "mxr_cache")
+        # separately. Run export/tracker_modules/prewarm_ort_cache.py once per onnx_dir to populate.
+        _cache = str(modules_dir / "mxr_cache")
         def _mig(fp16: bool = False) -> list:
             opts: dict = {"migraphx_model_cache_dir": _cache}
             if fp16:
@@ -424,11 +445,11 @@ class SAM3OnnxTracker:
 
         print("  Loading ONNX tracking modules ...")
         self.dec_init = _mig_direct(
-            onnx_dir / "mask_decoder_init.onnx", "dec_init_fp32.mxr", "dec_init")
+            modules_dir / "mask_decoder_init.onnx", "dec_init_fp32.mxr", "dec_init")
         self.dec_prop = _mig_direct(
-            onnx_dir / "mask_decoder_propagate.onnx", "dec_prop_fp32.mxr", "dec_propagate")
+            modules_dir / "mask_decoder_propagate.onnx", "dec_prop_fp32.mxr", "dec_propagate")
         self.mem_enc  = _mig_direct(
-            onnx_dir / "memory_encoder.onnx", "mem_enc_fp32.mxr", "memory_encoder")
+            modules_dir / "memory_encoder.onnx", "mem_enc_fp32.mxr", "memory_encoder")
 
         # memory_attention: ORT MIGraphX EP.
         # NOTE: direct MIGraphX Python API produces numerically wrong cond output
@@ -437,13 +458,13 @@ class SAM3OnnxTracker:
         # ORT MIGraphX EP gives correct results. At 1008px with backbone in GPU
         # memory, ORT EP may fall back to CPU (silent); acceptable since this
         # module contributes <10% of total latency. FP16 via migraphx_fp16_enable.
-        mem_attn_fixed  = onnx_dir / "memory_attention_fixed_N7.onnx"
+        mem_attn_fixed  = modules_dir / "memory_attention_fixed_N7.onnx"
         if mem_attn_fixed.exists():
             ort_opts = ort.SessionOptions()
             ort_opts.intra_op_num_threads = 1
             # Persist ORT-compiled .mxr to disk so subsequent runs skip the 5-min recompile.
             # First run: ~5 min compilation → cache saved. Subsequent: ~1.3s load from cache.
-            _ort_cache_dir = onnx_dir / "ort_mig_cache"
+            _ort_cache_dir = modules_dir / "ort_mig_cache"
             _ort_cache_dir.mkdir(parents=True, exist_ok=True)
             _attn_prov_cached = []
             for (pname, popts) in _attn_prov:
@@ -463,7 +484,7 @@ class SAM3OnnxTracker:
             self._mem_attn_slots = num_maskmem
         else:
             self.mem_attn = ort.InferenceSession(
-                str(onnx_dir / "memory_attention.onnx"), providers=CPU)
+                str(modules_dir / "memory_attention.onnx"), providers=CPU)
             self._mem_attn_slots = 0
             print("  memory_attention: CPU (dynamic) — export fixed_N7 for MIGraphX speedup")
 

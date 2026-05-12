@@ -7,8 +7,8 @@ Run WITHOUT the backbone loaded (no GPU memory pressure) so FP16 compilations
 succeed at 1008px without OOM.
 
 Usage:
-    python export/prewarm_ort_cache.py --onnx-dir onnx_files        # 504px
-    python export/prewarm_ort_cache.py --onnx-dir onnx_files_1008   # 1008px
+    python export/tracker_modules/prewarm_ort_cache.py --onnx-dir onnx_files_504        # 504px
+    python export/tracker_modules/prewarm_ort_cache.py --onnx-dir onnx_files_1008   # 1008px
 """
 from __future__ import annotations
 
@@ -41,10 +41,9 @@ import migraphx as _mxr
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--onnx-dir", type=Path, default=Path("onnx_files"),
-                   help="Directory containing exported ONNX files")
-    p.add_argument("--cache-subdir", type=str, default="mxr_cache",
-                   help="Cache directory name (inside onnx-dir)")
+    p.add_argument("--onnx-dir", type=Path, default=Path("onnx_files_504"),
+                   help="Resolution root, e.g. onnx_files_504 or onnx_files_1008. "
+                        "Operates on <onnx-dir>/tracker_modules/.")
     p.add_argument("--warmup", type=int, default=1,
                    help="Number of warmup inference runs per session")
     return p.parse_args()
@@ -64,15 +63,16 @@ def warmup_session(sess: ort.InferenceSession, inputs: dict, n: int = 1):
 
 def main():
     args = parse_args()
-    onnx_dir = args.onnx_dir.resolve()
-    cache_dir = str(onnx_dir / args.cache_subdir)
-    Path(cache_dir).mkdir(exist_ok=True)
+    modules_dir = args.onnx_dir.resolve() / "tracker_modules"
+    cache_dir = str(modules_dir / "mxr_cache")
+    Path(cache_dir).mkdir(parents=True, exist_ok=True)
 
     # Infer resolution from directory name / feature map size
     # memory_attention_fixed_N7.onnx input shapes tell us HW
-    ma_path = onnx_dir / "memory_attention_fixed_N7.onnx"
+    ma_path = modules_dir / "memory_attention_fixed_N7.onnx"
     if not ma_path.exists():
-        raise FileNotFoundError(f"{ma_path} not found. Run export first.")
+        raise FileNotFoundError(
+            f"{ma_path} not found. Run export/tracker_modules/export_tracker_modules.py first.")
 
     # Peek at first input shape to determine HW
     _tmp = ort.InferenceSession(str(ma_path), providers=["CPUExecutionProvider"])
@@ -85,7 +85,7 @@ def main():
     # compile it here WITHOUT the backbone so there's no OOM.
     use_fp16_attn = True   # always compile FP16 (no backbone loaded here)
 
-    print(f"Pre-warming ORT MIGraphX cache for {onnx_dir.name}")
+    print(f"Pre-warming ORT MIGraphX cache for {modules_dir}")
     print(f"  Resolution: ~{H*14}px  HW={HW}  cache: {cache_dir}")
     print(f"  FP16 memory_attention: {'yes' if use_fp16_attn else 'no'}")
     print()
@@ -118,15 +118,15 @@ def main():
     #   dec_prop: ORT 99ms → direct MIG 4.7ms | dec_init: ORT CPU 118ms → 4.9ms
     direct_sessions = [
         ("dec_propagate FP32 (direct migraphx)",
-         str(onnx_dir / "mask_decoder_propagate.onnx"),
+         str(modules_dir / "mask_decoder_propagate.onnx"),
          "dec_prop_fp32.mxr",
          {"fpn_2_cond": fpn2, "fpn_0": fpn0, "fpn_1": fpn1}),
         ("memory_encoder FP32 (direct migraphx)",
-         str(onnx_dir / "memory_encoder.onnx"),
+         str(modules_dir / "memory_encoder.onnx"),
          "mem_enc_fp32.mxr",
          {"vision_features": fpn2, "masks": MK}),
         ("dec_init FP32 (direct migraphx)",
-         str(onnx_dir / "mask_decoder_init.onnx"),
+         str(modules_dir / "mask_decoder_init.onnx"),
          "dec_init_fp32.mxr",
          {"fpn_2": fpn2, "fpn_0": fpn0, "fpn_1": fpn1,
           "input_points": pts, "input_labels": lbl, "input_boxes": box}),

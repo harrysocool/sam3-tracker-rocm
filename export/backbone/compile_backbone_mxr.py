@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compile simplified backbone ONNX to a MIGraphX .mxr cache with autotuning.
 
-Reads backbone_single_simplified.onnx and produces backbone_mxr_tuned.mxr —
+Reads backbone_<source>/single_simplified.onnx and produces backbone_<source>/tuned.mxr —
 the runtime cache that tracker.py loads in ~3s instead of recompiling each
 session.
 
@@ -13,7 +13,7 @@ Requires PYTHONPATH=/opt/rocm-7.2.0/lib so the patched migraphx Python
 binding loads. The wrapping setup.sh sets this; if running standalone:
 
     PYTHONPATH=/opt/rocm-7.2.0/lib${PYTHONPATH:+:$PYTHONPATH} \\
-        python export/compile_backbone_mxr.py --imgsz 504 --onnx-dir onnx_files
+        python export/backbone/compile_backbone_mxr.py --imgsz 504 --onnx-dir onnx_files_504
 """
 
 from __future__ import annotations
@@ -30,10 +30,14 @@ def parse_args():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("--onnx-dir", type=Path, required=True)
+    p.add_argument("--onnx-dir", type=Path, required=True,
+                   help="Resolution root (e.g. onnx_files_504). Reads "
+                        "<onnx-dir>/backbone_<source>/single_simplified.onnx, writes "
+                        "<onnx-dir>/backbone_<source>/tuned.mxr.")
     p.add_argument("--imgsz", type=int, default=504)
-    p.add_argument("--input-name", type=str, default="backbone_single_simplified.onnx")
-    p.add_argument("--output-name", type=str, default="backbone_mxr_tuned.mxr")
+    p.add_argument("--backbone-source", choices=["tracker", "detector"],
+                   default="tracker",
+                   help="Which backbone subdir to operate on")
     p.add_argument(
         "--no-fp16",
         action="store_true",
@@ -49,12 +53,13 @@ def parse_args():
 
 def main():
     args = parse_args()
-    src = args.onnx_dir / args.input_name
-    dst = args.onnx_dir / args.output_name
+    sub_dir = args.onnx_dir / f"backbone_{args.backbone_source}"
+    src = sub_dir / "single_simplified.onnx"
+    dst = sub_dir / "tuned.mxr"
 
     if not src.exists():
         raise FileNotFoundError(
-            f"{src} not found. Run export/simplify_backbone.py first."
+            f"{src} not found. Run export/backbone/simplify_backbone.py first."
         )
 
     # Make sure autotuning is enabled (env can disable it for fast iteration).

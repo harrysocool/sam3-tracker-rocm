@@ -17,7 +17,7 @@ from pathlib import Path
 
 import cv2, numpy as np
 
-WORKSPACE = Path(__file__).resolve().parent.parent
+WORKSPACE = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(WORKSPACE))
 from tracker import SAM3OnnxTracker, preprocess_image
 
@@ -27,7 +27,7 @@ BOX_ORIG = [85, 281, 1710, 850]    # truck box at original 1800×1200
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--checkpoint", type=Path, default=WORKSPACE / "model" / "sam3")
-    p.add_argument("--onnx-dir",   type=Path, default=WORKSPACE / "onnx_files")
+    p.add_argument("--onnx-dir",   type=Path, default=WORKSPACE / "onnx_files_504")
     p.add_argument("--image",      type=Path, default=WORKSPACE / "assets" / "demo.jpg")
     p.add_argument("--imgsz",      type=int,  default=504)
     p.add_argument("--warmup",     type=int,  default=8)

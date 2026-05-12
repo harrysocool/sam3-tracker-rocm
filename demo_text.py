@@ -23,7 +23,7 @@ Usage:
       --text "swan" \\
       --max-frames 60
 
-Output goes to outputs/<input-stem>_text.{jpg,mp4} unless --output is given.
+Output goes to outputs/text/<input-stem>_text.{jpg,mp4} unless --output is given.
 """
 from __future__ import annotations
 
@@ -54,10 +54,18 @@ def parse_args():
     p.add_argument("--video", type=Path, default=None,
                    help="Video input — any mp4 readable by OpenCV")
     p.add_argument("--output", type=Path, default=None,
-                   help="Output path. Default: outputs/<input-stem>_text.{jpg,mp4}")
+                   help="Output path. Default: outputs/text/<input-stem>_text.{jpg,mp4}")
     p.add_argument("--max-frames", type=int, default=120,
                    help="Cap video frames loaded into the session (default 120)")
     p.add_argument("--dtype", choices=["fp16", "fp32"], default="fp16")
+    p.add_argument("--mig", action="store_true",
+                   help="Use MIGraphX backbone for vision_encoder (≈2× faster init "
+                        "and per-frame backbone). Reads <onnx-dir>/backbone_detector/tuned.mxr "
+                        "(build with: python export/backbone/export_backbone_single.py "
+                        "--backbone-source detector + simplify + compile).")
+    p.add_argument("--onnx-dir", type=Path, default=Path("onnx_files_1008"),
+                   help="Resolution root (e.g. onnx_files_1008). The MIG path reads "
+                        "<onnx-dir>/backbone_detector/{single_simplified.onnx,tuned.mxr}.")
     args = p.parse_args()
     if (args.image is None) == (args.video is None):
         sys.exit("Pass exactly one of --image or --video")
@@ -126,6 +134,38 @@ def main():
         torch.cuda.synchronize()
     print(f"  loaded in {time.perf_counter() - t:.1f}s")
 
+    if args.mig:
+        print(f"Patching detector_model.vision_encoder with MIGraphX backbone ...")
+        t = time.perf_counter()
+        from tracker.tracker import MIGraphXBackbone
+        from tracker.mig_vision_encoder import patch_sam3_video_model_with_mig
+        det_dir = args.onnx_dir / "backbone_detector"
+        mxr = MIGraphXBackbone(
+            onnx_path=det_dir / "single_simplified.onnx",
+            cache_path=det_dir / "tuned.mxr",
+        )
+        mxr.warmup(n=2)
+        patch_sam3_video_model_with_mig(model, mxr)
+        print(f"  MIG backbone ready in {time.perf_counter() - t:.1f}s")
+
+        # Optional: also MIG-ize the DETR encoder (~245 ms PT → ~80 ms MIG per frame).
+        detr_onnx = args.onnx_dir / "detector_modules" / "detr_encoder_simplified.onnx"
+        if detr_onnx.exists():
+            print(f"Patching detector_model.detr_encoder with MIGraphX shim ...")
+            from tracker.mig_detr_encoder import patch_sam3_video_model_detr_encoder
+            patch_sam3_video_model_detr_encoder(model, detr_onnx)
+            print(f"  MIG detr_encoder ready")
+        # Optional: also MIG-ize memory_attention (steady-state padding)
+        mem_attn_onnx = args.onnx_dir / "tracker_modules" / "memory_attention_fixed_S7_P32.onnx"
+        if mem_attn_onnx.exists():
+            print(f"Patching tracker_model.memory_attention with MIGraphX shim ...")
+            from tracker.mig_memory_attention import patch_sam3_video_model_memory_attention
+            patch_sam3_video_model_memory_attention(model, mem_attn_onnx)
+            print(f"  MIG memory_attention ready (PT fallback for non-steady-state shapes)")
+        else:
+            print(f"  (skipping detr_encoder MIG: build with "
+                  f"export/detector/export_detr_encoder.py to enable)")
+
     # Collect frames
     if args.image is not None:
         bgr0 = cv2.imread(str(args.image))
@@ -174,9 +214,9 @@ def main():
     if args.output is not None:
         out_path = args.output
     elif args.image is not None:
-        out_path = Path("outputs") / f"{args.image.stem}_text.jpg"
+        out_path = Path("outputs/text") / f"{args.image.stem}_text.jpg"
     else:
-        out_path = Path("outputs") / f"{args.video.stem}_text.mp4"
+        out_path = Path("outputs/text") / f"{args.video.stem}_text.mp4"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Single image — done
