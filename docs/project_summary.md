@@ -164,3 +164,61 @@ direct MIGraphX Python API (`migraphx.program`) for maximum efficiency (eliminat
 ORT EP's NCHW↔NCHWc layout conversion overhead). `memory_attention` is the
 exception — it must route through ORT MIGraphX EP because the direct API path has
 an FP16 attention numerical bug (Finding #8).
+
+---
+
+## Update 2026-05-12 — Text-prompt path: 2.94× over PT baseline
+
+Stage A + B brought the `Sam3VideoModel` text-prompt path from 0.52 FPS pure
+PyTorch to **1.5 FPS @ 1008px** (single-object continuous tracking), with mask
+output identical to the PT reference (visually verified on 30-frame swan video,
+score 0.84 in both paths).
+
+| Stage | What changed | Prop FPS @ 1008px |
+|---|---|---|
+| 0 | Pure PyTorch baseline | 0.52 |
+| A | MIG backbone (`backbone_detector` with `last_hidden_state` output) | 0.96 |
+| B.2 | MIG `detr_encoder` (ORT MIG EP, fp16) | 1.16 |
+| B.4 | MIG `memory_attention` (padded fixed-shape S7×P32, ORT MIG EP) | **1.53** |
+
+**Architecture choices learned the hard way:**
+
+- **Detector and tracker have *different* FPN proj weights.** `Sam3VideoModel`
+  has `detector_model.vision_encoder.neck` (detector FPN) and
+  `tracker_neck` (tracker FPN, separate `Sam3VisionNeck`). The original MIG
+  backbone was exported from `Sam3TrackerVideoModel.vision_encoder` (tracker
+  weights) — works for the box-prompt path; produces `presence=0` when fed
+  to `Sam3Model` (detector path). New `--backbone-source detector` exports a
+  separate backbone with detector FPN weights, plus `last_hidden_state` output
+  so `tracker_neck` can re-run the tracker FPN on the cached ViT tokens.
+
+- **Any module containing attention layers must go through ORT MIG EP** with
+  `migraphx_fp16_enable=1`. Direct `migraphx.parse_onnx + quantize_fp16`
+  produces NaN outputs for these (memory_attention, detr_encoder); even
+  `--no-fp16` produces ~0.05 max-diff that breaks downstream detection
+  thresholds. ORT EP uses a different FP16 quantization pipeline that
+  produces correct results (this is why `memory_attention` in the box-prompt
+  path was already on ORT EP — Finding #8).
+
+- **MIGraphX kernel-selection cliff at K=64.** The padded `memory_attention`
+  ONNX with `num_object_pointer_tokens=64` (the architectural max) compiles
+  to a 14× slower kernel (791 ms vs 55 ms at K≤32). The shim caps at K=32
+  and truncates the oldest pointers when PT would have more. For continuous
+  tracking this is invisible; long-video re-identification across long
+  disappearances may degrade slightly.
+
+**What is *not* MIG-ized in this path** (and roughly what they cost per
+propagation frame, dominating the remaining ~600 ms):
+
+- `vision_encoder` itself (~380 ms — most of it is numpy↔torch + GPU↔CPU
+  transfer through the MIG bridge, not raw compute)
+- `detr_decoder` (~24 ms)
+- `mask_decoder` (~9 ms)
+- `dot_product_scoring`, `text_projection`, `presence_head` (<1 ms)
+- `tracker_neck` (~24 ms)
+- `tracker_model.mask_decoder` propagate (~5 ms)
+- Host-side gather/planning/execution (~25 ms)
+
+Going beyond ~1.5 FPS @ 1008px requires either keeping data on GPU through
+the MIG bridge (HIP IPC; difficult on this stack) or running the full
+pipeline at 504px (planned next: should land around 3–4 FPS).

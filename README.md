@@ -136,10 +136,11 @@ see [`docs/manual_setup.md`](docs/manual_setup.md).
 
 Two demo entry points — pick the one matching your prompt type:
 
-| Demo | Prompt | Backbone | Latency @504px | Use for |
+| Demo | Prompt | Backbone + Detector | Steady-state FPS | Use for |
 |---|---|---|---|---|
-| `demo.py`      | bounding box  | MIGraphX (fastest)        | ~115 ms (8.21 FPS) | known target, real-time |
-| `demo_text.py` | text          | PyTorch (CLIP detector)   | ~2 s init + slow propagation | open-vocabulary, prototyping |
+| `demo.py`           | bounding box  | MIGraphX backbone, MIG tracker modules | **8.2 FPS @ 504px** | known target, real-time |
+| `demo_text.py --mig` | text         | MIG backbone + MIG detr_encoder + MIG memory_attention (ORT EP), PT detr_decoder + mask_head | **1.5 FPS @ 1008px** (2.9× over PT) | open-vocabulary, video tracking |
+| `demo_text.py`       | text         | pure PyTorch                          | 0.5 FPS @ 1008px | open-vocabulary, no MIG setup |
 
 All commands assume you ran `./setup.sh` and are in the project root. The MIGraphX
 backbone requires `/opt/rocm-7.2.0/lib` on `PYTHONPATH`; PyTorch path doesn't:
@@ -168,18 +169,38 @@ python demo.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
 ### Text-prompt (`demo_text.py`) — open-vocabulary
 
 ```bash
-# Image — text → CLIP detection → mask
+# Image — pure PyTorch path
 python demo_text.py --checkpoint model/sam3 \
     --image assets/demo.jpg --text "truck"
 
-# Video — text init on frame 0, then PyTorch tracker propagates
+# Video — pure PyTorch (~0.5 FPS @ 1008px)
 python demo_text.py --checkpoint model/sam3 \
     --video assets/demo.mp4 --text "swan" --max-frames 60
+
+# Video — MIG-accelerated (~1.5 FPS, 2.9× faster, identical mask quality)
+# Requires the detector backbone + detr_encoder + memory_attention ONNX/MXR
+# (build once with the export commands below).
+LD_PRELOAD=/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0 \
+    python demo_text.py --checkpoint model/sam3 --onnx-dir onnx_files_1008 \
+    --video assets/demo.mp4 --text "swan" --mig --max-frames 60
 ```
 
-Outputs default to `outputs/<input-stem>_{tracked,text}.{jpg,mp4}` (overridable
-with `--output`). Try short noun phrases: `"swan"`, `"a person on a bike"`,
-`"yellow taxi"`.
+Build the MIG-path artefacts once (~25 min total at 1008px):
+```bash
+# 1. Detector backbone with last_hidden_state (~12 min compile)
+python export/backbone/export_backbone_single.py --imgsz 1008 --backbone-source detector
+python export/backbone/simplify_backbone.py        --imgsz 1008 --backbone-source detector
+python export/backbone/compile_backbone_mxr.py     --imgsz 1008 --backbone-source detector --skip-verify
+
+# 2. DETR encoder (~2 min)
+python export/detector/export_detr_encoder.py --imgsz 1008
+
+# 3. Padded memory_attention for the tracker (~10 s, ORT EP compile lazy at first run)
+python export/tracker_modules/export_memory_attention_padded.py --imgsz 1008
+```
+
+Outputs default to `outputs/{box,text}/<input-stem>_{tracked,text}.{jpg,mp4}` (overridable
+with `--output`). Try short noun phrases: `"swan"`, `"a person on a bike"`, `"yellow taxi"`.
 
 ### Quick checks (no dataset needed)
 
@@ -369,20 +390,28 @@ sam3-tracker-rocm/
 - **MIGraphX 2.15+patches required**: the stock MIGraphX 2.15.0 from the ROCm 7.2
   APT package produces ~916ms for the HF backbone (6.6× slower) due to a fusion
   limitation in `find_splits`. See [`analysis/migraphx_backbone_investigation.md`](analysis/migraphx_backbone_investigation.md) for details.
-- **Text-prompt path is PyTorch-only** (no MIGraphX acceleration yet). `demo_text.py`
-  runs the entire pipeline on PyTorch, so propagation drops from box-prompt's
-  8.21 FPS to ~0.5 FPS. Bringing text-prompt up to box-prompt FPS requires
-  MIGraphX-izing the detector module — concretely:
-    1. Re-export the backbone with `last_hidden_state` (the detector needs the
-       1024-d ViT features, not just the 256-d FPN).
-    2. Wire the CLIP text encoder + DETR head into a hybrid path
-       (PyTorch on frame 0, MIGraphX after).
-    3. Port `Sam3VideoModel`'s NMS + presence gating to the OnnxTracker side.
-    4. Resolve the torch ROCm 7.13 nightly vs patched MIGraphX 7.2 library
-       conflict (LD_PRELOAD workaround already documented in memory).
-
-  Estimated 2–3 days of work. Until then, treat `demo_text.py` as a prototyping
-  / open-vocabulary tool, not a real-time path.
+- **Text-prompt path: partial MIG** (`demo_text.py --mig`). Three modules are
+  MIG-accelerated — vision_encoder backbone, detr_encoder, memory_attention —
+  bringing 1008px propagation from 0.52 FPS (pure PT) to **1.5 FPS** (2.9× over
+  baseline). Mask quality matches PT exactly (verified frame-by-frame on the
+  swan video). Remaining cost (~600 ms/frame) is the ViT backbone itself
+  (~380 ms; mostly numpy↔torch + GPU↔CPU transfer through the MIG bridge),
+  the still-PT DETR decoder + detector mask head (~50 ms together), and the
+  PT tracker mask decoder (~10 ms). Going further requires either (a) keeping
+  data on GPU through the MIG bridge (HIP IPC; difficult on this stack) or
+  (b) running the full pipeline at 504px (planned next).
+- **MIG attention modules MUST go through ORT MIG EP.** Direct
+  `migraphx.parse_onnx + quantize_fp16` on attention layers (memory_attention,
+  detr_encoder) produces NaN outputs (FP16 attention bug analogous to
+  [ROCm/AMDMIGraphX#3596](https://github.com/ROCm/AMDMIGraphX/issues/3596));
+  even FP32 produces ~0.05 max-diff that breaks downstream detection thresholds.
+  ORT EP with `migraphx_fp16_enable=1` uses a different FP16 quantization path
+  that produces correct results.
+- **memory_attention K=64 cliff.** MIGraphX picks a 14× slower kernel at
+  num_object_pointer_tokens=64 (791 ms vs 55 ms at K≤32). The shim caps at
+  K=32 and truncates the oldest pointers when PT would have more — quality
+  impact is invisible for continuous tracking; long-video re-identification
+  across long disappearances may degrade slightly.
 
 ---
 

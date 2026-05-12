@@ -61,6 +61,11 @@ def main():
         detr_onnx = args.onnx_dir / "detector_modules" / "detr_encoder_simplified.onnx"
         if detr_onnx.exists():
             patch_sam3_video_model_detr_encoder(model, detr_onnx)
+            from tracker.mig_memory_attention import patch_sam3_video_model_memory_attention
+            mem_onnx = args.onnx_dir / 'tracker_modules' / 'memory_attention_fixed_S7_P32.onnx'
+            if mem_onnx.exists():
+                patch_sam3_video_model_memory_attention(model, mem_onnx)
+                print('  memory_attention patched in')
             print("  detr_encoder patched in")
         print("  MIG backbone patched in")
 
