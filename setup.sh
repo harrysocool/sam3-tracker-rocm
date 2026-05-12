@@ -326,16 +326,19 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-step "8. Pre-warm ORT MIGraphX caches (~1 min)"
+step "8. Pre-warm direct-MIG caches (dec_init / dec_prop / mem_enc, ~1 min)"
 # ─────────────────────────────────────────────────────────────────────────────
-PREWARM_SENTINEL="$MODULES_DIR/mxr_cache/memory_attention_fp16.mxr"
+# Sentinel is one of the three .mxr files the prewarm script actually produces.
+# memory_attention is NOT in this list — it runs via ORT MIGraphX EP and the
+# runtime populates its cache (in tracker_modules/ort_mig_cache/) on first use.
+PREWARM_SENTINEL="$MODULES_DIR/mxr_cache/dec_prop_fp32.mxr"
 
 if [[ -f "$PREWARM_SENTINEL" ]]; then
-    info "ORT caches already warmed"
+    info "Direct-MIG caches already warmed"
 else
-    echo "  Pre-warming tracking module caches..."
+    echo "  Pre-warming direct-MIG decoder + memory_encoder caches..."
     python export/tracker_modules/prewarm_ort_cache.py --onnx-dir "$ONNX_DIR"
-    info "ORT caches warmed"
+    info "Direct-MIG caches warmed"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -362,6 +365,15 @@ echo "    export HSA_OVERRIDE_GFX_VERSION=11.5.1"
 echo "    export MIGRAPHX_GPU_HIP_FLAGS=\"-Wno-error -Wno-lifetime-safety-intra-tu-suggestions\""
 echo "    export PYTHONPATH=/opt/rocm-7.2.0/lib\${PYTHONPATH:+:\$PYTHONPATH}"
 echo ""
-echo "    python demo.py --checkpoint $MODEL_DIR --onnx-dir $ONNX_DIR \\"
+echo "    python demo.py --checkpoint $MODEL_DIR --onnx-dir $ONNX_DIR --imgsz $IMGSZ \\"
 echo "        --image YOUR_IMAGE.jpg --box x1,y1,x2,y2"
+echo ""
+echo "  Text-prompt path (open-vocabulary, MIG-accelerated detector backbone):"
+echo "    Build the detector backbone once (~12 min @1008px, separate from box-prompt):"
+echo "      python export/backbone/export_backbone_single.py --imgsz $IMGSZ --onnx-dir $ONNX_DIR --backbone-source detector"
+echo "      python export/backbone/simplify_backbone.py        --imgsz $IMGSZ --onnx-dir $ONNX_DIR --backbone-source detector"
+echo "      python export/backbone/compile_backbone_mxr.py     --imgsz $IMGSZ --onnx-dir $ONNX_DIR --backbone-source detector --skip-verify"
+echo "    Then run with --mig (also needs LD_PRELOAD due to torch/MIG ROCm version split):"
+echo "      LD_PRELOAD=/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0 \\"
+echo "          python demo_text.py --checkpoint $MODEL_DIR --onnx-dir $ONNX_DIR --image YOUR_IMAGE.jpg --text \"object\" --mig"
 echo -e "${G}══════════════════════════════════════════════════════${NC}"
