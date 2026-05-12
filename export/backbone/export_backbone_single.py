@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Export Sam3TrackerVideoModel vision_encoder as a single-session ONNX backbone.
 
-Produces one fp32 ONNX (`backbone_single_fp32.onnx` by default) that takes
+Produces one fp32 ONNX (`backbone_<source>/single_fp32.onnx` by default) that takes
 `pixel_values` (1, 3, H, H) and returns the four FPN levels
 (`fpn_0`, `fpn_1`, `fpn_2`, `fpn_3`) — `fpn_3` (smallest, scale=0.5) is needed
 by the SAM3 detector path (text-prompt). The tracker (box-prompt) only consumes
@@ -9,12 +9,12 @@ the first three; tracker.py indexes `outputs[0..2]` so the extra output is
 backward compatible.
 
 Pipeline:
-    [export_backbone_single.py]  ->  backbone_single_fp32.onnx
-    [simplify_backbone.py]       ->  backbone_single_simplified.onnx
-    [compile_backbone_mxr.py]    ->  backbone_mxr_tuned.mxr  (the runtime cache)
+    [export_backbone_single.py]  ->  backbone_<source>/single_fp32.onnx
+    [simplify_backbone.py]       ->  backbone_<source>/single_simplified.onnx
+    [compile_backbone_mxr.py]    ->  backbone_<source>/tuned.mxr  (the runtime cache)
 
 Usage:
-    python export/export_backbone_single.py --imgsz 504 --output-dir onnx_files
+    python export/backbone/export_backbone_single.py --imgsz 504 --onnx-dir onnx_files_504
 """
 
 from __future__ import annotations

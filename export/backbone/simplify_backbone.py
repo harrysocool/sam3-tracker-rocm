@@ -10,7 +10,7 @@ hundreds of constant-folded Shape paths and If branches that MIGraphX can't
 fuse. After onnxsim it drops to ~2200 nodes, enabling far better kernel fusion.
 
 Usage:
-    python export/simplify_backbone.py --imgsz 504 --onnx-dir onnx_files
+    python export/backbone/simplify_backbone.py --imgsz 504 --onnx-dir onnx_files_504
 """
 
 from __future__ import annotations

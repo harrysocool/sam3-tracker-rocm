@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compile simplified backbone ONNX to a MIGraphX .mxr cache with autotuning.
 
-Reads backbone_single_simplified.onnx and produces backbone_mxr_tuned.mxr —
+Reads backbone_<source>/single_simplified.onnx and produces backbone_<source>/tuned.mxr —
 the runtime cache that tracker.py loads in ~3s instead of recompiling each
 session.
 
@@ -13,7 +13,7 @@ Requires PYTHONPATH=/opt/rocm-7.2.0/lib so the patched migraphx Python
 binding loads. The wrapping setup.sh sets this; if running standalone:
 
     PYTHONPATH=/opt/rocm-7.2.0/lib${PYTHONPATH:+:$PYTHONPATH} \\
-        python export/compile_backbone_mxr.py --imgsz 504 --onnx-dir onnx_files
+        python export/backbone/compile_backbone_mxr.py --imgsz 504 --onnx-dir onnx_files_504
 """
 
 from __future__ import annotations

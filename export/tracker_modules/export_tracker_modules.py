@@ -15,8 +15,8 @@ Key design decisions:
 
 Usage:
     PYTHONPATH not required (transformers>=5.8.0 includes sam3_tracker_video)\
-        python scripts/onnx/export/export_tracker_modules.py \\
-        [--output-dir results/onnx/tracker] [--imgsz 1008] [--opset 17] [--verify]
+        python export/tracker_modules/export_tracker_modules.py \\
+        [--onnx-dir onnx_files_1008] [--imgsz 1008] [--opset 17] [--verify]
 """
 
 from __future__ import annotations

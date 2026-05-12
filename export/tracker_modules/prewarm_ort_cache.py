@@ -7,8 +7,8 @@ Run WITHOUT the backbone loaded (no GPU memory pressure) so FP16 compilations
 succeed at 1008px without OOM.
 
 Usage:
-    python export/prewarm_ort_cache.py --onnx-dir onnx_files        # 504px
-    python export/prewarm_ort_cache.py --onnx-dir onnx_files_1008   # 1008px
+    python export/tracker_modules/prewarm_ort_cache.py --onnx-dir onnx_files_504        # 504px
+    python export/tracker_modules/prewarm_ort_cache.py --onnx-dir onnx_files_1008   # 1008px
 """
 from __future__ import annotations
 

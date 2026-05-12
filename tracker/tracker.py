@@ -7,7 +7,7 @@ Pipeline:
                    mask_decoder_propagate.onnx → mask + object pointer
   Every frame:     memory_encoder.onnx → memory entry → FIFO bank (max 7 frames)
 
-Backbone: MIGraphX compiled (backbone_mxr_tuned.mxr, ~88ms at 504px) when available,
+Backbone: MIGraphX compiled (backbone_<source>/tuned.mxr, ~88ms at 504px) when available,
           falling back to PyTorch ROCm FP16 (139ms). Pass backbone="pytorch" to force
           PyTorch. All other modules are CPU ONNX, except memory_attention which runs
           on MIGraphX when the fixed-N7 file is present.
@@ -108,7 +108,7 @@ class MIGraphXBackbone:
     SAM3 vision encoder compiled with patched MIGraphX 2.16.0.
 
     Achieves ~88ms at 504px vs PyTorch ROCm's 139ms (1.6× speedup).
-    Uses backbone_single_simplified.onnx with kernel autotuning baked into
+    Uses backbone_<source>/single_simplified.onnx with kernel autotuning baked into
     the .mxr cache file; first-time compilation takes ~3 minutes.
 
     Outputs: (fpn_0, fpn_1, fpn_2, fpn_3_or_None) as float32 numpy arrays.

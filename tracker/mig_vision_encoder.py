@@ -2,7 +2,7 @@
 
 Drop-in replacement for `Sam3VideoModel.detector_model.vision_encoder`. Routes
 the forward pass through a precompiled MIGraphX `.mxr` (the detector backbone
-exported with last_hidden_state — see `export/export_backbone_single.py
+exported with last_hidden_state — see `export/backbone/export_backbone_single.py
 --backbone-source detector`). Returns a `Sam3VisionEncoderOutput` with all
 fields the downstream Sam3VideoModel pipeline expects:
 
@@ -59,7 +59,7 @@ class MIGVisionEncoder(nn.Module):
         if len(outs) < 5 or outs[4] is None:
             raise RuntimeError(
                 "MIGVisionEncoder requires a 5-output backbone (4 FPN + last_hidden_state). "
-                "Re-export with: python export/export_backbone_single.py "
+                "Re-export with: python export/backbone/export_backbone_single.py "
                 "--backbone-source detector --output-name backbone_detector_lhs_fp32.onnx"
             )
         f0, f1, f2, f3, lhs_np = outs
