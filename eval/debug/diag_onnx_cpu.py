@@ -29,7 +29,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--checkpoint", type=Path, default=Path("/home/amd/project/sam3/model/sam3"))
     ap.add_argument("--onnx-dir", type=Path, default=Path("onnx_files_1008"))
-    ap.add_argument("--onnx-name", type=str, default="backbone_single_simplified.onnx")
+    ap.add_argument("--onnx-name", type=str, default="single_simplified.onnx")
     ap.add_argument("--image", type=Path, required=True)
     args = ap.parse_args()
 
@@ -65,7 +65,7 @@ def main():
 
     print(f"\n=== ONNX Runtime CPU on {args.onnx_name} ===")
     import onnxruntime as ort
-    sess = ort.InferenceSession(str(args.onnx_dir / args.onnx_name), providers=["CPUExecutionProvider"])
+    sess = ort.InferenceSession(str(args.onnx_dir / "backbone_detector" / args.onnx_name), providers=["CPUExecutionProvider"])
     np_in = pixel_values_fp32.numpy().astype(np.float32)
     onnx_outs = sess.run(None, {"pixel_values": np_in})
     print(f"  ONNX returned {len(onnx_outs)} outputs, shapes: {[o.shape for o in onnx_outs]}")

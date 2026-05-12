@@ -151,17 +151,17 @@ export PYTHONPATH=/opt/rocm-7.2.0/lib${PYTHONPATH:+:$PYTHONPATH}
 
 ```bash
 # Image — MIGraphX backbone (default, ~115 ms / frame)
-python demo.py --checkpoint model/sam3 --onnx-dir onnx_files \
+python demo.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
     --image assets/demo.jpg --box 85,281,1710,850
 
 # Image — PyTorch backbone fallback (no MIGraphX needed)
-python demo.py --checkpoint model/sam3 --onnx-dir onnx_files \
+python demo.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
     --backbone pytorch \
     --image assets/demo.jpg --box 85,281,1710,850
 
 # Video (any mp4) — same FPS as image, written to outputs/<stem>_tracked.mp4
 # (assets/demo.mp4 is 854x480; box catches the swan in frame 0)
-python demo.py --checkpoint model/sam3 --onnx-dir onnx_files \
+python demo.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
     --video assets/demo.mp4 --box 320,170,650,400
 ```
 
@@ -188,16 +188,16 @@ using only `assets/demo.jpg`:
 
 | Script | What it checks | Time |
 |---|---|---|
-| `eval/bench_pipeline.py`        | Per-module latency + total FPS — does your machine match the headline 8.21 FPS? | ~30 s |
-| `eval/probe_text_prompt.py`     | Text-prompt detection works (PyTorch path)             | ~10 s |
-| `eval/probe_text_prompt_mxr.py` | Text-prompt with MIGraphX backbone                     | ~15 s |
-| `eval/profile_text_prompt.py`   | Per-stage latency of text-prompt path                  | ~30 s |
+| `eval/benchmarks/bench_pipeline.py`        | Per-module latency + total FPS — does your machine match the headline 8.21 FPS? | ~30 s |
+| `eval/probes/probe_text_prompt.py`     | Text-prompt detection works (PyTorch path)             | ~10 s |
+| `eval/probes/probe_text_prompt_mxr.py` | Text-prompt with MIGraphX backbone                     | ~15 s |
+| `eval/benchmarks/profile_text_prompt.py`   | Per-stage latency of text-prompt path                  | ~30 s |
 
 ```bash
-python eval/bench_pipeline.py        --checkpoint model/sam3 --onnx-dir onnx_files
-python eval/probe_text_prompt.py     --checkpoint model/sam3 --image assets/demo.jpg --text "truck"
-python eval/probe_text_prompt_mxr.py --checkpoint model/sam3 --onnx-dir onnx_files --image assets/demo.jpg --text "truck"
-python eval/profile_text_prompt.py   --checkpoint model/sam3 --image assets/demo.jpg --text "truck"
+python eval/benchmarks/bench_pipeline.py        --checkpoint model/sam3 --onnx-dir onnx_files_504
+python eval/probes/probe_text_prompt.py     --checkpoint model/sam3 --image assets/demo.jpg --text "truck"
+python eval/probes/probe_text_prompt_mxr.py --checkpoint model/sam3 --onnx-dir onnx_files_504 --image assets/demo.jpg --text "truck"
+python eval/benchmarks/profile_text_prompt.py   --checkpoint model/sam3 --image assets/demo.jpg --text "truck"
 ```
 
 ---
@@ -259,7 +259,7 @@ The 1.5× backbone speedup comes from two patches on top of MIGraphX 2.15:
 1. A patch to `find_splits` ([AMDMIGraphX#4256](https://github.com/ROCm/AMDMIGraphX/issues/4256)) enabling fusion of the HF window-attention `Split` ops
 2. Kernel autotuning (analogous to PyTorch TunableOp) selecting optimal GEMM kernels
 
-Run `python eval/bench_pipeline.py --checkpoint model/sam3 --onnx-dir onnx_files` to reproduce.
+Run `python eval/benchmarks/bench_pipeline.py --checkpoint model/sam3 --onnx-dir onnx_files_504` to reproduce.
 
 *Measured on AMD Ryzen AI Max+ 395 (gfx1151).*
 
@@ -300,24 +300,24 @@ unzip dataset/gt-annotations.zip -d dataset/gt-annotations/
 
 ```bash
 # DAVIS 2017 val
-python eval/eval_davis.py \
+python eval/datasets/eval_davis.py \
     --checkpoint model/sam3 \
-    --onnx-dir onnx_files \
+    --onnx-dir onnx_files_504 \
     --davis dataset/DAVIS \
     --imgsz 504
 
 # Smartglass SG val
-python eval/eval_saco_sg.py \
+python eval/datasets/eval_saco_sg.py \
     --checkpoint model/sam3 \
-    --onnx-dir onnx_files \
+    --onnx-dir onnx_files_504 \
     --gt-json dataset/gt-annotations/saco_veval_smartglasses_val.json \
     --img-root dataset/saco_sg/JPEGImages_6fps \
     --imgsz 504
 
 # Pipeline A vs B latency benchmark
-python eval/bench_pipeline.py \
+python eval/benchmarks/bench_pipeline.py \
     --checkpoint model/sam3 \
-    --onnx-dir onnx_files
+    --onnx-dir onnx_files_504
 ```
 
 ---
@@ -328,15 +328,24 @@ python eval/bench_pipeline.py \
 sam3-tracker-rocm/
 ├── tracker/            # SAM3OnnxTracker — propagation pipeline
 ├── export/             # ONNX export + .mxr compile + ORT cache prewarm
-├── eval/               # DAVIS / SG evaluation, benchmarks, probes
+│   ├── backbone/       #   single-session backbone export → simplify → compile
+│   └── tracker_modules/#   mask decoders + memory + ORT cache prewarm
+├── eval/               # benchmarks, datasets, probes, debug
+│   ├── benchmarks/     #   bench_pipeline, profile_text_prompt
+│   ├── datasets/       #   DAVIS, SmartGlasses (box + text)
+│   ├── probes/         #   smoke tests for text-prompt + correctness
+│   └── debug/          #   investigation scripts (FPN diagnostics, ONNX-CPU vs PT)
 ├── analysis/           # optimization deep-dives (markdown)
 ├── tools/              # patched MIGraphX install helper
 ├── docs/               # setup guide, technical report
 │   └── images/         # README/doc visuals (committed)
 ├── model/sam3/         # config + tokenizer (weights downloaded separately)
 ├── assets/             # source inputs for demos: demo.jpg, demo.mp4
-├── onnx_files/         # generated, gitignored — 504px ONNX modules
-├── onnx_files_1008/    # generated, gitignored — 1008px ONNX modules
+├── onnx_files_504/     # generated, gitignored — 504px artefacts (subdirs below)
+│   ├── backbone_tracker/   # box-prompt path: single_fp32 / single_simplified / tuned.mxr
+│   ├── backbone_detector/  # text-prompt path (Sam3VideoModel detector FPN)
+│   └── tracker_modules/    # mask_decoder_*, memory_*, temporal_pe.npy + caches
+├── onnx_files_1008/    # generated, gitignored — 1008px (same subdir structure)
 ├── outputs/            # demo / probe outputs (gitignored, auto-created)
 ├── results/            # eval outputs (json, plots)
 ├── dataset/            # downloaded datasets (DAVIS, saco_sg)
@@ -352,7 +361,7 @@ sam3-tracker-rocm/
 
 - **MIGraphX backbone cold-start**: first compile of `backbone_mxr_tuned.mxr` takes
   ~3 min (504px) or ~9 min (1008px) with kernel autotuning. Subsequent runs load in ~3s.
-  Run `export/export_backbone_single.py` once per resolution to pre-build the cache.
+  Run `export/backbone/export_backbone_single.py` once per resolution to pre-build the cache.
 - **MIGraphX memory_attention cold-start**: first run JIT-compiles
   `memory_attention_fixed_N7.onnx` (~6s at 504px). Subsequent runs use the ORT cache.
 - **`dec_propagate` FP16 corrupts results**: ConvTranspose upsampling is numerically

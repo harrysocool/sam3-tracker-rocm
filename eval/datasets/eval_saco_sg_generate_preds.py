@@ -30,7 +30,7 @@ import cv2
 import numpy as np
 from pycocotools import mask as mask_utils
 
-WORKSPACE = Path(__file__).resolve().parent.parent
+WORKSPACE = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(WORKSPACE))
 os.environ.setdefault("MIGRAPHX_SKIP_BENCHMARKING", "1")
 
@@ -80,7 +80,7 @@ def main():
     args = ap.parse_args()
 
     if args.onnx_dir is None:
-        args.onnx_dir = WORKSPACE / ("onnx_files_1008" if args.imgsz == 1008 else "onnx_files")
+        args.onnx_dir = WORKSPACE / (f"onnx_files_{args.imgsz}")
     if args.out is None:
         args.out = WORKSPACE / f"results/saco_sg_val_{args.imgsz}px_preds.json"
 

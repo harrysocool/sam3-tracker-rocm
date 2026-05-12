@@ -84,8 +84,8 @@ def main():
     pos_enc_module = detector.vision_encoder.neck.position_encoding
 
     mxr = MIGraphXBackbone(
-        onnx_path=args.onnx_dir / "backbone_single_simplified.onnx",
-        cache_path=args.onnx_dir / "backbone_mxr_tuned.mxr",
+        onnx_path=args.onnx_dir / "backbone_detector" / "single_simplified.onnx",
+        cache_path=args.onnx_dir / "backbone_detector" / "tuned.mxr",
     )
     mxr.warmup(n=2)
 

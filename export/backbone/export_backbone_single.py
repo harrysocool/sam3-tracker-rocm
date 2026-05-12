@@ -27,7 +27,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-WORKSPACE = Path(__file__).resolve().parent.parent
+# Script lives at <repo>/export/backbone/<this>.py — go up THREE levels.
+WORKSPACE = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(WORKSPACE))
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
@@ -37,26 +38,23 @@ def parse_args():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     p.add_argument("--checkpoint", type=Path, default=WORKSPACE / "model" / "sam3")
-    p.add_argument("--output-dir", type=Path, default=WORKSPACE / "onnx_files")
+    p.add_argument("--onnx-dir", type=Path, default=None,
+                   help="Resolution root, e.g. onnx_files_504 or onnx_files_1008. "
+                        "Defaults based on --imgsz.")
     p.add_argument("--imgsz", type=int, default=504)
     p.add_argument("--opset", type=int, default=17)
-    p.add_argument(
-        "--output-name",
-        type=str,
-        default="backbone_single_fp32.onnx",
-        help="Output filename inside --output-dir",
-    )
     p.add_argument(
         "--backbone-source",
         choices=["tracker", "detector"],
         default="tracker",
-        help=("Which vision_encoder weights to export. 'tracker' (default) uses "
-              "Sam3TrackerVideoModel.vision_encoder — produces FPN features "
-              "compatible with the box-prompt tracker (existing 8.21 FPS path). "
-              "'detector' uses Sam3VideoModel.detector_model.vision_encoder — "
-              "needed for the SAM3 text-prompt detector path. The two have the "
-              "same ViT backbone weights but DIFFERENT FPN proj weights for "
-              "fpn[0..2]; fpn[3] weights match. Run both to support both paths."),
+        help=("Which vision_encoder weights to export. Output goes to "
+              "<onnx-dir>/backbone_<source>/single_fp32.onnx. "
+              "'tracker' uses Sam3TrackerVideoModel.vision_encoder — produces "
+              "FPN features compatible with the box-prompt tracker (existing "
+              "8.21 FPS path). 'detector' uses Sam3VideoModel.detector_model"
+              ".vision_encoder — needed for the SAM3 text-prompt detector path. "
+              "The two share ViT weights but have DIFFERENT FPN proj weights "
+              "for fpn[0..2]; fpn[3] weights match. Run both to support both."),
     )
     p.add_argument(
         "--verify", action="store_true",
@@ -92,8 +90,11 @@ class SingleSessionBackbone(nn.Module):
 
 def main():
     args = parse_args()
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    out_path = args.output_dir / args.output_name
+    if args.onnx_dir is None:
+        args.onnx_dir = WORKSPACE / f"onnx_files_{args.imgsz}"
+    sub_dir = args.onnx_dir / f"backbone_{args.backbone_source}"
+    sub_dir.mkdir(parents=True, exist_ok=True)
+    out_path = sub_dir / "single_fp32.onnx"
 
     from tracker.tracker import retarget_resolution
 

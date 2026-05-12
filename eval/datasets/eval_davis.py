@@ -26,7 +26,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
+WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(WORKSPACE_ROOT))
 os.environ.setdefault("MIGRAPHX_SKIP_BENCHMARKING", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
@@ -70,8 +70,7 @@ def main():
     args = parse_args()
 
     if args.onnx_dir is None:
-        suffix = "" if args.imgsz == 1008 else f"_{args.imgsz}"
-        args.onnx_dir = WORKSPACE_ROOT / "results" / "onnx" / f"tracker{suffix}"
+        args.onnx_dir = WORKSPACE_ROOT / f"onnx_files_{args.imgsz}"
     if args.out is None:
         args.out = WORKSPACE_ROOT / f"results/tracker_demo/davis_{args.split}_{args.imgsz}px.json"
 

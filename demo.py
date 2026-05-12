@@ -7,11 +7,11 @@ the first frame, then purely memory-based propagation for all subsequent frames.
 
 Usage:
     # Single image (init frame only):
-    python demo.py --checkpoint model/sam3 --onnx-dir onnx_files \
+    python demo.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
                    --image assets/demo.jpg --box 100,200,500,600
 
     # Video file:
-    python demo.py --checkpoint model/sam3 --onnx-dir onnx_files \
+    python demo.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
                    --video my_video.mp4 --box 100,200,500,600 \
                    --output tracked.mp4
 """
@@ -32,7 +32,8 @@ def parse_args():
     p.add_argument("--checkpoint", type=Path, required=True,
                    help="Path to downloaded facebook/sam3 model directory")
     p.add_argument("--onnx-dir", type=Path, required=True,
-                   help="Directory with exported ONNX files (from export/)")
+                   help="Resolution root, e.g. onnx_files_504 or onnx_files_1008. "
+                        "Reads <onnx-dir>/backbone_tracker/* and <onnx-dir>/tracker_modules/*.")
     p.add_argument("--imgsz", type=int, default=504,
                    help="Input resolution (504 for speed, 1008 for quality)")
     p.add_argument("--box", type=str, required=True,

@@ -325,11 +325,17 @@ class SAM3OnnxTracker:
         self.HW            = self.H * self.W
         self.num_maskmem   = num_maskmem
         self.mask_mem_size = self.H * 16
+        # onnx_dir is the resolution root (onnx_files_504 / onnx_files_1008).
+        # Files live in fixed subdirectories:
+        #   <onnx_dir>/backbone_tracker/  — backbone .onnx + .mxr (tracker FPN weights)
+        #   <onnx_dir>/tracker_modules/   — mask_decoder_*, memory_*, temporal_pe, caches
         onnx_dir = Path(onnx_dir)
+        backbone_dir = onnx_dir / "backbone_tracker"
+        modules_dir  = onnx_dir / "tracker_modules"
 
-        _mxr_cache  = onnx_dir / "backbone_mxr_tuned.mxr"
-        _mxr_onnx   = onnx_dir / "backbone_single_simplified.onnx"
-        _temporal_pe = onnx_dir / "temporal_pe.npy"
+        _mxr_cache  = backbone_dir / "tuned.mxr"
+        _mxr_onnx   = backbone_dir / "single_simplified.onnx"
+        _temporal_pe = modules_dir / "temporal_pe.npy"
         _use_mxr    = (backbone == "migraphx") or (
             backbone == "auto" and (_mxr_cache.exists() or _mxr_onnx.exists())
         )
@@ -339,8 +345,9 @@ class SAM3OnnxTracker:
             # temporal_pe is loaded from a pre-saved .npy file (generated once during export).
             if not _temporal_pe.exists():
                 raise FileNotFoundError(
-                    f"{_temporal_pe} not found. Run export/export_tracker_modules.py once "
-                    f"to generate it, or copy it from another onnx_files directory."
+                    f"{_temporal_pe} not found. Run export/tracker_modules/export_tracker_modules.py "
+                    f"once to generate it, or copy it from another onnx_files_<RES>/tracker_modules/ "
+                    f"directory."
                 )
             temporal_pe = np.load(str(_temporal_pe))
 
@@ -402,8 +409,8 @@ class SAM3OnnxTracker:
 
         # MIGraphX provider helpers with persistent compile cache.
         # Cache key includes model hash + fp16 flag, so FP16 and FP32 variants are stored
-        # separately. Run export/prewarm_ort_cache.py once per onnx_dir to populate.
-        _cache = str(onnx_dir / "mxr_cache")
+        # separately. Run export/tracker_modules/prewarm_ort_cache.py once per onnx_dir to populate.
+        _cache = str(modules_dir / "mxr_cache")
         def _mig(fp16: bool = False) -> list:
             opts: dict = {"migraphx_model_cache_dir": _cache}
             if fp16:
@@ -438,11 +445,11 @@ class SAM3OnnxTracker:
 
         print("  Loading ONNX tracking modules ...")
         self.dec_init = _mig_direct(
-            onnx_dir / "mask_decoder_init.onnx", "dec_init_fp32.mxr", "dec_init")
+            modules_dir / "mask_decoder_init.onnx", "dec_init_fp32.mxr", "dec_init")
         self.dec_prop = _mig_direct(
-            onnx_dir / "mask_decoder_propagate.onnx", "dec_prop_fp32.mxr", "dec_propagate")
+            modules_dir / "mask_decoder_propagate.onnx", "dec_prop_fp32.mxr", "dec_propagate")
         self.mem_enc  = _mig_direct(
-            onnx_dir / "memory_encoder.onnx", "mem_enc_fp32.mxr", "memory_encoder")
+            modules_dir / "memory_encoder.onnx", "mem_enc_fp32.mxr", "memory_encoder")
 
         # memory_attention: ORT MIGraphX EP.
         # NOTE: direct MIGraphX Python API produces numerically wrong cond output
@@ -451,13 +458,13 @@ class SAM3OnnxTracker:
         # ORT MIGraphX EP gives correct results. At 1008px with backbone in GPU
         # memory, ORT EP may fall back to CPU (silent); acceptable since this
         # module contributes <10% of total latency. FP16 via migraphx_fp16_enable.
-        mem_attn_fixed  = onnx_dir / "memory_attention_fixed_N7.onnx"
+        mem_attn_fixed  = modules_dir / "memory_attention_fixed_N7.onnx"
         if mem_attn_fixed.exists():
             ort_opts = ort.SessionOptions()
             ort_opts.intra_op_num_threads = 1
             # Persist ORT-compiled .mxr to disk so subsequent runs skip the 5-min recompile.
             # First run: ~5 min compilation → cache saved. Subsequent: ~1.3s load from cache.
-            _ort_cache_dir = onnx_dir / "ort_mig_cache"
+            _ort_cache_dir = modules_dir / "ort_mig_cache"
             _ort_cache_dir.mkdir(parents=True, exist_ok=True)
             _attn_prov_cached = []
             for (pname, popts) in _attn_prov:
@@ -477,7 +484,7 @@ class SAM3OnnxTracker:
             self._mem_attn_slots = num_maskmem
         else:
             self.mem_attn = ort.InferenceSession(
-                str(onnx_dir / "memory_attention.onnx"), providers=CPU)
+                str(modules_dir / "memory_attention.onnx"), providers=CPU)
             self._mem_attn_slots = 0
             print("  memory_attention: CPU (dynamic) — export fixed_N7 for MIGraphX speedup")
 

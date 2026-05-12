@@ -57,7 +57,7 @@ def build_mxr_vision_features(
     dtype = pixel_values.dtype
 
     np_in = pixel_values.detach().float().cpu().numpy().astype(np.float32, copy=False)
-    fpn0, fpn1, fpn2, fpn3 = mxr_backbone(np_in)
+    outs = mxr_backbone(np_in); fpn0, fpn1, fpn2, fpn3 = outs[:4]
 
     fpn = [
         torch.from_numpy(np.ascontiguousarray(t)).to(device=device, dtype=dtype)
@@ -131,9 +131,7 @@ def main():
                     default=Path("/home/amd/project/sam3/model/sam3"))
     ap.add_argument("--onnx-dir", type=Path,
                     default=Path("onnx_files_1008"),
-                    help="Dir with backbone_mxr_tuned.mxr at SAM3 default 1008px")
-    ap.add_argument("--mxr-name", type=str, default="backbone_mxr_tuned.mxr",
-                    help="Filename of the .mxr cache inside --onnx-dir")
+                    help="Resolution root (e.g. onnx_files_1008). Reads <onnx-dir>/backbone_detector/.")
     ap.add_argument("--image", type=Path, required=True)
     ap.add_argument("--text", type=str, required=True)
     ap.add_argument("--output-stem", type=Path, default=Path("outputs/text_probe"))
@@ -162,10 +160,10 @@ def main():
     print(f"      took {time.perf_counter() - t:.1f}s\n")
 
     # 2. Load MIGraphX backbone
-    print(f"[2/5] Loading MIGraphX backbone from {args.onnx_dir / args.mxr_name} ...")
+    print(f"[2/5] Loading MIGraphX backbone from {args.onnx_dir / "backbone_detector" / "tuned.mxr"} ...")
     mxr = MIGraphXBackbone(
-        onnx_path=args.onnx_dir / "backbone_single_simplified.onnx",
-        cache_path=args.onnx_dir / args.mxr_name,
+        onnx_path=args.onnx_dir / "backbone_detector" / "single_simplified.onnx",
+        cache_path=args.onnx_dir / "backbone_detector" / "tuned.mxr",
     )
     mxr.warmup(n=3)
     print()

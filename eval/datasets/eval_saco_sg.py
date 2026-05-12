@@ -21,7 +21,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
+WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(WORKSPACE_ROOT))
 os.environ.setdefault("MIGRAPHX_SKIP_BENCHMARKING", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
@@ -67,7 +67,7 @@ def main():
 
     # Auto-select paths based on imgsz
     if args.onnx_dir is None:
-        args.onnx_dir = WORKSPACE_ROOT / ("onnx_files_1008" if args.imgsz == 1008 else "onnx_files")
+        args.onnx_dir = WORKSPACE_ROOT / (f"onnx_files_{args.imgsz}")
     if args.out is None:
         args.out = WORKSPACE_ROOT / f"results/tracker_demo/baseline_50seq_{args.imgsz}px.json"
 

@@ -10,7 +10,7 @@ import cv2, numpy as np
 from PIL import Image
 from pycocotools import mask as mask_utils
 
-WORKSPACE = Path(__file__).resolve().parent.parent
+WORKSPACE = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(WORKSPACE))
 os.environ.setdefault("HSA_OVERRIDE_GFX_VERSION", "11.5.1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")

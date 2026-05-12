@@ -60,13 +60,12 @@ def parse_args():
     p.add_argument("--dtype", choices=["fp16", "fp32"], default="fp16")
     p.add_argument("--mig", action="store_true",
                    help="Use MIGraphX backbone for vision_encoder (≈2× faster init "
-                        "and per-frame backbone). Requires backbone_detector_lhs_mxr_tuned.mxr "
-                        "in --onnx-dir (build with export/export_backbone_single.py "
-                        "--backbone-source detector).")
+                        "and per-frame backbone). Reads <onnx-dir>/backbone_detector/tuned.mxr "
+                        "(build with: python export/backbone/export_backbone_single.py "
+                        "--backbone-source detector + simplify + compile).")
     p.add_argument("--onnx-dir", type=Path, default=Path("onnx_files_1008"),
-                   help="Where the MIG backbone .mxr lives (only used with --mig)")
-    p.add_argument("--mxr-name", type=str, default="backbone_detector_lhs_mxr_tuned.mxr",
-                   help="MIG backbone filename inside --onnx-dir")
+                   help="Resolution root (e.g. onnx_files_1008). The MIG path reads "
+                        "<onnx-dir>/backbone_detector/{single_simplified.onnx,tuned.mxr}.")
     args = p.parse_args()
     if (args.image is None) == (args.video is None):
         sys.exit("Pass exactly one of --image or --video")
@@ -140,9 +139,10 @@ def main():
         t = time.perf_counter()
         from tracker.tracker import MIGraphXBackbone
         from tracker.mig_vision_encoder import patch_sam3_video_model_with_mig
+        det_dir = args.onnx_dir / "backbone_detector"
         mxr = MIGraphXBackbone(
-            onnx_path=args.onnx_dir / "backbone_detector_lhs_simplified.onnx",
-            cache_path=args.onnx_dir / args.mxr_name,
+            onnx_path=det_dir / "single_simplified.onnx",
+            cache_path=det_dir / "tuned.mxr",
         )
         mxr.warmup(n=2)
         patch_sam3_video_model_with_mig(model, mxr)

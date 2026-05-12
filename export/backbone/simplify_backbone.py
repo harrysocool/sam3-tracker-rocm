@@ -25,21 +25,26 @@ def parse_args():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("--onnx-dir", type=Path, required=True)
+    p.add_argument("--onnx-dir", type=Path, required=True,
+                   help="Resolution root (e.g. onnx_files_504). Reads "
+                        "<onnx-dir>/backbone_<source>/single_fp32.onnx, writes "
+                        "<onnx-dir>/backbone_<source>/single_simplified.onnx.")
     p.add_argument("--imgsz", type=int, default=504)
-    p.add_argument("--input-name", type=str, default="backbone_single_fp32.onnx")
-    p.add_argument("--output-name", type=str, default="backbone_single_simplified.onnx")
+    p.add_argument("--backbone-source", choices=["tracker", "detector"],
+                   default="tracker",
+                   help="Which backbone subdir to operate on")
     return p.parse_args()
 
 
 def main():
     args = parse_args()
-    src = args.onnx_dir / args.input_name
-    dst = args.onnx_dir / args.output_name
+    sub_dir = args.onnx_dir / f"backbone_{args.backbone_source}"
+    src = sub_dir / "single_fp32.onnx"
+    dst = sub_dir / "single_simplified.onnx"
 
     if not src.exists():
         raise FileNotFoundError(
-            f"{src} not found. Run export/export_backbone_single.py first."
+            f"{src} not found. Run export/backbone/export_backbone_single.py first."
         )
 
     print(f"Loading {src} ({src.stat().st_size / 1e6:.0f} MB)...")

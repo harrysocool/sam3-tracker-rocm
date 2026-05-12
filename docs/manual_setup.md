@@ -112,28 +112,33 @@ huggingface-cli download facebook/sam3 --local-dir model/sam3
 
 ```bash
 # 504px — recommended (7.10 FPS, DAVIS J=81.1%)
-python export/export_tracker_modules.py --imgsz 504 --output-dir onnx_files
+python export/tracker_modules/export_tracker_modules.py --imgsz 504 --onnx-dir onnx_files_504
 
 # 1008px — higher quality (2.39 FPS, DAVIS J=85.8%)
-python export/export_tracker_modules.py --imgsz 1008 --output-dir onnx_files_1008
+python export/tracker_modules/export_tracker_modules.py --imgsz 1008 --onnx-dir onnx_files_1008
 ```
 
-> `--fixed-slots 7` (default) also exports `memory_attention_fixed_N7.onnx` with static shapes.
-> The tracker automatically picks this file and runs it on MIGraphX.
+> Outputs go to `<onnx-dir>/tracker_modules/`. `--fixed-slots 7` (default) also exports
+> `memory_attention_fixed_N7.onnx` with static shapes for MIGraphX.
 
 ### 5b. Export and compile MIGraphX backbone (~10 minutes first time)
 
+The backbone has **two flavours** depending on path:
+- `--backbone-source tracker` (default) — for box-prompt path (`demo.py`)
+- `--backbone-source detector` — for text-prompt path (`demo_text.py --mig`)
+
+They share ViT weights but have different FPN proj weights for fpn[0..2]. Both
+write to `<onnx-dir>/backbone_<source>/{single_fp32.onnx, single_simplified.onnx, tuned.mxr}`.
+
 ```bash
-# Export backbone ONNX (single-session, simplified)
-# Then compile to .mxr with kernel autotuning — saved once, loaded in ~3s afterwards
+# 504px tracker backbone
+python export/backbone/export_backbone_single.py --imgsz 504 --onnx-dir onnx_files_504 --backbone-source tracker
+python export/backbone/simplify_backbone.py        --imgsz 504 --onnx-dir onnx_files_504 --backbone-source tracker
+python export/backbone/compile_backbone_mxr.py     --imgsz 504 --onnx-dir onnx_files_504 --backbone-source tracker
+# Creates: onnx_files_504/backbone_tracker/tuned.mxr  (~896 MB, one-time compile ~3 min)
 
-# 504px backbone
-python export/export_backbone_single.py --imgsz 504 --output-dir onnx_files
-# Creates: onnx_files/backbone_mxr_tuned.mxr  (~896 MB, one-time compile ~3 min)
-
-# 1008px backbone
-python export/export_backbone_single.py --imgsz 1008 --output-dir onnx_files_1008
-# Creates: onnx_files_1008/backbone_mxr_tuned.mxr  (~920 MB, one-time compile ~9 min)
+# 1008px tracker backbone (same 3-step pipeline, --imgsz 1008)
+# 1008px detector backbone (substitute --backbone-source detector)
 ```
 
 > The `.mxr` cache encodes kernel-autotuned GPU programs. After first compile the backbone

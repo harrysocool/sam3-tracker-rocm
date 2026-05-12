@@ -34,7 +34,6 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--checkpoint", type=Path, default=Path("/home/amd/project/sam3/model/sam3"))
     ap.add_argument("--onnx-dir", type=Path, default=Path("onnx_files_1008"))
-    ap.add_argument("--mxr-name", type=str, default="backbone_mxr_tuned.mxr")
     ap.add_argument("--image", type=Path, required=True)
     ap.add_argument("--text", type=str, default="truck")
     args = ap.parse_args()
@@ -50,8 +49,8 @@ def main():
     pos_enc_module = detector.vision_encoder.neck.position_encoding
 
     mxr = MIGraphXBackbone(
-        onnx_path=args.onnx_dir / "backbone_single_simplified.onnx",
-        cache_path=args.onnx_dir / args.mxr_name,
+        onnx_path=args.onnx_dir / "backbone_detector" / "single_simplified.onnx",
+        cache_path=args.onnx_dir / "backbone_detector" / "tuned.mxr",
     )
     mxr.warmup(n=2)
 
