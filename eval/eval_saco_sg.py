@@ -39,8 +39,7 @@ def parse_args():
                    default=WORKSPACE_ROOT / "dataset/gt-annotations/saco_veval_smartglasses_val.json")
     p.add_argument("--img-root", type=Path,
                    default=WORKSPACE_ROOT / "dataset/saco_sg/JPEGImages_6fps")
-    p.add_argument("--onnx-dir", type=Path, default=None,
-                   help="ONNX dir (default: auto from imgsz)")
+    p.add_argument("--onnx-dir", type=Path, default=None)
     p.add_argument("--checkpoint", type=Path,
                    default=WORKSPACE_ROOT / "model/sam3")
     p.add_argument("--num-maskmem", type=int, default=7)
@@ -68,8 +67,7 @@ def main():
 
     # Auto-select paths based on imgsz
     if args.onnx_dir is None:
-        suffix = "" if args.imgsz == 1008 else f"_{args.imgsz}"
-        args.onnx_dir = WORKSPACE_ROOT / "results" / "onnx" / f"tracker{suffix}"
+        args.onnx_dir = WORKSPACE_ROOT / ("onnx_files_1008" if args.imgsz == 1008 else "onnx_files")
     if args.out is None:
         args.out = WORKSPACE_ROOT / f"results/tracker_demo/baseline_50seq_{args.imgsz}px.json"
 
