@@ -148,6 +148,17 @@ def main():
         patch_sam3_video_model_with_mig(model, mxr)
         print(f"  MIG backbone ready in {time.perf_counter() - t:.1f}s")
 
+        # Optional: also MIG-ize the DETR encoder (~245 ms PT → ~80 ms MIG per frame).
+        detr_onnx = args.onnx_dir / "detector_modules" / "detr_encoder_simplified.onnx"
+        if detr_onnx.exists():
+            print(f"Patching detector_model.detr_encoder with MIGraphX shim ...")
+            from tracker.mig_detr_encoder import patch_sam3_video_model_detr_encoder
+            patch_sam3_video_model_detr_encoder(model, detr_onnx)
+            print(f"  MIG detr_encoder ready")
+        else:
+            print(f"  (skipping detr_encoder MIG: build with "
+                  f"export/detector/export_detr_encoder.py to enable)")
+
     # Collect frames
     if args.image is not None:
         bgr0 = cv2.imread(str(args.image))
