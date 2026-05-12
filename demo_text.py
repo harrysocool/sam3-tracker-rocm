@@ -155,6 +155,13 @@ def main():
             from tracker.mig_detr_encoder import patch_sam3_video_model_detr_encoder
             patch_sam3_video_model_detr_encoder(model, detr_onnx)
             print(f"  MIG detr_encoder ready")
+        # Optional: also MIG-ize memory_attention (steady-state padding)
+        mem_attn_onnx = args.onnx_dir / "tracker_modules" / "memory_attention_fixed_S7_P32.onnx"
+        if mem_attn_onnx.exists():
+            print(f"Patching tracker_model.memory_attention with MIGraphX shim ...")
+            from tracker.mig_memory_attention import patch_sam3_video_model_memory_attention
+            patch_sam3_video_model_memory_attention(model, mem_attn_onnx)
+            print(f"  MIG memory_attention ready (PT fallback for non-steady-state shapes)")
         else:
             print(f"  (skipping detr_encoder MIG: build with "
                   f"export/detector/export_detr_encoder.py to enable)")
