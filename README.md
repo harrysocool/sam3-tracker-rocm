@@ -194,22 +194,29 @@ text-prompt paths do not need it.
 
 ### Box-prompt (`demo.py`) — tracking only, fastest
 
+> `assets/demo.jpg` and `assets/demo.mp4` are bundled demo files (a truck image and
+> a short swan clip). Replace with your own image or video. `--box x1,y1,x2,y2` is
+> the bounding box around the target on frame 0, in pixel coordinates.
+
 ```bash
 # Image — MIGraphX backbone (default, ~115 ms / frame)
 python demo.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
-    --image assets/demo.jpg --box 85,281,1710,850
+    --image assets/demo.jpg --box 85,281,1710,850   # x1,y1,x2,y2 in pixels
 
 # Image — PyTorch backbone fallback (no MIGraphX needed)
 python demo.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
     --backbone pytorch \
     --image assets/demo.jpg --box 85,281,1710,850
 
-# Video (any mp4) — same FPS as image, written to outputs/<stem>_tracked.mp4
+# Video (any mp4) — output written to outputs/box/<stem>_tracked.mp4
 python demo.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
     --video assets/demo.mp4 --box 320,170,650,400
 ```
 
 ### Text-prompt (`demo_text.py`) — detection + tracking, open-vocabulary
+
+> `assets/demo.mp4` is a bundled swan clip. Replace with your own video.
+> MIG commands (`--mig`) require Stage 2 artefacts to be built first.
 
 ```bash
 # Image — pure PyTorch path (no MIG artifacts needed)
@@ -218,7 +225,7 @@ python demo_text.py --checkpoint model/sam3 \
 
 # Video — pure PyTorch (~0.5 FPS @ 1008px)
 python demo_text.py --checkpoint model/sam3 \
-    --video assets/demo.mp4 --text "swan" --max-frames 60
+    --video assets/demo.mp4 --text "swan" --max-frames 60  # omit for full video
 
 # Video — MIG @504 (~5.1 FPS, 10× over PT baseline, best for demos)
 LD_PRELOAD=/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0 \
@@ -231,12 +238,6 @@ LD_PRELOAD=/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:/opt/rocm-7.2.0/lib/migraphx/l
     --video assets/demo.mp4 --text "swan" --mig --max-frames 60
 ```
 
-Build artefacts with (see Stage 2 above if you haven't already):
-```bash
-python export/build.py --pipeline text --imgsz 504   # ~18 min
-python export/build.py --pipeline text --imgsz 1008  # ~30 min
-```
-
 Multi-object flags:
 - `--min-score 0.5` — only track detections above this confidence (default 0.5)
 - `--max-objects 0` — cap by score rank, 0 = all above threshold (default 0 = all)
@@ -244,35 +245,41 @@ Multi-object flags:
 ```bash
 # Track all dogs in the scene
 python demo_text.py --checkpoint model/sam3 \
-    --video input.mp4 --text "dog" \
+    --video assets/demo.mp4 --text "dog" \
     --imgsz 504 --mig --onnx-dir onnx_files_504 --min-score 0.4
 
 # Track at most 2 people (highest scoring)
 python demo_text.py --checkpoint model/sam3 \
-    --video input.mp4 --text "person" \
+    --video assets/demo.mp4 --text "person" \
     --imgsz 504 --mig --onnx-dir onnx_files_504 --max-objects 2
 ```
 
 Outputs default to `outputs/{box,text}/<input-stem>_{tracked,text}.{jpg,mp4}` (overridable
 with `--output`). Try short noun phrases: `"swan"`, `"a person on a bike"`, `"yellow taxi"`.
 
-### Quick checks (no dataset needed)
-
-After `setup.sh`, four small scripts smoke-test specific aspects of the pipeline
-using only `assets/demo.jpg`:
-
-| Script | What it checks | Time |
-|---|---|---|
-| `eval/benchmarks/bench_pipeline.py`        | Per-module latency + total FPS — does your machine match the headline 8.21 FPS? | ~30 s |
-| `eval/probes/probe_text_prompt.py`     | Text-prompt detection works (PyTorch path)             | ~10 s |
-| `eval/probes/probe_text_prompt_mxr.py` | Text-prompt with MIGraphX backbone                     | ~15 s |
-| `eval/benchmarks/profile_text_prompt.py`   | Per-stage latency of text-prompt path                  | ~30 s |
+### Quick checks
 
 ```bash
-python eval/benchmarks/bench_pipeline.py        --checkpoint model/sam3 --onnx-dir onnx_files_504
-python eval/probes/probe_text_prompt.py     --checkpoint model/sam3 --image assets/demo.jpg --text "truck"
+conda activate sam3-tracker  # if not already active
+```
+
+| Script | Requires | What it checks | Time |
+|---|---|---|---|
+| `eval/probes/probe_text_prompt.py`     | Stage 1 only | Text-prompt detection (pure PyTorch) | ~10 s |
+| `eval/benchmarks/bench_pipeline.py`    | Stage 2 box  | Per-module latency + total FPS       | ~30 s |
+| `eval/probes/probe_text_prompt_mxr.py` | Stage 2 text | Text-prompt with MIGraphX backbone   | ~15 s |
+| `eval/benchmarks/profile_text_prompt.py` | Stage 2 text | Per-stage latency of text-prompt   | ~30 s |
+
+```bash
+# After Stage 1 only:
+python eval/probes/probe_text_prompt.py --checkpoint model/sam3 --image assets/demo.jpg --text "truck"
+
+# After Stage 2 (box):
+python eval/benchmarks/bench_pipeline.py --checkpoint model/sam3 --onnx-dir onnx_files_504
+
+# After Stage 2 (text):
 python eval/probes/probe_text_prompt_mxr.py --checkpoint model/sam3 --onnx-dir onnx_files_504 --image assets/demo.jpg --text "truck"
-python eval/benchmarks/profile_text_prompt.py   --checkpoint model/sam3 --image assets/demo.jpg --text "truck"
+python eval/benchmarks/profile_text_prompt.py --checkpoint model/sam3 --image assets/demo.jpg --text "truck"
 ```
 
 ---
@@ -459,10 +466,12 @@ sam3-tracker-rocm/
 │   ├── mig_vision_encoder.py    #   MIG shim: Sam3VideoModel vision_encoder
 │   ├── mig_detr_encoder.py      #   MIG shim: Sam3DetrEncoder (ORT MIG EP)
 │   └── mig_memory_attention.py  #   MIG shim: memory_attention (ORT MIG EP, padded)
-├── export/                 # ONNX export + .mxr compile scripts
-│   ├── backbone/           #   ViT backbone: export → simplify → MIGraphX compile
-│   ├── detector/           #   DETR encoder export (text-prompt path)
-│   └── tracker_modules/    #   mask_decoder_*, memory_*, memory_attention (padded)
+├── export/                      # ONNX export + .mxr compile scripts
+│   ├── build.py             # ← unified build entry point (box + text, any resolution)
+│   ├── build_text_prompt_mig.py  #   text-prompt sub-script (called by build.py)
+│   ├── backbone/            #   ViT backbone: export → simplify → MIGraphX compile
+│   ├── detector/            #   DETR encoder export (text-prompt path)
+│   └── tracker_modules/     #   mask_decoder_*, memory_*, memory_attention (padded)
 ├── eval/                   # Benchmarks, dataset evals, regression tools
 │   ├── benchmarks/         #   bench_pipeline, profile_full_mig, profile_text_prompt
 │   ├── datasets/           #   eval_davis, eval_saco_sg, eval_sg_text_prompt,
