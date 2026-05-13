@@ -74,3 +74,4 @@ tunableop_results*.csv
 
 # Local mxr cache (legacy 3-session compile artifacts)
 mxr_cache/
+docs/inference_stack_explained.md
