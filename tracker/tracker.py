@@ -229,10 +229,13 @@ def retarget_resolution(model, new_imgsz: int) -> None:
     model.config.image_size = new_imgsz
     model.config.memory_attention_rope_feat_sizes = [new_H, new_H]
     model.image_size = new_imgsz
-    pe = model.prompt_encoder
-    pe.image_embedding_size = (new_H, new_H)
-    pe.mask_input_size = (4 * new_H, 4 * new_H)
-    pe.input_image_size = new_imgsz
+    # prompt_encoder lives on Sam3TrackerVideoModel directly, but on
+    # Sam3VideoModel it lives under .tracker_model. Be defensive.
+    pe = getattr(model, "prompt_encoder", None) or          getattr(getattr(model, "tracker_model", None), "prompt_encoder", None)
+    if pe is not None:
+        pe.image_embedding_size = (new_H, new_H)
+        pe.mask_input_size = (4 * new_H, 4 * new_H)
+        pe.input_image_size = new_imgsz
 
     for _, mod in model.named_modules():
         dev   = getattr(mod, "rope_embeddings_cos", torch.tensor(0)).device

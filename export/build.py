@@ -119,6 +119,7 @@ def build_box(imgsz: int, args) -> bool:
             ok = ok and run([
                 sys.executable,
                 "export/backbone/simplify_backbone.py",
+                "--onnx-dir", str(onnx_dir),
                 "--imgsz", str(imgsz),
                 "--backbone-source", "tracker",
             ], "Simplify backbone (onnxsim)")
