@@ -138,9 +138,10 @@ Two demo entry points — pick the one matching your prompt type:
 
 | Demo | Prompt | Backbone + Detector | Steady-state FPS | Use for |
 |---|---|---|---|---|
-| `demo.py`           | bounding box  | MIGraphX backbone, MIG tracker modules | **8.2 FPS @ 504px** | known target, real-time |
-| `demo_text.py --mig` | text         | MIG backbone + MIG detr_encoder + MIG memory_attention (ORT EP), PT detr_decoder + mask_head | **1.5 FPS @ 1008px** (2.9× over PT) | open-vocabulary, video tracking |
-| `demo_text.py`       | text         | pure PyTorch                          | 0.5 FPS @ 1008px | open-vocabulary, no MIG setup |
+| `demo.py`                        | bounding box | MIGraphX backbone, MIG tracker modules | **8.2 FPS @ 504px** | known target, real-time |
+| `demo_text.py --mig --imgsz 504` | text         | MIG backbone + detr_encoder + memory_attention @504 | **5.1 FPS @ 504px** (2.0× over PT @504) | open-vocabulary, high FPS |
+| `demo_text.py --mig`             | text         | MIG backbone + detr_encoder + memory_attention @1008 | **1.5 FPS @ 1008px** (2.9× over PT @1008) | open-vocabulary, higher quality |
+| `demo_text.py`                   | text         | pure PyTorch                                         | 0.5 FPS @ 1008px | open-vocabulary, no MIG setup |
 
 All commands assume you ran `./setup.sh` and are in the project root. The MIGraphX
 backbone requires `/opt/rocm-7.2.0/lib` on `PYTHONPATH`; PyTorch path doesn't:
@@ -177,25 +178,31 @@ python demo_text.py --checkpoint model/sam3 \
 python demo_text.py --checkpoint model/sam3 \
     --video assets/demo.mp4 --text "swan" --max-frames 60
 
-# Video — MIG-accelerated (~1.5 FPS, 2.9× faster, identical mask quality)
-# Requires the detector backbone + detr_encoder + memory_attention ONNX/MXR
-# (build once with the export commands below).
+# Video — MIG @504 (~5.1 FPS, 10× over PT @1008, best for demos)
+LD_PRELOAD=/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0 \
+    python demo_text.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
+    --video assets/demo.mp4 --text "swan" --imgsz 504 --mig --max-frames 60
+
+# Video — MIG @1008 (~1.5 FPS, highest mask quality)
 LD_PRELOAD=/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0 \
     python demo_text.py --checkpoint model/sam3 --onnx-dir onnx_files_1008 \
     --video assets/demo.mp4 --text "swan" --mig --max-frames 60
 ```
 
-Build the MIG-path artefacts once (~25 min total at 1008px):
+Build the MIG-path artefacts once (run for each resolution you want):
 ```bash
-# 1. Detector backbone with last_hidden_state (~12 min compile)
-python export/backbone/export_backbone_single.py --imgsz 1008 --backbone-source detector
+# --- 504px (~15 min total, ~3 FPS faster demos) ---
+python export/backbone/export_backbone_single.py  --imgsz 504 --backbone-source detector
+python export/backbone/simplify_backbone.py        --imgsz 504 --backbone-source detector
+python export/backbone/compile_backbone_mxr.py     --imgsz 504 --backbone-source detector --skip-verify
+python export/detector/export_detr_encoder.py     --imgsz 504
+python export/tracker_modules/export_memory_attention_padded.py --imgsz 504
+
+# --- 1008px (~25 min total, higher quality) ---
+python export/backbone/export_backbone_single.py  --imgsz 1008 --backbone-source detector
 python export/backbone/simplify_backbone.py        --imgsz 1008 --backbone-source detector
 python export/backbone/compile_backbone_mxr.py     --imgsz 1008 --backbone-source detector --skip-verify
-
-# 2. DETR encoder (~2 min)
-python export/detector/export_detr_encoder.py --imgsz 1008
-
-# 3. Padded memory_attention for the tracker (~10 s, ORT EP compile lazy at first run)
+python export/detector/export_detr_encoder.py     --imgsz 1008
 python export/tracker_modules/export_memory_attention_padded.py --imgsz 1008
 ```
 
@@ -281,6 +288,17 @@ The 1.5× backbone speedup comes from two patches on top of MIGraphX 2.15:
 2. Kernel autotuning (analogous to PyTorch TunableOp) selecting optimal GEMM kernels
 
 Run `python eval/benchmarks/bench_pipeline.py --checkpoint model/sam3 --onnx-dir onnx_files_504` to reproduce.
+
+### Text-prompt propagation FPS (`demo_text.py`)
+
+| Resolution | Path | Propagation FPS | vs PT baseline |
+|---|---|---|---|
+| 504px | MIG (backbone + detr_encoder + memory_attention) | **5.1 FPS** | **2.0×** |
+| 504px | PyTorch | 2.6 FPS | baseline |
+| 1008px | MIG (backbone + detr_encoder + memory_attention) | **1.5 FPS** | **2.9×** |
+| 1008px | PyTorch | 0.52 FPS | baseline |
+
+*Mask quality: MIG vs PT mean IoU = 0.999 @1008px, 0.994 @504px (frame-by-frame, 20-30 frames blackswan).*
 
 *Measured on AMD Ryzen AI Max+ 395 (gfx1151).*
 
@@ -392,14 +410,13 @@ sam3-tracker-rocm/
   limitation in `find_splits`. See [`analysis/migraphx_backbone_investigation.md`](analysis/migraphx_backbone_investigation.md) for details.
 - **Text-prompt path: partial MIG** (`demo_text.py --mig`). Three modules are
   MIG-accelerated — vision_encoder backbone, detr_encoder, memory_attention —
-  bringing 1008px propagation from 0.52 FPS (pure PT) to **1.5 FPS** (2.9× over
-  baseline). Mask quality matches PT exactly (verified frame-by-frame on the
-  swan video). Remaining cost (~600 ms/frame) is the ViT backbone itself
-  (~380 ms; mostly numpy↔torch + GPU↔CPU transfer through the MIG bridge),
-  the still-PT DETR decoder + detector mask head (~50 ms together), and the
-  PT tracker mask decoder (~10 ms). Going further requires either (a) keeping
-  data on GPU through the MIG bridge (HIP IPC; difficult on this stack) or
-  (b) running the full pipeline at 504px (planned next).
+  at both 504px and 1008px. FPS: **5.1 @ 504px** (2.0× over PT @504, 10× over
+  PT @1008) and **1.5 @ 1008px** (2.9× over PT @1008). Mask quality matches PT
+  at both resolutions (mean IoU ≥0.994 verified frame-by-frame). Remaining cost
+  is dominated by the ViT backbone (~65% of propagation time), where the main
+  overhead is GPU↔CPU data movement through the MIG numpy bridge — not the
+  kernel itself. Going further requires GPU-resident MIG pipes (HIP IPC) which
+  is a known future optimization target.
 - **MIG attention modules MUST go through ORT MIG EP.** Direct
   `migraphx.parse_onnx + quantize_fp16` on attention layers (memory_attention,
   detr_encoder) produces NaN outputs (FP16 attention bug analogous to

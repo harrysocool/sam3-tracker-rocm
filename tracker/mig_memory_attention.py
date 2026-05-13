@@ -33,21 +33,23 @@ import torch.nn as nn
 import onnxruntime as ort
 
 
-# ----- shape constants for the SAM3 1008px text-prompt video pipeline -----
-HW_1008 = 5184              # 72 * 72
+# ----- shape constants -----
 SPATIAL_SLOTS = 7
-# K=32 (= 8 conditioning-frame pointers × 4 tokens/pointer) is the practical cap
-# imposed by MIGraphX runtime: at K=64 the compiler picks a kernel that's
-# 14× slower (791 ms vs 55 ms). When the actual PT pointer count exceeds 32,
-# we truncate to the LAST 32 (= most-recent pointers); information from older
-# conditioning frames is dropped — affects long-video re-identification but
-# leaves continuous-tracking quality intact.
-PTR_TOKENS = 32
-EXPECTED_SPATIAL_LEN = SPATIAL_SLOTS * HW_1008      # 36288
-EXPECTED_TOTAL_LEN   = EXPECTED_SPATIAL_LEN + PTR_TOKENS  # 36320
+# K=32 is the practical max imposed by MIGraphX runtime at 1008px:
+# at K=64 the compiler picks a kernel that's 14× slower (791 ms vs 55 ms).
+# At 504px the cliff may sit at a different K — we still default to 32 since
+# it covers the typical text-prompt single-object use case (≤8 conditioning
+# frames worth of pointers); when actual N > 32 we keep the most-recent 32.
+DEFAULT_PTR_TOKENS = 32
 
 
 class MIGMemoryAttention(nn.Module):
+    """ORT MIG EP shim for tracker_model.memory_attention.
+
+    Shape parameters (HW per spatial frame, K = ptr-token cap) are inferred
+    from the ONNX session's input shapes — one shim instance per resolution.
+    """
+
     def __init__(self, onnx_path: Path, original_forward,
                  ort_cache_dir: Path | None = None):
         super().__init__()
@@ -74,7 +76,22 @@ class MIGMemoryAttention(nn.Module):
         self.session = ort.InferenceSession(str(onnx_path), sess_options=opts, providers=providers)
         elapsed = time.perf_counter() - t0
         prov = self.session.get_providers()[0]
-        print(f"  memory_attention (ORT MIG EP): ready in {elapsed:.1f}s on {prov}")
+
+        # Infer shape constants from the ONNX session inputs.
+        #   current_vision_features: (HW, 1, 256)
+        #   memory:                  (S*HW + K, 1, 64)
+        in_shapes = {x.name: x.shape for x in self.session.get_inputs()}
+        self.HW = int(in_shapes["current_vision_features"][0])
+        total_mem = int(in_shapes["memory"][0])
+        self.spatial_len = SPATIAL_SLOTS * self.HW
+        self.ptr_tokens = total_mem - self.spatial_len
+        if self.ptr_tokens < 0:
+            raise RuntimeError(
+                f"ONNX memory length {total_mem} < expected spatial {self.spatial_len} "
+                f"(HW={self.HW}, S={SPATIAL_SLOTS}). Re-export the padded ONNX."
+            )
+        print(f"  memory_attention (ORT MIG EP): ready in {elapsed:.1f}s on {prov}  "
+              f"(HW={self.HW}, spatial={self.spatial_len}, K={self.ptr_tokens})")
 
         # Stats
         self._mig_calls = 0
@@ -90,10 +107,10 @@ class MIGMemoryAttention(nn.Module):
     ):
         spatial_part = memory.shape[0] - num_object_pointer_tokens
         # Fast-path requires the steady-state spatial size; pointer count
-        # may exceed PTR_TOKENS (we truncate to the most-recent PTR_TOKENS).
-        ok = (spatial_part == EXPECTED_SPATIAL_LEN
+        # may exceed self.ptr_tokens (we truncate to the most-recent K).
+        ok = (spatial_part == self.spatial_len
               and num_object_pointer_tokens >= 0
-              and current_vision_features.shape[0] == HW_1008)
+              and current_vision_features.shape[0] == self.HW)
 
         if not ok:
             self._pt_fallback_calls += 1
@@ -110,25 +127,25 @@ class MIGMemoryAttention(nn.Module):
         dtype = current_vision_features.dtype
 
         # Object pointers are at the END of the memory tensor:
-        #   [spatial(36288) | actual_ptrs(N)]
-        # We need exactly PTR_TOKENS ptr slots:
-        #   N <= PTR_TOKENS:  pad with zeros (no info loss)
-        #   N >  PTR_TOKENS:  keep last PTR_TOKENS (drop oldest pointers)
+        #   [spatial(self.spatial_len) | actual_ptrs(N)]
+        # We need exactly self.ptr_tokens slots:
+        #   N <= ptr_tokens:  pad with zeros (no info loss)
+        #   N >  ptr_tokens:  keep last ptr_tokens (drop oldest pointers)
         spatial = memory[:spatial_part]
         spatial_pos = memory_posision_embeddings[:spatial_part]
         ptrs = memory[spatial_part:]
         ptrs_pos = memory_posision_embeddings[spatial_part:]
 
-        if num_object_pointer_tokens <= PTR_TOKENS:
-            pad_n = PTR_TOKENS - num_object_pointer_tokens
+        if num_object_pointer_tokens <= self.ptr_tokens:
+            pad_n = self.ptr_tokens - num_object_pointer_tokens
             if pad_n > 0:
                 zero_pad = torch.zeros(pad_n, 1, 64, dtype=memory.dtype, device=memory.device)
                 ptrs = torch.cat([ptrs, zero_pad], dim=0)
                 ptrs_pos = torch.cat([ptrs_pos, zero_pad], dim=0)
         else:
-            # Keep the LAST PTR_TOKENS (most recent pointers in PT temporal order)
-            ptrs = ptrs[-PTR_TOKENS:]
-            ptrs_pos = ptrs_pos[-PTR_TOKENS:]
+            # Keep the LAST K pointers (most recent in PT temporal order)
+            ptrs = ptrs[-self.ptr_tokens:]
+            ptrs_pos = ptrs_pos[-self.ptr_tokens:]
 
         memory_padded = torch.cat([spatial, ptrs], dim=0)
         mem_pos_padded = torch.cat([spatial_pos, ptrs_pos], dim=0)
