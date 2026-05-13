@@ -93,6 +93,12 @@ info "conda: $(conda --version)"
 # ─────────────────────────────────────────────────────────────────────────────
 step "0a. ROCm 7.2 APT (stock MIGraphX)"
 # ─────────────────────────────────────────────────────────────────────────────
+# Always install runtime libs needed by OpenCV/cv2 (missing from minimal envs)
+if ! $SKIP_APT; then
+    sudo apt-get update -qq 2>/dev/null || true
+    sudo apt-get install -y libgl1 libglib2.0-0 2>/dev/null || true
+fi
+
 if $SKIP_APT; then
     info "Skipping APT install (--skip-apt)"
 elif dpkg -s migraphx &>/dev/null; then
@@ -107,7 +113,7 @@ else
         https://repo.radeon.com/rocm/apt/7.2 noble main" | \
         sudo tee /etc/apt/sources.list.d/rocm.list
     sudo apt-get update -qq
-    sudo apt-get install -y migraphx migraphx-dev libgl1 libglib2.0-0
+    sudo apt-get install -y migraphx migraphx-dev
     info "migraphx installed"
 fi
 
