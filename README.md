@@ -209,22 +209,21 @@ LD_PRELOAD=/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:/opt/rocm-7.2.0/lib/migraphx/l
     --video assets/demo.mp4 --text "swan" --mig --max-frames 60
 ```
 
-Build the MIG-path artefacts once (run for each resolution you want):
+Build the MIG-path artefacts once with the one-shot build script:
 ```bash
-# --- 504px (~15 min total) ---
-python export/backbone/export_backbone_single.py  --imgsz 504 --backbone-source detector
-python export/backbone/simplify_backbone.py        --imgsz 504 --backbone-source detector
-python export/backbone/compile_backbone_mxr.py     --imgsz 504 --backbone-source detector --skip-verify
-python export/detector/export_detr_encoder.py      --imgsz 504
-python export/tracker_modules/export_memory_attention_padded.py --imgsz 504
+# 504px (~15 min)
+python export/build_text_prompt_mig.py --imgsz 504
 
-# --- 1008px (~25 min total, higher quality) ---
-python export/backbone/export_backbone_single.py  --imgsz 1008 --backbone-source detector
-python export/backbone/simplify_backbone.py        --imgsz 1008 --backbone-source detector
-python export/backbone/compile_backbone_mxr.py     --imgsz 1008 --backbone-source detector --skip-verify
-python export/detector/export_detr_encoder.py      --imgsz 1008
-python export/tracker_modules/export_memory_attention_padded.py --imgsz 1008
+# 1008px (~25 min, higher quality)
+python export/build_text_prompt_mig.py --imgsz 1008
+
+# Both resolutions in one call
+python export/build_text_prompt_mig.py --imgsz 504 1008
 ```
+
+Each step skips if its output already exists — safe to re-run after interruption.
+Use `--force` to rebuild, `--steps backbone|detr_encoder|memory_attention` to
+run a single stage.
 
 Multi-object flags:
 - `--min-score 0.5` — only track detections above this confidence (default 0.5)
