@@ -288,15 +288,9 @@ python eval/benchmarks/profile_text_prompt.py --checkpoint model/sam3 --image as
 
 ### Text-prompt: detection + tracking (`demo_text.py --mig --imgsz 504`)
 
-| `"swan"` | `"camel"` |
-|:---:|:---:|
-| <img src="docs/images/demo_swan_text_mig.gif" width="400" alt="swan text-prompt MIG"> | <img src="docs/images/demo_camel_text_mig.gif" width="400" alt="camel text-prompt MIG"> |
-
-### Text-prompt multi-object (`"pig"`, `--min-score 0.3`)
-
-| pigs — 3 pigs tracked simultaneously from frame 0 |
-|:---:|
-| <img src="docs/images/demo_pigs_multi_object.gif" width="600" alt="pigs multi-object"> |
+| `"swan"` | `"camel"` | `"pig"` (3 objects) |
+|:---:|:---:|:---:|
+| <img src="docs/images/demo_swan_text_mig.gif" width="260" alt="swan"> | <img src="docs/images/demo_camel_text_mig.gif" width="260" alt="camel"> | <img src="docs/images/demo_pigs_multi_object.gif" width="260" alt="pigs multi-object"> |
 
 ### Box-prompt: tracking only (`demo.py`)
 
