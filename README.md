@@ -87,17 +87,18 @@ Have these in place **before** running `./setup.sh`:
 > pip wheels (ROCm 7.13), while MIGraphX is only in the stable APT release (ROCm 7.2).
 > Both are required; `setup.sh` installs them in the right order.
 
-### Quick start (one command)
+### Stage 1 — Environment (`./setup.sh`, ~10 min)
 
 ```bash
+git clone https://github.com/harrysocool/sam3-tracker-rocm.git
+cd sam3-tracker-rocm
 ./setup.sh
 ```
 
-Useful flags: `--skip-apt`, `--skip-migraphx`, `--env NAME`, `--imgsz 504/1008`.
+Useful flags: `--skip-apt`, `--skip-migraphx`, `--env NAME`.
 See [setup.sh](setup.sh) for details.
 
-### What setup.sh does
-
+What it does:
 1. APT: ROCm 7.2 stack + stock MIGraphX 2.15.0 (`--skip-apt` to bypass)
 2. Patched MIGraphX tarball (~2 min, two unreleased fixes for the headline FPS — `--skip-migraphx` to bypass)
 3. Conda env (`sam3-tracker` by default; override with `--env`) with Python 3.12
@@ -105,10 +106,32 @@ See [setup.sh](setup.sh) for details.
 5. ONNX Runtime MIGraphX EP wheel (1.24.2)
 6. Python dependencies from `requirements.txt`
 7. Model weights from community mirror `1038lab/sam3` (no HF account needed)
-8. Tracker module ONNX export — `memory_attention`, `mask_decoder_*`, `memory_encoder` (~5 min)
-9. Backbone `.mxr` compile (single-session export → onnxsim → MIGraphX autotune; ~5 min @ 504px, ~12 min @ 1008px)
-10. Pre-warm ORT MIGraphX cache (~1 min)
-11. Smoke test (`demo.py` on `assets/demo.jpg`)
+
+### Stage 2 — Build model artefacts (`export/build.py`)
+
+After `setup.sh`, activate the environment and build artefacts for the pipeline(s) you want:
+
+```bash
+conda activate sam3-tracker
+
+# Box-prompt only — demo.py  (~10 min @504px)
+python export/build.py --pipeline box --imgsz 504
+
+# Text-prompt MIG — demo_text.py --mig  (~18 min @504px)
+python export/build.py --pipeline text --imgsz 504
+
+# Both pipelines at 504px
+python export/build.py --pipeline all --imgsz 504
+
+# Both pipelines, both resolutions (~90 min total)
+python export/build.py --pipeline all --imgsz 504 1008
+```
+
+Each step skips if output already exists — safe to re-run after interruption.
+Use `--force` to rebuild from scratch.
+
+> **Which resolution?** 504px runs 3-10× faster with slightly lower mask quality.
+> Start with 504 — switch to 1008 if you need higher accuracy.
 
 ### Manual / alternative paths
 
@@ -164,11 +187,10 @@ Two demo entry points — pick the one matching your use case:
 | `demo_text.py --mig` | text | Detection + tracking @ 1008px | **1.5 FPS @ 1008px** | open-vocabulary, higher quality |
 | `demo_text.py` | text | Detection + tracking (pure PyTorch) | 0.5 FPS @ 1008px | open-vocabulary, no MIG setup |
 
-All commands assume you ran `./setup.sh` and are in the project root. The MIGraphX
-backbone requires `/opt/rocm-7.2.0/lib` on `PYTHONPATH`; PyTorch path doesn't:
-```bash
-export PYTHONPATH=/opt/rocm-7.2.0/lib${PYTHONPATH:+:$PYTHONPATH}
-```
+All commands below assume you have activated the conda env (`conda activate sam3-tracker`)
+and are in the project root. The MIGraphX text-prompt path requires the `LD_PRELOAD` shown
+in the commands below to resolve a dual-ROCm-version conflict; the box-prompt and PyTorch
+text-prompt paths do not need it.
 
 ### Box-prompt (`demo.py`) — tracking only, fastest
 
@@ -209,21 +231,11 @@ LD_PRELOAD=/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:/opt/rocm-7.2.0/lib/migraphx/l
     --video assets/demo.mp4 --text "swan" --mig --max-frames 60
 ```
 
-Build the MIG-path artefacts once with the one-shot build script:
+Build artefacts with (see Stage 2 above if you haven't already):
 ```bash
-# 504px (~15 min)
-python export/build_text_prompt_mig.py --imgsz 504
-
-# 1008px (~25 min, higher quality)
-python export/build_text_prompt_mig.py --imgsz 1008
-
-# Both resolutions in one call
-python export/build_text_prompt_mig.py --imgsz 504 1008
+python export/build.py --pipeline text --imgsz 504   # ~18 min
+python export/build.py --pipeline text --imgsz 1008  # ~30 min
 ```
-
-Each step skips if its output already exists — safe to re-run after interruption.
-Use `--force` to rebuild, `--steps backbone|detr_encoder|memory_attention` to
-run a single stage.
 
 Multi-object flags:
 - `--min-score 0.5` — only track detections above this confidence (default 0.5)
@@ -482,7 +494,7 @@ sam3-tracker-rocm/
 
 - **MIGraphX backbone cold-start**: first compile of `backbone_mxr_tuned.mxr` takes
   ~3 min (504px) or ~9 min (1008px) with kernel autotuning. Subsequent runs load in ~3s.
-  Run `export/backbone/export_backbone_single.py` once per resolution to pre-build the cache.
+  Run `python export/build.py --pipeline box --imgsz 504` once to pre-build the cache.
 - **Text-prompt: vision_encoder dominates** (65% of propagation time at 504px, 57% at 1008px).
   The ViT backbone already runs via MIGraphX, but each frame requires a GPU→CPU→GPU numpy
   round-trip through the MIG bridge (~37 ms overhead at 1008px). Eliminating this round-trip
