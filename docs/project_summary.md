@@ -100,10 +100,10 @@ fallbacks in `tracker/rocm_patches.py`, applied automatically at import).
 
 ### Box-prompt (DAVIS 2017 val, SAM3OnnxTracker)
 
-| Resolution | Mean J | SG proxy J (50 seqs) | SG HOTA (mask, 300-seq) |
-|---|---|---|---|
-| 504px | **81.6%** | 40.4% | 0.179 |
-| 1008px | **84.8%** | 44.0% | 0.183 |
+| Resolution | DAVIS Mean J |
+|---|---|
+| 504px | **81.6%** |
+| 1008px | **84.8%** |
 
 ### Text-prompt mask quality (MIG vs PyTorch, frame-by-frame IoU)
 
@@ -198,7 +198,6 @@ BIOS UMA=64GB maximizes the fast non-coherent GPU pool (see Finding #7).
 
 | Item | Effort | Notes |
 |---|---|---|
-| Full DAVIS/SG eval — text-prompt MIG path | ~half day | Only box-prompt eval done to date |
 | Recover 9.46 FPS (box-prompt peak) | 1–2 days | Exclude softmax from FP16 quantization in memory_attention direct API, or wait for MIGraphX upstream fix |
 | Apply MLIR attention to box-prompt backbone | ~1 hour | Needs re-export + recompile of `backbone_tracker/tuned.mxr` |
 | Webcam real-time demo | half day | Add `--device 0` streaming input to demo scripts |

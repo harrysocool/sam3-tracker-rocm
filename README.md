@@ -326,15 +326,13 @@ Multi-object scaling @504 MIG (backbone shared across all objects):
 
 ### Box-prompt: Tracking only (`demo.py`)
 
-| Resolution | DAVIS 2017 val J | SG val J (50 seqs) ¹ | Prop FPS | Backbone |
+| Resolution | DAVIS 2017 val J | Prop FPS | Backbone |
 |---|---|---|---|---|
-| **504px** | **81.5%** | **40.4%** | **12.21** | MIGraphX 2.15+patches + MLIR |
-| 1008px | 84.8% | 44.0% | **3.22** | MIGraphX 2.15+patches + MLIR |
-| 504px (PyTorch) | 81.5% | 40.4% | 5.72 | PyTorch ROCm FP16 |
-| 1008px (PyTorch) | 84.8% | 44.0% | 1.35 | PyTorch ROCm FP16 |
+| **504px** | **81.5%** | **12.21** | MIGraphX 2.15+patches + MLIR |
+| 1008px | 84.8% | **3.22** | MIGraphX 2.15+patches + MLIR |
+| 504px (PyTorch) | 81.5% | 5.72 | PyTorch ROCm FP16 |
+| 1008px (PyTorch) | 84.8% | 1.35 | PyTorch ROCm FP16 |
 
-¹ SG J (IoU) is a proxy metric on a random 50-sequence subset, not the official cgF1/HOTA
-evaluation. Official SG evaluation pending (requires full 1686-annotation run with text prompts).
 
 ### Per-module latency breakdown (504px, MIGraphX backbone)
 
@@ -396,23 +394,6 @@ unzip DAVIS-2017-trainval-480p.zip -d dataset/
 
 > Official page: [davischallenge.org/davis2017/code.html](https://davischallenge.org/davis2017/code.html)
 
-**Smartglass SG val** (SA-Co/VEval) — public Roboflow mirror, no account needed:
-
-```bash
-mkdir -p dataset
-wget https://sa-co.roboflow.com/veval/saco_sg.zip -P dataset/        # ~30 GB frames
-wget https://sa-co.roboflow.com/veval/gt-annotations.zip -P dataset/ # ~117 MB annotations
-unzip dataset/saco_sg.zip -d dataset/
-unzip dataset/gt-annotations.zip -d dataset/gt-annotations/
-# Result: dataset/saco_sg/JPEGImages_6fps/ and dataset/gt-annotations/annotation/saco_veval_smartglasses_val.json
-```
-
-> Currently only the **SG (SmartGlasses)** subset is set up. The full SA-Co/VEval
-> bundle also includes **SAV** and **YT1B** subsets but is significantly larger;
-> evaluating on those is a future TODO.
->
-> Also available (gated) on HuggingFace: [facebook/SACo-VEval](https://huggingface.co/datasets/facebook/SACo-VEval). Full mirror bundle (all subsets): [sa-co.roboflow.com/veval/all.zip](https://sa-co.roboflow.com/veval/all.zip).
-
 ### Run evaluation
 
 ```bash
@@ -422,20 +403,6 @@ python eval/datasets/eval_davis.py \
     --onnx-dir onnx_files_504 \
     --davis dataset/DAVIS \
     --imgsz 504
-
-# Smartglass SG val (box-prompt)
-python eval/datasets/eval_saco_sg.py \
-    --checkpoint model/sam3 \
-    --onnx-dir onnx_files_504 \
-    --gt-json dataset/gt-annotations/saco_veval_smartglasses_val.json \
-    --img-root dataset/saco_sg/JPEGImages_6fps \
-    --imgsz 504
-
-# SG val (text-prompt, PyTorch)
-python eval/datasets/eval_sg_text_prompt.py \
-    --checkpoint model/sam3 \
-    --gt-json dataset/gt-annotations/saco_veval_smartglasses_val.json \
-    --img-root dataset/saco_sg/JPEGImages_6fps
 
 # PT vs MIG mask regression check
 python eval/datasets/mask_diff_pt_vs_mig.py \
@@ -474,8 +441,7 @@ sam3-tracker-rocm/
 │   └── tracker_modules/     #   mask_decoder_*, memory_*, memory_attention (padded)
 ├── eval/                   # Benchmarks, dataset evals, regression tools
 │   ├── benchmarks/         #   bench_pipeline, profile_full_mig, profile_text_prompt
-│   ├── datasets/           #   eval_davis, eval_saco_sg, eval_sg_text_prompt,
-│   │                       #   mask_diff_pt_vs_mig
+│   ├── datasets/           #   eval_davis, mask_diff_pt_vs_mig
 │   ├── probes/             #   smoke tests for text-prompt + correctness checks
 │   └── debug/              #   investigation scripts (FPN diagnostics, ONNX-CPU vs PT)
 ├── docs/                   # Setup guide, technical report
@@ -490,7 +456,7 @@ sam3-tracker-rocm/
 ├── onnx_files_1008/        # Generated, gitignored — 1008px (same subdir structure)
 ├── outputs/                # Demo outputs (gitignored, auto-created)
 ├── results/                # Eval outputs: JSON metrics, profiles
-├── dataset/                # Downloaded datasets (DAVIS, saco_sg)
+├── dataset/                # Downloaded datasets (DAVIS)
 ├── demo.py                 # ← Box-prompt: image / video tracking demo
 ├── demo_text.py            # ← Text-prompt: open-vocabulary detection + tracking
 ├── setup.sh                # ← One-command setup

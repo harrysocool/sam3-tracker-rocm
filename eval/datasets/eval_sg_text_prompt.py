@@ -5,7 +5,8 @@ Uses noun_phrase from GT annotations as text prompt → detect → track.
 """
 from __future__ import annotations
 import argparse
-from datetime import datetime, json, os, random, sys, time
+from datetime import datetime
+import json, os, random, sys, time
 
 _TS = datetime.now().strftime("%Y%m%d_%H%M%S")  # one stamp per run; passed in default --out names
 from pathlib import Path
@@ -56,16 +57,56 @@ def main():
                     help="Max frames per annotation (0=all, recommend 20 for quick test)")
     ap.add_argument("--out", type=Path,
                     default=WORKSPACE/f"results/eval/saco_sg/saco_sg_30seq_textprompt_preds_{_TS}.json")
+    ap.add_argument("--imgsz", type=int, default=1008,
+                    help="Input resolution (504 or 1008)")
+    ap.add_argument("--mig", action="store_true",
+                    help="Use MIGraphX acceleration (requires LD_PRELOAD)")
+    ap.add_argument("--onnx-dir", type=Path, default=None,
+                    help="ONNX artefacts root (default: onnx_files_<imgsz>)")
     args = ap.parse_args()
+    if args.onnx_dir is None:
+        args.onnx_dir = WORKSPACE / f"onnx_files_{args.imgsz}"
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda")
     dtype = torch.float16
 
-    print(f"Loading Sam3VideoModel ...")
+    print(f"Loading Sam3VideoModel (imgsz={args.imgsz}, mig={args.mig}) ...")
     t0 = time.perf_counter()
     processor = AutoProcessor.from_pretrained(str(args.checkpoint))
-    model = Sam3VideoModel.from_pretrained(str(args.checkpoint)).to(device).to(dtype).eval()
+
+    from transformers import Sam3VideoConfig
+    config = Sam3VideoConfig.from_pretrained(str(args.checkpoint))
+    if args.imgsz != 1008:
+        config.image_size = args.imgsz
+        config.low_res_mask_size = 4 * args.imgsz // 14
+        new_size = {"height": args.imgsz, "width": args.imgsz}
+        new_mask = {"height": 4 * args.imgsz // 14, "width": 4 * args.imgsz // 14}
+        for sub in (getattr(processor, "image_processor", None),
+                    getattr(processor, "video_processor", None)):
+            if sub is not None:
+                if hasattr(sub, "size"):      sub.size = new_size
+                if hasattr(sub, "mask_size"): sub.mask_size = new_mask
+        if hasattr(processor, "target_size"): processor.target_size = args.imgsz
+
+    model = Sam3VideoModel.from_pretrained(str(args.checkpoint), config=config).to(device).to(dtype).eval()
+
+    if args.mig:
+        from tracker.tracker import MIGraphXBackbone
+        from tracker.mig_vision_encoder import patch_sam3_video_model_with_mig
+        from tracker.mig_detr_encoder import patch_sam3_video_model_detr_encoder
+        from tracker.mig_memory_attention import patch_sam3_video_model_memory_attention
+        det_dir = args.onnx_dir / "backbone_detector"
+        mxr = MIGraphXBackbone(det_dir / "single_simplified.onnx", det_dir / "tuned.mxr")
+        patch_sam3_video_model_with_mig(model, mxr)
+        detr_onnx = args.onnx_dir / "detector_modules" / "detr_encoder_simplified.onnx"
+        if detr_onnx.exists():
+            patch_sam3_video_model_detr_encoder(model, detr_onnx)
+        mem_onnx = args.onnx_dir / "tracker_modules" / "memory_attention_fixed_S7_P32.onnx"
+        if mem_onnx.exists():
+            patch_sam3_video_model_memory_attention(model, mem_onnx)
+        print("  MIG patches applied")
+
     print(f"  loaded in {time.perf_counter()-t0:.1f}s\n")
 
     with open(args.gt_json) as f:
