@@ -1,6 +1,0 @@
---- a/modeling_sam3_video.py
-+++ b/modeling_sam3_video.py
-@@ nms_masks: pure-PyTorch greedy NMS fallback @@
- Add _greedy_nms() helper: pure-PyTorch greedy NMS on a precomputed IoU
- matrix. Runs on GPU (ROCm-compatible). Used as fallback when cv_utils_kernel
- is unavailable, instead of skipping NMS entirely.

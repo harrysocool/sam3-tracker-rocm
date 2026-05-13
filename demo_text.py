@@ -39,6 +39,9 @@ from PIL import Image
 
 from transformers import Sam3VideoModel, AutoProcessor
 
+from tracker.rocm_patches import apply as _apply_rocm_patches
+_apply_rocm_patches()  # fill_holes (scipy) + NMS (PyTorch) for ROCm
+
 
 # ─── Args ──────────────────────────────────────────────────────────────────
 def parse_args():

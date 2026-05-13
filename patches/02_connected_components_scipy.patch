@@ -1,6 +1,0 @@
---- a/modeling_sam3_video.py
-+++ b/modeling_sam3_video.py
-@@ _get_connected_components_with_padding: scipy fallback for ROCm @@
- Replace dummy fallback (disables filtering) with scipy.ndimage.label.
- The cv_utils_kernel only ships CUDA variants; scipy gives correct connected
- component labels on CPU (~0.5 ms per mask at 504px, negligible overhead).
