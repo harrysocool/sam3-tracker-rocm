@@ -107,7 +107,7 @@ else
         https://repo.radeon.com/rocm/apt/7.2 noble main" | \
         sudo tee /etc/apt/sources.list.d/rocm.list
     sudo apt-get update -qq
-    sudo apt-get install -y migraphx migraphx-dev
+    sudo apt-get install -y migraphx migraphx-dev libgl1 libglib2.0-0
     info "migraphx installed"
 fi
 
