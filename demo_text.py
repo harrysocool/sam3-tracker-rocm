@@ -329,8 +329,18 @@ def main():
             out = model(inference_session=session, frame_idx=i)
         obj_map = out.obj_id_to_mask or {}
         score_map = out.obj_id_to_score or {}
-        objs = [(obj_map[j], float(score_map.get(j, 0.0)), j)
-                for j in tracked if j in obj_map]
+        # Include all objects the model is currently tracking, not just the
+        # original frame-0 set. Sam3VideoModel runs detection every frame and
+        # adds newly confirmed objects (after hotstart_delay≈15 frames) to
+        # out.object_ids automatically — this is re-detection for free.
+        all_ids = set(obj_map.keys()) | set(out.object_ids or [])
+        objs = [
+            (obj_map[j], float(score_map.get(j, 0.0)), j)
+            for j in all_ids
+            if j in obj_map and (
+                j in tracked or float(score_map.get(j, 0.0)) >= args.min_score
+            )
+        ]
         writer.write(overlay(frames_bgr[i], objs, args.text, frame_idx=i))
         if i % 20 == 0:
             elapsed = time.perf_counter() - t_prop
