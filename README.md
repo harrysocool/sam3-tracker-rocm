@@ -286,17 +286,23 @@ python eval/benchmarks/profile_text_prompt.py --checkpoint model/sam3 --image as
 
 ## Results
 
-### Single-image segmentation (box prompt)
+### Text-prompt: detection + tracking (`demo_text.py --mig --imgsz 504`)
 
-| truck (demo) | drift-straight (J = 95.2%) | parkour (J = 92.2%) |
-|:---:|:---:|:---:|
-| <img src="docs/images/demo_tracked.jpg" width="320" alt="truck"> | <img src="docs/images/demo_drift-straight.jpg" width="320" alt="drift-straight"> | <img src="docs/images/demo_parkour.jpg" width="320" alt="parkour"> |
+| `"swan"` | `"camel"` |
+|:---:|:---:|
+| <img src="docs/images/demo_swan_text_mig.gif" width="400" alt="swan text-prompt MIG"> | <img src="docs/images/demo_camel_text_mig.gif" width="400" alt="camel text-prompt MIG"> |
 
-### Video tracking (DAVIS 2017 val, 504px)
+### Text-prompt multi-object (`"dog"`, `--min-score 0.3`)
 
-| blackswan  (J = 93.0%) | dog  (J = 94.7%) | camel  (J = 96.0%) |
-|:---:|:---:|:---:|
-| <img src="docs/images/demo_blackswan.gif" width="320" alt="blackswan"> | <img src="docs/images/demo_dog.gif" width="320" alt="dog"> | <img src="docs/images/demo_camel.gif" width="320" alt="camel"> |
+| dogs-jump — 3 dogs tracked simultaneously (re-detected mid-video) |
+|:---:|
+| <img src="docs/images/demo_dogs_multi_object.gif" width="600" alt="dogs multi-object"> |
+
+### Box-prompt: tracking only (`demo.py`)
+
+| truck — single image | dog-agility — video (8.87 FPS) |
+|:---:|:---:|
+| <img src="docs/images/demo_tracked.jpg" width="400" alt="truck box-prompt"> | <img src="docs/images/demo_dog_agility_box.gif" width="400" alt="dog-agility box-prompt"> |
 
 ---
 
