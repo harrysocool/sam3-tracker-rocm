@@ -214,7 +214,7 @@ BIOS UMA=64GB maximizes the fast non-coherent GPU pool (see Finding #7).
 | Topic | File |
 |---|---|
 | Backbone optimization (find_splits patch, NHWC fix, MLIR attn) | [`analysis/backbone_optimization.md`](../analysis/backbone_optimization.md) |
-| Backbone optimization research (gfx1151 env vars, community findings) | [`docs/backbone_optimization_research.md`](backbone_optimization_research.md) |
+| Backbone optimization research (gfx1151 env vars, community findings) | [`analysis/backbone_optimization_research.md`](backbone_optimization_research.md) |
 | Tracking module optimization (memory_attention, dec/enc, ORT cache) | [`analysis/module_optimization.md`](../analysis/module_optimization.md) |
 | MIGraphX backbone investigation (detailed, pre-patch) | [`analysis/migraphx_backbone_investigation.md`](../analysis/migraphx_backbone_investigation.md) |
 | 1008px performance deep-dive (NHWC, rocprof, op analysis) | [`analysis/1008px_perf_analysis.md`](../analysis/1008px_perf_analysis.md) |
