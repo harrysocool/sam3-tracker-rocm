@@ -593,8 +593,12 @@ class SAM3OnnxTracker:
         fpn_0, fpn_1, fpn_2, pos_2 = self._backbone(img_np)
 
         cur_feat = fpn_2.reshape(1, 256, self.HW).transpose(2, 0, 1)
+        # pos_2 is the 4th backbone output; only usable as positional encoding
+        # if its spatial size matches fpn_2 (self.HW). At 1008px the tracker
+        # backbone ONNX has 4 FPN levels where fpn_3 (36x36) != fpn_2 (72x72).
+        pos_2_valid = (pos_2 is not None and pos_2.size == 256 * self.HW)
         cur_pos  = (pos_2.reshape(1, 256, self.HW).transpose(2, 0, 1)
-                    if pos_2 is not None else np.zeros_like(cur_feat))
+                    if pos_2_valid else np.zeros_like(cur_feat))
 
         memory, memory_pos = self.memory_bank.build_attention_inputs(
             fixed_slots=self._mem_attn_slots)
