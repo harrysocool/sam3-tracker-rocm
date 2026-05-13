@@ -107,6 +107,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
             ok = ok and run([
                 sys.executable,
                 "export/backbone/simplify_backbone.py",
+                "--onnx-dir", str(onnx_dir),
                 "--imgsz", str(imgsz),
                 "--backbone-source", "detector",
             ], f"[2/5] Simplify backbone @{imgsz}px")
@@ -117,6 +118,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
             ok = ok and run([
                 sys.executable,
                 "export/backbone/compile_backbone_mxr.py",
+                "--onnx-dir", str(onnx_dir),
                 "--imgsz", str(imgsz),
                 "--backbone-source", "detector",
                 "--skip-verify",

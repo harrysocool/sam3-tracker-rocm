@@ -130,6 +130,7 @@ def build_box(imgsz: int, args) -> bool:
             ok = ok and run([
                 sys.executable,
                 "export/backbone/compile_backbone_mxr.py",
+                "--onnx-dir", str(onnx_dir),
                 "--imgsz", str(imgsz),
                 "--backbone-source", "tracker",
                 "--skip-verify",
