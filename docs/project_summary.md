@@ -100,10 +100,13 @@ fallbacks in `tracker/rocm_patches.py`, applied automatically at import).
 
 ### Box-prompt (DAVIS 2017 val, SAM3OnnxTracker)
 
-| Resolution | DAVIS Mean J |
-|---|---|
-| 504px | **81.6%** |
-| 1008px | **84.8%** |
+| Resolution | DAVIS Mean J | Reference |
+|---|---|---|
+| 504px | **81.6%** | SAM2-L (GT mask init): J&F=91.6% ¹ |
+| 1008px | **84.8%** | — |
+
+¹ SAM2-L uses ground-truth first-frame mask; our system uses a box-derived mask.
+The gap reflects prompt quality difference, not tracker propagation quality.
 
 ### Text-prompt mask quality (MIG vs PyTorch, frame-by-frame IoU)
 

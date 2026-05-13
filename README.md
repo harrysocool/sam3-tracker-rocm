@@ -327,11 +327,13 @@ Multi-object scaling @504 MIG (backbone shared across all objects):
 ### Box-prompt: Tracking only (`demo.py`)
 
 | Resolution | DAVIS 2017 val J | Prop FPS | Backbone |
-|---|---|---|---|---|
-| **504px** | **81.5%** | **12.21** | MIGraphX 2.15+patches + MLIR |
-| 1008px | 84.8% | **3.22** | MIGraphX 2.15+patches + MLIR |
-| 504px (PyTorch) | 81.5% | 5.72 | PyTorch ROCm FP16 |
+|---|---|---|---|
+| **504px** | **81.6%** | **12.21** | MIGraphX 2.15+patches + MLIR |
+| 1008px | **84.8%** | **3.22** | MIGraphX 2.15+patches + MLIR |
+| 504px (PyTorch) | 81.6% | 5.72 | PyTorch ROCm FP16 |
 | 1008px (PyTorch) | 84.8% | 1.35 | PyTorch ROCm FP16 |
+
+*DAVIS 2017 val, semi-supervised (box prompt on frame 0). For reference: SAM2-L with GT first-frame mask achieves J&F=91.6% on the same split — our tracker uses a box-derived mask instead of GT, which accounts for the gap.*
 
 
 ### Per-module latency breakdown (504px, MIGraphX backbone)
