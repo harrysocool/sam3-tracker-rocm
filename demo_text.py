@@ -58,6 +58,9 @@ def parse_args():
     p.add_argument("--max-frames", type=int, default=120,
                    help="Cap video frames loaded into the session (default 120)")
     p.add_argument("--dtype", choices=["fp16", "fp32"], default="fp16")
+    p.add_argument("--imgsz", type=int, default=1008,
+                   help="Input resolution (504 or 1008). Must match the .mxr/.onnx "
+                        "artefacts under --onnx-dir. Sam3VideoModel defaults to 1008.")
     p.add_argument("--mig", action="store_true",
                    help="Use MIGraphX backbone for vision_encoder (≈2× faster init "
                         "and per-frame backbone). Reads <onnx-dir>/backbone_detector/tuned.mxr "
@@ -128,7 +131,33 @@ def main():
     print(f"Loading Sam3VideoModel from {args.checkpoint} ...")
     t = time.perf_counter()
     processor = AutoProcessor.from_pretrained(str(args.checkpoint))
-    model = (Sam3VideoModel.from_pretrained(str(args.checkpoint))
+
+    # Build config first so we can rewrite image_size BEFORE module __init__
+    # bakes derived sizes (backbone_feature_sizes, RoPE, low_res_mask_size).
+    # The config's image_size setter cascades to detector + tracker sub-configs;
+    # low_res_mask_size has no setter so we patch it manually.
+    from transformers import Sam3VideoConfig
+    config = Sam3VideoConfig.from_pretrained(str(args.checkpoint))
+    if args.imgsz != 1008:
+        config.image_size = args.imgsz
+        config.low_res_mask_size = 4 * args.imgsz // 14
+        # Processor side: image/video processors carry their own size + mask_size
+        # which drive pixel_values shape and output mask shape respectively.
+        new_size = {"height": args.imgsz, "width": args.imgsz}
+        new_mask = {"height": 4 * args.imgsz // 14, "width": 4 * args.imgsz // 14}
+        for sub in (getattr(processor, "image_processor", None),
+                    getattr(processor, "video_processor", None)):
+            if sub is not None:
+                if hasattr(sub, "size"):
+                    sub.size = new_size
+                if hasattr(sub, "mask_size"):
+                    sub.mask_size = new_mask
+        if hasattr(processor, "target_size"):
+            processor.target_size = args.imgsz
+        print(f"  config rewritten: image_size={args.imgsz}, "
+              f"low_res_mask_size={config.low_res_mask_size}")
+
+    model = (Sam3VideoModel.from_pretrained(str(args.checkpoint), config=config)
              .to(device).to(dtype).eval())
     if device.type == "cuda":
         torch.cuda.synchronize()
