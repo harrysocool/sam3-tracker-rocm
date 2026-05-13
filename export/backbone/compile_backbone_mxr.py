@@ -65,6 +65,12 @@ def main():
     # Make sure autotuning is enabled (env can disable it for fast iteration).
     os.environ.pop("MIGRAPHX_SKIP_BENCHMARKING", None)
 
+    # Route attention subgraphs through rocMLIR-compiled kernels.
+    # Validated on gfx1151: 18% faster (169ms vs 200ms/frame) with identical
+    # mask quality (IoU=0.9995 vs baseline). Not the default on RDNA/gfx11;
+    # must be set explicitly. Does not affect non-attention ops.
+    os.environ.setdefault("MIGRAPHX_MLIR_USE_SPECIFIC_OPS", "attention")
+
     # Defer the import: it touches the dynamic linker and prints whatever
     # warning the patched library emits.
     import migraphx

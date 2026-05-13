@@ -5,7 +5,7 @@ optimized for AMD ROCm hardware. A **text prompt** finds the target on frame 0; 
 propagates the mask through subsequent frames. **Box-prompt** mode skips detection for
 maximum throughput.
 
-Achieves **5.1 FPS** text-prompt and **8.21 FPS** box-prompt (propagation, 504px) on an
+Achieves **5.5 FPS** text-prompt and **8.21 FPS** box-prompt (propagation, 504px) on an
 AMD Ryzen AI Max+ 395. DAVIS 2017 val Mean J: **81.5%** (504px).
 
 > **Hardware requirement**: AMD gfx1151 (Radeon 8060S / Ryzen AI Max+ 395) with ROCm 7.x.
@@ -183,7 +183,7 @@ Two demo entry points — pick the one matching your use case:
 | Demo | Prompt | Pipeline | Steady-state FPS | Use for |
 |---|---|---|---|---|
 | `demo.py` | bounding box | Tracking only (no detection) | **8.2 FPS @ 504px** | known target, real-time |
-| `demo_text.py --mig --imgsz 504` | text | Detection + tracking @ 504px, N objects | **5.1 FPS** (1 obj) / **4.1 FPS** (4 obj) | open-vocabulary, multi-object |
+| `demo_text.py --mig --imgsz 504` | text | Detection + tracking @ 504px, N objects | **5.5 FPS** (1 obj) / **4.4 FPS** (4 obj) | open-vocabulary, multi-object |
 | `demo_text.py --mig` | text | Detection + tracking @ 1008px | **1.5 FPS @ 1008px** | open-vocabulary, higher quality |
 | `demo_text.py` | text | Detection + tracking (pure PyTorch) | 0.5 FPS @ 1008px | open-vocabulary, no MIG setup |
 
@@ -308,7 +308,7 @@ python eval/benchmarks/profile_text_prompt.py --checkpoint model/sam3 --image as
 
 | Resolution | Path | Prop FPS | vs PT @1008 |
 |---|---|---|---|
-| **504px** | **MIG** (backbone + detr_encoder + memory_attention) | **5.1** | **9.8×** |
+| **504px** | **MIG** (backbone + detr_encoder + memory_attention) | **5.5** | **10.6×** |
 | 504px | PyTorch | 2.6 | 5.0× |
 | **1008px** | **MIG** | **1.5** | **2.9×** |
 | 1008px | PyTorch | 0.52 | baseline |
@@ -320,9 +320,9 @@ Multi-object scaling @504 MIG (backbone shared across all objects):
 
 | Objects tracked | Prop FPS |
 |---|---|
-| 1 | 5.1 |
-| 4 (measured, dogs-jump) | 4.1 |
-| 8 (estimated) | ~2.7 |
+| 1 | 5.5 |
+| 4 (estimated) | ~4.4 |
+| 8 (estimated) | ~2.9 |
 
 ### Box-prompt: Tracking only (`demo.py`)
 
@@ -338,16 +338,16 @@ evaluation. Official SG evaluation pending (requires full 1686-annotation run wi
 
 ### Per-module latency breakdown (504px, MIGraphX backbone)
 
-**Text-prompt propagation** (191 ms/frame → 5.1 FPS):
+**Text-prompt propagation** (169 ms/frame → 5.9 FPS, with MLIR attention backbone):
 
 | Stage | Latency | Backend |
 |---|---:|---|
-| backbone (vision encoder) | ~125 ms | MIGraphX .mxr direct API (FP16) |
+| backbone (vision encoder) | ~97 ms | MIGraphX .mxr + MLIR attention ops (FP16) |
 | memory_attention | ~20 ms | ORT MIGraphX EP FP16 ¹ |
 | detr_encoder | ~11 ms | ORT MIGraphX EP FP16 |
 | detr_decoder | ~11 ms | PyTorch |
 | tracker_neck + mask_decoder + memory_encoder | ~8 ms | PyTorch |
-| **Total propagation frame** | **~191 ms → 5.1 FPS** | |
+| **Total propagation frame** | **~169 ms → 5.9 FPS** | |
 
 **Box-prompt propagation** (122 ms/frame → 8.21 FPS):
 

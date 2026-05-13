@@ -75,13 +75,30 @@ Run during compile and search for attention-related fusions.
 
 ---
 
-## Baseline (2026-05-13, 504px, full MIG stack)
+## Benchmark Results (2026-05-13)
+
+### Variant comparison @504px (careful A/B, 3 rounds × 25 frames)
+| Variant | median ms | mean±std | FPS | vs baseline |
+|---|---|---|---|---|
+| baseline (original) | 197 | 200±10 | 4.99 | — |
+| **mlir_attention** ✅ | **166** | **169±10** | **5.91** | **+18%** |
+| no_miopen | — | ~218 | ~4.6 | -9% |
+| hipblaslt | — | ~416 | ~2.4 | **-52% (broken on gfx1151)** |
+| mlir_hipblaslt | — | ~484 | ~2.1 | **worst** |
+
+**`MIGRAPHX_MLIR_USE_SPECIFIC_OPS="attention"` confirmed: 18% faster, IoU=0.9995 (mask quality preserved)**
+
+### Accuracy check (baseline vs mlir_attention, 30 frames)
+- mask IoU: mean=0.9995, min=0.998
+- score diff: mean=0.001, max=0.001 (FP16 rounding only)
+
+### Updated baseline (2026-05-13, 504px, MLIR attention backbone)
 | Module | ms | % |
 |---|---|---|
-| vision_encoder (backbone) | 125 | 62% |
-| memory_attention (ORT MIG EP) | 19 | 9% |
-| detr_encoder (ORT MIG EP) | 12 | 6% |
-| detr_decoder (PT) | 11 | 6% |
+| vision_encoder (backbone) | 97 | 57% |
+| memory_attention (ORT MIG EP) | 19 | 11% |
+| detr_encoder (ORT MIG EP) | 12 | 7% |
+| detr_decoder (PT) | 11 | 7% |
 | tracker_neck (PT) | 4 | 2% |
 | others | 4 | 2% |
-| **Total** | **202ms → 5.0 FPS** | |
+| **Total** | **~169ms → 5.9 FPS** | |
