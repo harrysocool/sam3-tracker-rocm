@@ -258,122 +258,28 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-step "6. Export ONNX tracking modules"
-# ─────────────────────────────────────────────────────────────────────────────
-ONNX_DIR="onnx_files_${IMGSZ}"
-MODULES_DIR="$ONNX_DIR/tracker_modules"
-BACKBONE_DIR="$ONNX_DIR/backbone_tracker"
-export HSA_OVERRIDE_GFX_VERSION=11.5.1
-export MIGRAPHX_GPU_HIP_FLAGS="-Wno-error -Wno-lifetime-safety-intra-tu-suggestions"
-export PYTORCH_ALLOC_CONF=expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:512
-export PYTHONPATH=/opt/rocm-7.2.0/lib${PYTHONPATH:+:$PYTHONPATH}
-
-# Sentinel: BOTH the ONNX module AND the temporal_pe.npy must exist. Older
-# checkouts that ran the broken export (before temporal_pe.npy was added)
-# have memory_attention_fixed_N7.onnx but no temporal_pe.npy, and the tracker
-# refuses to start without it.
-if [[ -f "$MODULES_DIR/memory_attention_fixed_N7.onnx" && -f "$MODULES_DIR/temporal_pe.npy" ]]; then
-    info "Tracker modules already exported ($MODULES_DIR/)"
-else
-    echo "  Exporting tracker modules (${IMGSZ}px → $MODULES_DIR/, ~5 min)..."
-    python export/tracker_modules/export_tracker_modules.py \
-        --checkpoint "$MODEL_DIR" \
-        --imgsz "$IMGSZ" \
-        --onnx-dir "$ONNX_DIR"
-    info "Tracker modules exported → $MODULES_DIR/"
-fi
-
-# ─────────────────────────────────────────────────────────────────────────────
-step "7. Build MIGraphX backbone cache (~5 min 504px / ~12 min 1008px, one-time)"
-# ─────────────────────────────────────────────────────────────────────────────
-MXR_CACHE="$BACKBONE_DIR/tuned.mxr"
-SINGLE_FP32="$BACKBONE_DIR/single_fp32.onnx"
-SINGLE_SIMP="$BACKBONE_DIR/single_simplified.onnx"
-
-if [[ -f "$MXR_CACHE" ]]; then
-    info "Backbone cache already present ($MXR_CACHE)"
-else
-    # 7a. Single-session export (~1 min) — tracker FPN weights
-    if [[ -f "$SINGLE_FP32" || -f "$SINGLE_SIMP" ]]; then
-        info "Step 7a skipped — single-session ONNX already exists"
-    else
-        echo "  [7a/3] Exporting single-session backbone ONNX (~1 min)..."
-        python export/backbone/export_backbone_single.py \
-            --checkpoint "$MODEL_DIR" \
-            --imgsz "$IMGSZ" \
-            --onnx-dir "$ONNX_DIR" \
-            --backbone-source tracker
-    fi
-
-    # 7b. onnxsim (~1 min)
-    if [[ -f "$SINGLE_SIMP" ]]; then
-        info "Step 7b skipped — simplified ONNX already exists"
-    else
-        echo "  [7b/3] Simplifying ONNX with onnxsim (~1 min)..."
-        python export/backbone/simplify_backbone.py \
-            --onnx-dir "$ONNX_DIR" \
-            --imgsz "$IMGSZ" \
-            --backbone-source tracker
-    fi
-
-    # 7c. MIGraphX compile + autotune (the slow step)
-    echo "  [7c/3] Compiling + autotuning with MIGraphX (~3 min @504 / ~9 min @1008)..."
-    python export/backbone/compile_backbone_mxr.py \
-        --onnx-dir "$ONNX_DIR" \
-        --imgsz "$IMGSZ" \
-        --backbone-source tracker
-    info "Backbone cache built → $MXR_CACHE"
-fi
-
-# ─────────────────────────────────────────────────────────────────────────────
-step "8. Pre-warm direct-MIG caches (dec_init / dec_prop / mem_enc, ~1 min)"
-# ─────────────────────────────────────────────────────────────────────────────
-# Sentinel is one of the three .mxr files the prewarm script actually produces.
-# memory_attention is NOT in this list — it runs via ORT MIGraphX EP and the
-# runtime populates its cache (in tracker_modules/ort_mig_cache/) on first use.
-PREWARM_SENTINEL="$MODULES_DIR/mxr_cache/dec_prop_fp32.mxr"
-
-if [[ -f "$PREWARM_SENTINEL" ]]; then
-    info "Direct-MIG caches already warmed"
-else
-    echo "  Pre-warming direct-MIG decoder + memory_encoder caches..."
-    python export/tracker_modules/prewarm_ort_cache.py --onnx-dir "$ONNX_DIR"
-    info "Direct-MIG caches warmed"
-fi
-
-# ─────────────────────────────────────────────────────────────────────────────
-step "9. Smoke test"
-# ─────────────────────────────────────────────────────────────────────────────
-echo "  Running demo on sample image..."
-python demo.py \
-    --checkpoint "$MODEL_DIR" \
-    --onnx-dir "$ONNX_DIR" \
-    --image assets/demo.jpg \
-    --output /tmp/sam3_smoke_test.jpg \
-    --box 85,281,1710,850
-
-info "Smoke test passed → /tmp/sam3_smoke_test.jpg"
-
+# Environment ready — print next-step instructions
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${G}══════════════════════════════════════════════════════${NC}"
-echo -e "${G}  Setup complete!${NC}"
+echo -e "${G}  Environment setup complete!${NC}"
 echo ""
-echo "  Activate and run:"
+echo "  Activate the conda environment:"
 echo "    conda activate $CONDA_ENV"
-echo "    export HSA_OVERRIDE_GFX_VERSION=11.5.1"
-echo "    export MIGRAPHX_GPU_HIP_FLAGS=\"-Wno-error -Wno-lifetime-safety-intra-tu-suggestions\""
-echo "    export PYTHONPATH=/opt/rocm-7.2.0/lib\${PYTHONPATH:+:\$PYTHONPATH}"
 echo ""
-echo "    python demo.py --checkpoint $MODEL_DIR --onnx-dir $ONNX_DIR --imgsz $IMGSZ \\"
-echo "        --image YOUR_IMAGE.jpg --box x1,y1,x2,y2"
+echo "  Then build the model artefacts for the pipeline(s) you want:"
 echo ""
-echo "  Text-prompt path (open-vocabulary, MIG-accelerated detector backbone):"
-echo "    Build the detector backbone once (~12 min @1008px, separate from box-prompt):"
-echo "      python export/backbone/export_backbone_single.py --imgsz $IMGSZ --onnx-dir $ONNX_DIR --backbone-source detector"
-echo "      python export/backbone/simplify_backbone.py        --imgsz $IMGSZ --onnx-dir $ONNX_DIR --backbone-source detector"
-echo "      python export/backbone/compile_backbone_mxr.py     --imgsz $IMGSZ --onnx-dir $ONNX_DIR --backbone-source detector --skip-verify"
-echo "    Then run with --mig (also needs LD_PRELOAD due to torch/MIG ROCm version split):"
-echo "      LD_PRELOAD=/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0 \\"
-echo "          python demo_text.py --checkpoint $MODEL_DIR --onnx-dir $ONNX_DIR --image YOUR_IMAGE.jpg --text \"object\" --mig"
+echo "  Box-prompt  (demo.py, ~10 min @504px):"
+echo "    python export/build.py --pipeline box --imgsz $IMGSZ"
+echo ""
+echo "  Text-prompt MIG  (demo_text.py --mig, ~18 min @504px):"
+echo "    python export/build.py --pipeline text --imgsz $IMGSZ"
+echo ""
+echo "  Both pipelines at once:"
+echo "    python export/build.py --pipeline all --imgsz $IMGSZ"
+echo ""
+echo "  Both pipelines, both resolutions (~90 min total):"
+echo "    python export/build.py --pipeline all --imgsz 504 1008"
+echo ""
+echo "  See python export/build.py --help for all options."
 echo -e "${G}══════════════════════════════════════════════════════${NC}"

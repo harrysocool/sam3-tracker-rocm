@@ -58,6 +58,12 @@ def parse_args():
     p.add_argument("--max-frames", type=int, default=120,
                    help="Cap video frames loaded into the session (default 120)")
     p.add_argument("--dtype", choices=["fp16", "fp32"], default="fp16")
+    p.add_argument("--min-score", type=float, default=0.5,
+                   help="Minimum detection score to track (default 0.5). "
+                        "Lower to track weaker detections, raise to filter false positives.")
+    p.add_argument("--max-objects", type=int, default=0,
+                   help="Max objects to track (default 0 = all above --min-score). "
+                        "Objects are ranked by frame-0 detection score.")
     p.add_argument("--imgsz", type=int, default=1008,
                    help="Input resolution (504 or 1008). Must match the .mxr/.onnx "
                         "artefacts under --onnx-dir. Sam3VideoModel defaults to 1008.")
@@ -92,32 +98,68 @@ def load_video_frames(path: Path, max_n: int):
     return frames_pil, frames_bgr, fps
 
 
-def overlay(bgr: np.ndarray, mask, score: float, text: str,
-            frame_idx: int | None = None,
-            color=(0, 200, 80)) -> np.ndarray:
+# Fixed palette for up to 8 objects (BGR).
+_OBJ_COLORS = [
+    (0, 200, 80),    # green
+    (255, 80, 0),    # blue
+    (0, 80, 255),    # red-orange
+    (0, 220, 220),   # yellow
+    (200, 0, 200),   # magenta
+    (0, 200, 255),   # gold
+    (180, 255, 100), # lime
+    (255, 100, 180), # pink
+]
+
+
+def _to_mask(raw, H: int, W: int) -> np.ndarray:
+    """Convert raw tensor/array logits to a boolean HxW mask at original resolution."""
+    if isinstance(raw, torch.Tensor):
+        raw = raw.detach().float().cpu().numpy()
+    m = np.asarray(raw).squeeze() > 0
+    if m.shape != (H, W):
+        m = cv2.resize(m.astype(np.uint8), (W, H),
+                       interpolation=cv2.INTER_NEAREST).astype(bool)
+    return m
+
+
+def overlay(bgr: np.ndarray,
+            objects: list[tuple],
+            text: str,
+            frame_idx: int | None = None) -> np.ndarray:
+    """Render all tracked objects onto one frame.
+
+    objects: list of (mask, score, obj_id) — one entry per tracked object.
+             mask can be a torch.Tensor (logits) or np.ndarray (bool/float).
+    """
     H, W = bgr.shape[:2]
-    if isinstance(mask, torch.Tensor):
-        mask = mask.detach().float().cpu().numpy()
-    mask = np.asarray(mask).squeeze()
-    # Sam3VideoModel returns logits — threshold at 0 first, THEN resize to
-    # original res (resizing logits would smear FG/BG values).
-    mask = mask > 0
-    if mask.shape != (H, W):
-        mask = cv2.resize(mask.astype(np.uint8), (W, H),
-                          interpolation=cv2.INTER_NEAREST).astype(bool)
     vis = bgr.copy()
-    if mask.any():
+
+    for mask_raw, score, obj_id in objects:
+        color = _OBJ_COLORS[obj_id % len(_OBJ_COLORS)]
+        m = _to_mask(mask_raw, H, W)
+        if not m.any():
+            continue
         layer = np.zeros_like(bgr)
-        layer[mask] = color
+        layer[m] = color
         vis = cv2.addWeighted(vis, 0.55, layer, 0.45, 0)
-        contours, _ = cv2.findContours(mask.astype(np.uint8),
+        contours, _ = cv2.findContours(m.astype(np.uint8),
                                        cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cv2.drawContours(vis, contours, -1, color, 2)
-    label = f"text='{text}'  score={score:.2f}"
+        # Label near top of the largest contour bounding box
+        if contours:
+            x, y, cw, ch = cv2.boundingRect(max(contours, key=cv2.contourArea))
+            label_pt = (max(x, 4), max(y - 6, 16))
+        else:
+            label_pt = (10, 30 + obj_id * 24)
+        cv2.putText(vis, f"#{obj_id} {score:.2f}", label_pt,
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2)
+
+    # Header: prompt + frame index
+    header = f"'{text}'"
     if frame_idx is not None:
-        label += f"  f={frame_idx}"
-    cv2.putText(vis, label, (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.85, (0, 255, 255), 2)
+        header += f"  f={frame_idx}"
+    cv2.putText(vis, header, (10, 26),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
     return vis
 
 
@@ -234,10 +276,23 @@ def main():
     if n_obj == 0:
         print("No detections — try a different prompt.")
         return 1
-    primary = max(out0.object_ids, key=lambda i: out0.obj_id_to_score.get(i, 0))
-    score0 = float(out0.obj_id_to_score[primary])
-    mask0 = out0.obj_id_to_mask[primary]
-    print(f"  primary: object #{primary}  score={score0:.2f}")
+
+    # Filter by min-score and sort descending.
+    tracked = sorted(
+        [i for i in out0.object_ids
+         if float(out0.obj_id_to_score.get(i, 0)) >= args.min_score],
+        key=lambda i: out0.obj_id_to_score.get(i, 0),
+        reverse=True,
+    )
+    if args.max_objects > 0:
+        tracked = tracked[:args.max_objects]
+    if not tracked:
+        print(f"No detections above --min-score {args.min_score} — try lowering it.")
+        return 1
+    for obj_id in tracked:
+        score = float(out0.obj_id_to_score[obj_id])
+        print(f"  object #{obj_id}  score={score:.2f}")
+    print(f"  tracking {len(tracked)} object(s)")
 
     # Output path
     if args.output is not None:
@@ -250,7 +305,9 @@ def main():
 
     # Single image — done
     if args.image is not None:
-        vis = overlay(frames_bgr[0], mask0, score0, args.text)
+        objs0 = [(out0.obj_id_to_mask[i], float(out0.obj_id_to_score.get(i, 0)), i)
+                 for i in tracked]
+        vis = overlay(frames_bgr[0], objs0, args.text)
         cv2.imwrite(str(out_path), vis)
         print(f"Saved: {out_path}")
         return 0
@@ -260,7 +317,9 @@ def main():
     writer = cv2.VideoWriter(str(out_path),
                              cv2.VideoWriter_fourcc(*"mp4v"),
                              fps, (W, H))
-    writer.write(overlay(frames_bgr[0], mask0, score0, args.text, frame_idx=0))
+    objs0 = [(out0.obj_id_to_mask[i], float(out0.obj_id_to_score.get(i, 0)), i)
+             for i in tracked]
+    writer.write(overlay(frames_bgr[0], objs0, args.text, frame_idx=0))
 
     n_total = len(frames_pil)
     print(f"Propagating through frames 1..{n_total - 1} ...")
@@ -268,13 +327,21 @@ def main():
     for i in range(1, n_total):
         with torch.inference_mode():
             out = model(inference_session=session, frame_idx=i)
-        if primary in (out.obj_id_to_mask or {}):
-            mask = out.obj_id_to_mask[primary]
-            score = float(out.obj_id_to_score.get(primary, 0.0))
-        else:
-            mask = np.zeros((H, W), dtype=bool)
-            score = 0.0
-        writer.write(overlay(frames_bgr[i], mask, score, args.text, frame_idx=i))
+        obj_map = out.obj_id_to_mask or {}
+        score_map = out.obj_id_to_score or {}
+        # Include all objects the model is currently tracking, not just the
+        # original frame-0 set. Sam3VideoModel runs detection every frame and
+        # adds newly confirmed objects (after hotstart_delay≈15 frames) to
+        # out.object_ids automatically — this is re-detection for free.
+        all_ids = set(obj_map.keys()) | set(out.object_ids or [])
+        objs = [
+            (obj_map[j], float(score_map.get(j, 0.0)), j)
+            for j in all_ids
+            if j in obj_map and (
+                j in tracked or float(score_map.get(j, 0.0)) >= args.min_score
+            )
+        ]
+        writer.write(overlay(frames_bgr[i], objs, args.text, frame_idx=i))
         if i % 20 == 0:
             elapsed = time.perf_counter() - t_prop
             print(f"  frame {i}/{n_total - 1}  ({i / elapsed:.1f} prop FPS)")
