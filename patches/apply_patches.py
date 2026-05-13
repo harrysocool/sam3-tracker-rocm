@@ -5,15 +5,25 @@ Run after cloning DART and setting up the conda environment.
 These patches enable fill_holes (scipy), greedy NMS (PyTorch), and
 update the warning messages to reflect the scipy/PyTorch fallback paths.
 """
+import argparse
+import os
 import sys
 from pathlib import Path
-import subprocess
 
-DART_ROOT = Path(__file__).resolve().parent.parent.parent / "sam3" / "repo" / "DART"
+DEFAULT_DART = Path(__file__).resolve().parent.parent.parent / "sam3" / "repo" / "DART"
+
+p = argparse.ArgumentParser(description=__doc__)
+p.add_argument("--dart-root", type=Path, default=None,
+               help="Path to the DART repo root (default: ../sam3/repo/DART relative to project)")
+args = p.parse_args()
+
+DART_ROOT = Path(os.environ.get("SAM3_DART_ROOT", "")).expanduser() if os.environ.get("SAM3_DART_ROOT") else (args.dart_root or DEFAULT_DART)
 MODELING = DART_ROOT / ".local_deps/transformers/models/sam3_video/modeling_sam3_video.py"
 
 if not MODELING.exists():
-    sys.exit(f"modeling_sam3_video.py not found at {MODELING}\nIs DART cloned to the right path?")
+    print(f"[patches] WARNING: modeling_sam3_video.py not found at {MODELING}")
+    print("[patches] Skipping ROCm patches — re-run manually: python patches/apply_patches.py --dart-root <path>")
+    sys.exit(0)  # soft exit so setup.sh continues
 
 src = MODELING.read_text()
 

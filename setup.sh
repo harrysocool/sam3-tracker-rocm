@@ -208,6 +208,15 @@ pip install -q -r requirements.txt
 info "requirements.txt installed"
 
 # ─────────────────────────────────────────────────────────────────────────────
+step "4b. ROCm compatibility patches for .local_deps/transformers"
+# ─────────────────────────────────────────────────────────────────────────────
+# Patches fill_holes (scipy), NMS (PyTorch), and warning messages to work
+# without the CUDA-only kernels-community/cv-utils library.
+# Soft-fails with a warning if DART is not at the expected path.
+python patches/apply_patches.py ${SAM3_DART_ROOT:+--dart-root "$SAM3_DART_ROOT"}
+info "ROCm patches applied (or skipped — see warning above)"
+
+# ─────────────────────────────────────────────────────────────────────────────
 step "5. Model weights"
 # ─────────────────────────────────────────────────────────────────────────────
 WEIGHT_FILE="$MODEL_DIR/model.safetensors"
