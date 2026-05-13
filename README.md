@@ -41,11 +41,14 @@ Uses `Sam3VideoModel` — the full SAM3 detection + tracking stack:
 
 1. **CLIP text encoder** converts the prompt (e.g. `"swan"`) into query embeddings
 2. **ViT backbone** extracts multi-scale visual features from frame 0
-3. **DETR encoder + decoder** localises the object; presence-aware scoring + greedy
-   mask-IoU NMS selects the highest-scoring detection
+3. **DETR encoder + decoder** localises **all matching objects**; presence-aware
+   scoring + greedy mask-IoU NMS ranks them by score
 4. **SAM3 mask decoder** produces the initial segmentation mask
 5. **Memory propagation** (frames 1+): backbone features + memory bank drive the mask
    decoder each frame; object pointers accumulate in the memory bank
+
+All detected objects above `--min-score` are tracked simultaneously — backbone runs
+once per frame regardless of object count, so 4 objects costs only ~20% more than 1.
 
 All three heavy modules — backbone, DETR encoder, memory attention — are MIG-accelerated.
 
@@ -157,7 +160,7 @@ Two demo entry points — pick the one matching your use case:
 | Demo | Prompt | Pipeline | Steady-state FPS | Use for |
 |---|---|---|---|---|
 | `demo.py` | bounding box | Tracking only (no detection) | **8.2 FPS @ 504px** | known target, real-time |
-| `demo_text.py --mig --imgsz 504` | text | Detection + tracking @ 504px | **5.1 FPS @ 504px** | open-vocabulary, high FPS |
+| `demo_text.py --mig --imgsz 504` | text | Detection + tracking @ 504px, N objects | **5.1 FPS** (1 obj) / **4.1 FPS** (4 obj) | open-vocabulary, multi-object |
 | `demo_text.py --mig` | text | Detection + tracking @ 1008px | **1.5 FPS @ 1008px** | open-vocabulary, higher quality |
 | `demo_text.py` | text | Detection + tracking (pure PyTorch) | 0.5 FPS @ 1008px | open-vocabulary, no MIG setup |
 
@@ -223,6 +226,22 @@ python export/detector/export_detr_encoder.py      --imgsz 1008
 python export/tracker_modules/export_memory_attention_padded.py --imgsz 1008
 ```
 
+Multi-object flags:
+- `--min-score 0.5` — only track detections above this confidence (default 0.5)
+- `--max-objects 0` — cap by score rank, 0 = all above threshold (default 0 = all)
+
+```bash
+# Track all dogs in the scene
+python demo_text.py --checkpoint model/sam3 \
+    --video input.mp4 --text "dog" \
+    --imgsz 504 --mig --onnx-dir onnx_files_504 --min-score 0.4
+
+# Track at most 2 people (highest scoring)
+python demo_text.py --checkpoint model/sam3 \
+    --video input.mp4 --text "person" \
+    --imgsz 504 --mig --onnx-dir onnx_files_504 --max-objects 2
+```
+
 Outputs default to `outputs/{box,text}/<input-stem>_{tracked,text}.{jpg,mp4}` (overridable
 with `--output`). Try short noun phrases: `"swan"`, `"a person on a bike"`, `"yellow taxi"`.
 
@@ -278,6 +297,14 @@ python eval/benchmarks/profile_text_prompt.py   --checkpoint model/sam3 --image 
 
 Mask quality: PT vs MIG mean IoU = **0.999** @1008px, **0.994** @504px (verified
 frame-by-frame on 20–30 frames). Detection score: truck 0.95, swan 0.93–0.96 across resolutions.
+
+Multi-object scaling @504 MIG (backbone shared across all objects):
+
+| Objects tracked | Prop FPS |
+|---|---|
+| 1 | 5.1 |
+| 4 (measured, dogs-jump) | 4.1 |
+| 8 (estimated) | ~2.7 |
 
 ### Box-prompt: Tracking only (`demo.py`)
 
