@@ -6,7 +6,7 @@ propagates the mask through subsequent frames. **Box-prompt** mode skips detecti
 maximum throughput.
 
 Achieves **5.5 FPS** text-prompt and **12.21 FPS** box-prompt (propagation, 504px) on an
-AMD Ryzen AI Max+ 395. DAVIS 2017 val Mean J: **81.5%** (504px).
+AMD Ryzen AI Max+ 395. DAVIS 2017 val Mean J: **81.6%** (504px).
 
 > **Hardware requirement**: AMD gfx1151 (Radeon 8060S / Ryzen AI Max+ 395) with ROCm 7.x.
 > Other AMD GPUs supporting ROCm may work but are untested.
@@ -349,7 +349,7 @@ evaluation. Official SG evaluation pending (requires full 1686-annotation run wi
 | tracker_neck + mask_decoder + memory_encoder | ~8 ms | PyTorch |
 | **Total propagation frame** | **~169 ms → 5.9 FPS** | |
 
-**Box-prompt propagation** (122 ms/frame → 8.21 FPS):
+**Box-prompt propagation** (~82 ms/frame → 12.21 FPS, with MLIR attention backbone):
 
 | Stage | Latency | Backend |
 |---|---:|---|

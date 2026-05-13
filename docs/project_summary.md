@@ -102,7 +102,7 @@ fallbacks in `tracker/rocm_patches.py`, applied automatically at import).
 
 | Resolution | Mean J | SG proxy J (50 seqs) | SG HOTA (mask, 300-seq) |
 |---|---|---|---|
-| 504px | **81.5%** | 40.4% | 0.179 |
+| 504px | **81.6%** | 40.4% | 0.179 |
 | 1008px | **84.8%** | 44.0% | 0.183 |
 
 ### Text-prompt mask quality (MIG vs PyTorch, frame-by-frame IoU)

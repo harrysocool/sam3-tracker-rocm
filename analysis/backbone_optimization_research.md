@@ -102,3 +102,23 @@ Run during compile and search for attention-related fusions.
 | tracker_neck (PT) | 4 | 2% |
 | others | 4 | 2% |
 | **Total** | **~169ms → 5.9 FPS** | |
+---
+
+## Tracker backbone MLIR results (2026-05-13, box-prompt pipeline)
+
+Same `MIGRAPHX_MLIR_USE_SPECIFIC_OPS="attention"` flag applied to `backbone_tracker/tuned.mxr`.
+Effect is larger than detector backbone because tracker backbone attention subgraph responds
+better to MLIR fusion (different FPN structure: 3 levels vs 4+LHS for detector).
+
+| Metric | Before | After (MLIR) | Δ |
+|---|---|---|---|
+| Backbone @504px | ~92ms | ~67ms | -27% |
+| Backbone @1008px | ~342ms | ~236ms | -31% |
+| Total prop @504px | ~115ms → 8.21 FPS | ~82ms → 12.21 FPS | **+49%** |
+| Total prop @1008px | ~432ms → 2.31 FPS | ~310ms → 3.22 FPS | **+39%** |
+
+Accuracy verified: DAVIS @504 J = 81.6% (vs 81.5% before, within noise).
+
+Also fixed: `pos_2` shape validation in `tracker/tracker.py:propagate_frame` —
+the 1008px backbone ONNX has 4 outputs (fpn_0/1/2/3) and the 4th was incorrectly
+used as positional encoding despite having wrong spatial size (36×36 vs 72×72 for fpn_2).
