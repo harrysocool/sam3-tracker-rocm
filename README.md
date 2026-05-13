@@ -5,7 +5,7 @@ optimized for AMD ROCm hardware. A **text prompt** finds the target on frame 0; 
 propagates the mask through subsequent frames. **Box-prompt** mode skips detection for
 maximum throughput.
 
-Achieves **5.5 FPS** text-prompt and **8.21 FPS** box-prompt (propagation, 504px) on an
+Achieves **5.5 FPS** text-prompt and **12.21 FPS** box-prompt (propagation, 504px) on an
 AMD Ryzen AI Max+ 395. DAVIS 2017 val Mean J: **81.5%** (504px).
 
 > **Hardware requirement**: AMD gfx1151 (Radeon 8060S / Ryzen AI Max+ 395) with ROCm 7.x.
@@ -182,7 +182,7 @@ Two demo entry points — pick the one matching your use case:
 
 | Demo | Prompt | Pipeline | Steady-state FPS | Use for |
 |---|---|---|---|---|
-| `demo.py` | bounding box | Tracking only (no detection) | **8.2 FPS @ 504px** | known target, real-time |
+| `demo.py` | bounding box | Tracking only (no detection) | **12.2 FPS @ 504px** | known target, real-time |
 | `demo_text.py --mig --imgsz 504` | text | Detection + tracking @ 504px, N objects | **5.5 FPS** (1 obj) / **4.4 FPS** (4 obj) | open-vocabulary, multi-object |
 | `demo_text.py --mig` | text | Detection + tracking @ 1008px | **1.5 FPS @ 1008px** | open-vocabulary, higher quality |
 | `demo_text.py` | text | Detection + tracking (pure PyTorch) | 0.5 FPS @ 1008px | open-vocabulary, no MIG setup |
@@ -328,8 +328,8 @@ Multi-object scaling @504 MIG (backbone shared across all objects):
 
 | Resolution | DAVIS 2017 val J | SG val J (50 seqs) ¹ | Prop FPS | Backbone |
 |---|---|---|---|---|
-| **504px** | **81.5%** | **40.4%** | **8.21** | MIGraphX 2.15+patches |
-| 1008px | 84.8% | 44.0% | **2.31** | MIGraphX 2.15+patches |
+| **504px** | **81.5%** | **40.4%** | **12.21** | MIGraphX 2.15+patches + MLIR |
+| 1008px | 84.8% | 44.0% | **3.22** | MIGraphX 2.15+patches + MLIR |
 | 504px (PyTorch) | 81.5% | 40.4% | 5.72 | PyTorch ROCm FP16 |
 | 1008px (PyTorch) | 84.8% | 44.0% | 1.35 | PyTorch ROCm FP16 |
 
@@ -353,11 +353,11 @@ evaluation. Official SG evaluation pending (requires full 1686-annotation run wi
 
 | Stage | Latency | Backend |
 |---|---:|---|
-| backbone (`backbone_mxr_tuned.mxr`) | ~92 ms | MIGraphX 2.15+patches GPU (FP16 internal) |
+| backbone (`backbone_mxr_tuned.mxr`) | ~67 ms | MIGraphX 2.15+patches + MLIR attention (FP16) |
 | memory_attention | ~7 ms | ORT MIGraphX EP FP16 ¹ |
 | mask_decoder_propagate (`dec_prop_fp32.mxr`) | ~14 ms | MIGraphX direct API FP32 |
 | memory_encoder (`mem_enc_fp32.mxr`) | ~2 ms | MIGraphX direct API FP16 |
-| **Total propagation frame** | **~122 ms → 8.21 FPS** | |
+| **Total propagation frame** | **~82 ms → 12.21 FPS** | |
 
 ¹ `memory_attention` and `detr_encoder` run through ONNX Runtime's MIGraphX EP rather than
 a precompiled `.mxr` because the direct MIGraphX FP16 attention kernel produces NaN outputs

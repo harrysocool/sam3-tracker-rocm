@@ -5,7 +5,7 @@
 
 | Pipeline | 504px FPS | 1008px FPS |
 |---|---|---|
-| Box-prompt (`demo.py`) | **8.21** | **2.31** |
+| Box-prompt (`demo.py`) | **12.21** | **3.22** |
 | Text-prompt MIG (`demo_text.py --mig`) | **5.5** | **~1.5** |
 | Text-prompt PyTorch | 2.6 | 0.52 |
 
@@ -33,12 +33,12 @@
 
 ```
 Input frame
-  → backbone_mxr_tuned.mxr       [MIGraphX 2.15+patches, MLIR attn, FP16]   ~92ms / ~342ms
+  → backbone_mxr_tuned.mxr       [MIGraphX 2.15+patches, MLIR attn, FP16]   ~67ms / ~236ms
   → memory_attention             [ORT MIGraphX EP, FP16] ¹                     ~7ms /  ~60ms
   → mask_decoder_propagate.mxr   [MIGraphX direct API, FP32]                  ~14ms /  ~98ms
   → memory_encoder.mxr           [MIGraphX direct API, FP16]                   ~2ms /   ~7ms
   ─────────────────────────────────────────────────────────────────────────────────
-  Total:  504px → ~115ms → 8.21 FPS   |   1008px → ~432ms → 2.31 FPS
+  Total:  504px → ~82ms → 12.21 FPS   |   1008px → ~310ms → 3.22 FPS
 ```
 
 ### Text-prompt (`demo_text.py --mig`) — Detection + Tracking
@@ -79,11 +79,9 @@ fallbacks in `tracker/rocm_patches.py`, applied automatically at import).
 | FP16 for mem_attn + mem_enc (migraphx_fp16_enable) | 8.32 | 1.56 |
 | FP16 mem_attn via direct MIGraphX API + autotuned mxr | 8.58 | 1.97 |
 | NHWC output fix (GPU contiguous_kernel) — **peak** | **9.46** | **2.39** |
-| Revert mem_attn to ORT EP (correctness fix — Finding #8) | **8.21** | **2.31** |
-| **+MLIR attention backbone** (`MIGRAPHX_MLIR_USE_SPECIFIC_OPS=attention`) | **8.21**² | **2.31**² |
-
-² Box-prompt backbone is compiled separately from text-prompt; MLIR flag not yet applied
-to box-prompt backbone (tracker FPN weights differ — see Finding #10).
+| Revert mem_attn to ORT EP (correctness fix — Finding #8) | 8.21 | 2.31 |
+| **+MLIR attention backbone** (detector) | 8.21 | 2.31 |
+| **+MLIR attention backbone** (tracker) | **12.21** | **3.22** |
 
 ## Text-prompt Optimization Journey
 
@@ -128,8 +126,8 @@ to box-prompt backbone (tracker FPN weights differ — see Finding #10).
 |---|---|---|---|
 | NVIDIA H200 | 1008px | ~5–6 | PyTorch, single object |
 | NVIDIA RTX 5090 | 1008px | 30+ | TensorRT + ByteTrack |
-| **AMD Ryzen AI Max+ 395 (APU)** | **504px** | **8.21** (box) / **5.5** (text) | MIGraphX |
-| **AMD Ryzen AI Max+ 395 (APU)** | **1008px** | **2.31** (box) / **~1.5** (text) | MIGraphX |
+| **AMD Ryzen AI Max+ 395 (APU)** | **504px** | **12.21** (box) / **5.5** (text) | MIGraphX + MLIR |
+| **AMD Ryzen AI Max+ 395 (APU)** | **1008px** | **3.22** (box) / **~1.5** (text) | MIGraphX + MLIR |
 
 The Ryzen AI Max+ 395 is memory-bandwidth-limited (APU, unified memory).
 BIOS UMA=64GB maximizes the fast non-coherent GPU pool (see Finding #7).
