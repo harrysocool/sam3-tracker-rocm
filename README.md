@@ -333,7 +333,8 @@ Multi-object scaling @504 MIG (backbone shared across all objects):
 | 504px (PyTorch) | 81.6% | 5.72 | PyTorch ROCm FP16 |
 | 1008px (PyTorch) | 84.8% | 1.35 | PyTorch ROCm FP16 |
 
-*DAVIS 2017 val, semi-supervised (box prompt on frame 0). For reference: SAM2-L with GT first-frame mask achieves J&F=91.6% on the same split — our tracker uses a box-derived mask instead of GT, which accounts for the gap.*
+> **Reference**: SAM2-L (official, GT first-frame mask) achieves **J&F=91.6%** on DAVIS 2017 val.
+> Our box-prompt uses a box-derived mask on frame 0 instead of GT — the gap reflects prompt quality, not tracker propagation quality.
 
 
 ### Per-module latency breakdown (504px, MIGraphX backbone)
