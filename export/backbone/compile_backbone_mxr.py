@@ -73,6 +73,11 @@ def main():
 
     # Defer the import: it touches the dynamic linker and prints whatever
     # warning the patched library emits.
+    # MIGraphX Python binding lives in /opt/rocm-7.2.0/lib — add it if not
+    # already on sys.path (e.g. when invoked as a subprocess without PYTHONPATH).
+    _mxr_lib = "/opt/rocm-7.2.0/lib"
+    if _mxr_lib not in sys.path:
+        sys.path.insert(0, _mxr_lib)
     import migraphx
 
     print(f"migraphx from: {migraphx.__file__}")
