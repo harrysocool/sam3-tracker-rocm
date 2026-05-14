@@ -16,6 +16,8 @@ Usage:
                    --output tracked.mp4
 """
 from __future__ import annotations
+import os
+os.environ.setdefault("HSA_OVERRIDE_GFX_VERSION", "11.5.1")
 
 import argparse
 import time
