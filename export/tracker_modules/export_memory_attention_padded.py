@@ -80,9 +80,15 @@ def main():
     out_path = args.out_dir / out_name
 
     print(f"Loading Sam3VideoModel.tracker_model from {args.checkpoint} ...")
-    from transformers import Sam3VideoModel
+    from transformers import Sam3VideoModel, Sam3VideoConfig
+    config = Sam3VideoConfig.from_pretrained(str(args.checkpoint))
+    if args.imgsz != 1008:
+        # Rewrite config BEFORE from_pretrained so RoPE buffers are sized correctly.
+        # Same pattern as demo_text.py config-based init.
+        config.image_size = args.imgsz
+        config.low_res_mask_size = 4 * args.imgsz // 14
     model = Sam3VideoModel.from_pretrained(
-        str(args.checkpoint), attn_implementation="eager"
+        str(args.checkpoint), config=config, attn_implementation="eager"
     ).cpu().eval()
     trk = model.tracker_model
 
