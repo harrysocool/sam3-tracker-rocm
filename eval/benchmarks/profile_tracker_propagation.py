@@ -49,7 +49,7 @@ for meth_name in ["_prepare_memory_conditioned_features", "_run_single_frame_inf
         setattr(trk, meth_name, make_wrap(meth_name, getattr(trk, meth_name)))
 
 # Load video frames
-cap = cv2.VideoCapture("assets/demo.mp4")
+cap = cv2.VideoCapture("assets/blackswan.mp4")
 frames = []
 for _ in range(11):
     ret, f = cap.read()

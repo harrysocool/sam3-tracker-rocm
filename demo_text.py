@@ -13,7 +13,7 @@ Usage:
   # Single image
   python demo_text.py \\
       --checkpoint model/sam3 \\
-      --image assets/demo.jpg \\
+      --image assets/truck.jpg \\
       --text "truck"
 
   # Video (any mp4)
@@ -26,6 +26,8 @@ Usage:
 Output goes to outputs/text/<input-stem>_text.{jpg,mp4} unless --output is given.
 """
 from __future__ import annotations
+import os
+os.environ.setdefault("HSA_OVERRIDE_GFX_VERSION", "11.5.1")
 
 import argparse
 import sys

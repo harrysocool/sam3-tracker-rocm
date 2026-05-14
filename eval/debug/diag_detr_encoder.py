@@ -29,7 +29,7 @@ mxr_bb = MIGraphXBackbone(
 mxr_bb.warmup(2)
 patch_sam3_video_model_with_mig(model, mxr_bb)
 
-img = Image.open("assets/demo.jpg").convert("RGB")
+img = Image.open("assets/truck.jpg").convert("RGB")
 session = processor.init_video_session(video=[img], inference_device=device, dtype=dtype)
 text_inputs = processor.tokenizer("truck", return_tensors="pt", padding="max_length", max_length=32).to(device)
 

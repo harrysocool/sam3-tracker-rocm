@@ -178,7 +178,7 @@ def main():
 Next: run the demo with --mig
   LD_PRELOAD=/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0 \\
     python demo_text.py --checkpoint {args.checkpoint} \\
-      --video assets/demo.mp4 --text "swan" \\
+      --video assets/blackswan.mp4 --text "swan" \\
       --imgsz {args.imgsz[0]} --mig --onnx-dir onnx_files_{args.imgsz[0]} --max-frames 60
 """)
     return 0 if all_ok else 1

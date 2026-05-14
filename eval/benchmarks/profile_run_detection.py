@@ -36,7 +36,7 @@ for name in ["text_encoder", "text_projection", "detr_encoder", "detr_decoder", 
         mod = getattr(det, name)
         mod.forward = make_wrap(name, mod.forward)
 
-img = Image.open("assets/demo.jpg").convert("RGB")
+img = Image.open("assets/truck.jpg").convert("RGB")
 ts = []
 for i in range(7):
     sess = proc.init_video_session(video=[img], inference_device=device, dtype=dtype)

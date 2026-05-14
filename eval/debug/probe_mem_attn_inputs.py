@@ -45,7 +45,7 @@ def wrap(current_vision_features, memory, current_vision_position_embeddings=Non
                 memory_posision_embeddings, num_object_pointer_tokens)
 trk.memory_attention.forward = wrap
 
-cap = cv2.VideoCapture("assets/demo.mp4")
+cap = cv2.VideoCapture("assets/blackswan.mp4")
 frames = []
 for _ in range(n_frames):
     ret, f = cap.read()
