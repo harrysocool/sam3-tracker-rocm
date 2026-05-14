@@ -29,15 +29,15 @@ sudo apt-get install -y migraphx
 
 #### 0b. (Optional) Install patched MIGraphX for full performance
 
-The headline FPS numbers (9.46 / 2.39 at 504 / 1008 px) require two
+The headline FPS numbers (8.21 / 2.31 at 504 / 1008 px) require two
 unreleased MIGraphX fixes (`find_splits` multi-arg + NHWC `offload_copy`).
 We refer to the resulting build as **`MIGraphX 2.15+patches`**.
 
 | Path | Performance | What you need |
 |---|---|---|
 | Stay on stock APT 2.15.0 | 5.72 / 1.35 FPS (504 / 1008 px) | Check out tag `v0.1-migraphx-2.15` |
-| **Install prebuilt tarball** | **9.46 / 2.39 FPS** | ~2 min — download release asset, run install script |
-| Build patched from source | 9.46 / 2.39 FPS | ~30 min — for non-`gfx1151` GPUs or different ROCm/Python |
+| **Install prebuilt tarball** | **8.21 / 2.31 FPS** | ~2 min — download release asset, run install script |
+| Build patched from source | 8.21 / 2.31 FPS | ~30 min — for non-`gfx1151` GPUs or different ROCm/Python |
 
 Both prebuilt and source paths are documented in [`docs/build_migraphx_patched.md`](docs/build_migraphx_patched.md).
 Patched source lives in the fork: [`harrysocool/AMDMIGraphX` branch `fix/offload-copy-contiguous-output`](https://github.com/harrysocool/AMDMIGraphX/tree/fix/offload-copy-contiguous-output) (both patches stacked).
@@ -108,33 +108,32 @@ pip install -r requirements.txt
 huggingface-cli download facebook/sam3 --local-dir model/sam3
 ```
 
-### 5. Export ONNX tracking modules (~5 minutes)
+### 5. Build model artefacts (`export/build.py`)
+
+Use the unified build script — it handles both pipelines and both resolutions,
+and skips steps whose output already exists.
 
 ```bash
-# 504px — recommended (7.10 FPS, DAVIS J=81.1%)
-python export/export_tracker_modules.py --imgsz 504 --output-dir onnx_files
+# Box-prompt pipeline (demo.py) — ~10 min @504px
+python export/build.py --pipeline box --imgsz 504
 
-# 1008px — higher quality (2.39 FPS, DAVIS J=85.8%)
-python export/export_tracker_modules.py --imgsz 1008 --output-dir onnx_files_1008
+# Text-prompt MIG pipeline (demo_text.py --mig) — ~18 min @504px
+python export/build.py --pipeline text --imgsz 504
+
+# Both pipelines at 504px
+python export/build.py --pipeline all --imgsz 504
+
+# Both pipelines, both resolutions (~90 min total)
+python export/build.py --pipeline all --imgsz 504 1008
 ```
 
-> `--fixed-slots 7` (default) also exports `memory_attention_fixed_N7.onnx` with static shapes.
-> The tracker automatically picks this file and runs it on MIGraphX.
+Use `--force` to rebuild from scratch. Use `--steps backbone|tracker_modules|prewarm`
+(box pipeline) or `--steps backbone|detr_encoder|memory_attention` (text pipeline)
+to run a single stage.
 
-### 5b. Export and compile MIGraphX backbone (~10 minutes first time)
-
-```bash
-# Export backbone ONNX (single-session, simplified)
-# Then compile to .mxr with kernel autotuning — saved once, loaded in ~3s afterwards
-
-# 504px backbone
-python export/export_backbone_single.py --imgsz 504 --output-dir onnx_files
-# Creates: onnx_files/backbone_mxr_tuned.mxr  (~896 MB, one-time compile ~3 min)
-
-# 1008px backbone
-python export/export_backbone_single.py --imgsz 1008 --output-dir onnx_files_1008
-# Creates: onnx_files_1008/backbone_mxr_tuned.mxr  (~920 MB, one-time compile ~9 min)
-```
-
-> The `.mxr` cache encodes kernel-autotuned GPU programs. After first compile the backbone
-> loads in ~3s on subsequent runs. Pass `--backbone pytorch` to fall back to PyTorch.
+> **Box vs text artefacts**: the two pipelines share the same ViT backbone weights
+> but have different FPN projection weights (`fpn[0..2]`). `build.py` exports them
+> separately into `backbone_tracker/` and `backbone_detector/`. Do not mix them.
+>
+> The `.mxr` cache encodes kernel-autotuned GPU programs. After first compile, the
+> backbone loads in ~3s on subsequent runs.

@@ -1,0 +1,223 @@
+{
+  "config": {
+    "dataset": "DAVIS2017-val",
+    "imgsz": 504,
+    "num_maskmem": 7,
+    "onnx_dir": "/home/amd/project/sam3/results/onnx/tracker_504",
+    "backbone": "Sam3TrackerVideoModel.vision_encoder (PyTorch ROCm FP16, 504px)"
+  },
+  "mean_j": 0.8110577806248059,
+  "mean_fps": 3.4269843415333523,
+  "sequences": [
+    {
+      "seq": "bike-packing",
+      "n_objects": 2,
+      "frames": 69,
+      "mean_j": 0.8316211702660516,
+      "fps": 5.559045072907331
+    },
+    {
+      "seq": "blackswan",
+      "n_objects": 1,
+      "frames": 50,
+      "mean_j": 0.9295317430135576,
+      "fps": 5.570280633852043
+    },
+    {
+      "seq": "bmx-trees",
+      "n_objects": 2,
+      "frames": 80,
+      "mean_j": 0.6078905062764841,
+      "fps": 5.5302517803060525
+    },
+    {
+      "seq": "breakdance",
+      "n_objects": 1,
+      "frames": 84,
+      "mean_j": 0.9216211738893308,
+      "fps": 5.476114301700295
+    },
+    {
+      "seq": "camel",
+      "n_objects": 1,
+      "frames": 90,
+      "mean_j": 0.9601097066719757,
+      "fps": 3.8184198162779865
+    },
+    {
+      "seq": "car-roundabout",
+      "n_objects": 1,
+      "frames": 75,
+      "mean_j": 0.9261720758101368,
+      "fps": 3.6882750914715428
+    },
+    {
+      "seq": "car-shadow",
+      "n_objects": 1,
+      "frames": 40,
+      "mean_j": 0.9009213104690812,
+      "fps": 3.4845220144748223
+    },
+    {
+      "seq": "cows",
+      "n_objects": 1,
+      "frames": 104,
+      "mean_j": 0.8842153928909489,
+      "fps": 2.981708498424815
+    },
+    {
+      "seq": "dance-twirl",
+      "n_objects": 1,
+      "frames": 90,
+      "mean_j": 0.8884115589591356,
+      "fps": 3.0992992492039124
+    },
+    {
+      "seq": "dog",
+      "n_objects": 1,
+      "frames": 60,
+      "mean_j": 0.9469309969172934,
+      "fps": 3.07358254050943
+    },
+    {
+      "seq": "dogs-jump",
+      "n_objects": 3,
+      "frames": 66,
+      "mean_j": 0.8998298898009863,
+      "fps": 3.0780416184628328
+    },
+    {
+      "seq": "drift-chicane",
+      "n_objects": 1,
+      "frames": 52,
+      "mean_j": 0.8944476308910659,
+      "fps": 2.991105287180102
+    },
+    {
+      "seq": "drift-straight",
+      "n_objects": 1,
+      "frames": 50,
+      "mean_j": 0.952092298825757,
+      "fps": 3.026744587586797
+    },
+    {
+      "seq": "goat",
+      "n_objects": 1,
+      "frames": 90,
+      "mean_j": 0.8984388355406929,
+      "fps": 2.9634870788035665
+    },
+    {
+      "seq": "gold-fish",
+      "n_objects": 5,
+      "frames": 78,
+      "mean_j": 0.9048392702978967,
+      "fps": 3.063843550324251
+    },
+    {
+      "seq": "horsejump-high",
+      "n_objects": 2,
+      "frames": 50,
+      "mean_j": 0.7676134590750181,
+      "fps": 3.08153896172657
+    },
+    {
+      "seq": "india",
+      "n_objects": 3,
+      "frames": 81,
+      "mean_j": 0.5690600436688963,
+      "fps": 3.0709806793704697
+    },
+    {
+      "seq": "judo",
+      "n_objects": 2,
+      "frames": 34,
+      "mean_j": 0.8386472903584059,
+      "fps": 3.090986812367206
+    },
+    {
+      "seq": "kite-surf",
+      "n_objects": 3,
+      "frames": 50,
+      "mean_j": 0.4515678413646342,
+      "fps": 3.025065136077341
+    },
+    {
+      "seq": "lab-coat",
+      "n_objects": 5,
+      "frames": 47,
+      "mean_j": 0.5165605592772863,
+      "fps": 2.98638886898067
+    },
+    {
+      "seq": "libby",
+      "n_objects": 1,
+      "frames": 49,
+      "mean_j": 0.8864731673207862,
+      "fps": 2.979226295832891
+    },
+    {
+      "seq": "loading",
+      "n_objects": 3,
+      "frames": 50,
+      "mean_j": 0.9111558682170627,
+      "fps": 3.0334186991222394
+    },
+    {
+      "seq": "mbike-trick",
+      "n_objects": 2,
+      "frames": 79,
+      "mean_j": 0.7951453144989868,
+      "fps": 3.0242383379201647
+    },
+    {
+      "seq": "motocross-jump",
+      "n_objects": 2,
+      "frames": 40,
+      "mean_j": 0.8287190898885314,
+      "fps": 2.9832414937842726
+    },
+    {
+      "seq": "paragliding-launch",
+      "n_objects": 3,
+      "frames": 80,
+      "mean_j": 0.44417588242961364,
+      "fps": 2.989227114268013
+    },
+    {
+      "seq": "parkour",
+      "n_objects": 1,
+      "frames": 100,
+      "mean_j": 0.9219765889300837,
+      "fps": 3.0675394685935355
+    },
+    {
+      "seq": "pigs",
+      "n_objects": 3,
+      "frames": 79,
+      "mean_j": 0.9043274968979728,
+      "fps": 3.071980071106218
+    },
+    {
+      "seq": "scooter-black",
+      "n_objects": 2,
+      "frames": 43,
+      "mean_j": 0.489596546025984,
+      "fps": 3.04006515212587
+    },
+    {
+      "seq": "shooting",
+      "n_objects": 3,
+      "frames": 40,
+      "mean_j": 0.8529688103338439,
+      "fps": 2.9502756691868455
+    },
+    {
+      "seq": "soapbox",
+      "n_objects": 3,
+      "frames": 99,
+      "mean_j": 0.8066718999366781,
+      "fps": 3.010636364052447
+    }
+  ]
+}

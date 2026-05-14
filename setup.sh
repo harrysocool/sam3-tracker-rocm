@@ -93,6 +93,12 @@ info "conda: $(conda --version)"
 # ─────────────────────────────────────────────────────────────────────────────
 step "0a. ROCm 7.2 APT (stock MIGraphX)"
 # ─────────────────────────────────────────────────────────────────────────────
+# Always install runtime libs needed by OpenCV/cv2 (missing from minimal envs)
+if ! $SKIP_APT; then
+    sudo apt-get update -qq 2>/dev/null || true
+    sudo apt-get install -y libgl1 libglib2.0-0 2>/dev/null || true
+fi
+
 if $SKIP_APT; then
     info "Skipping APT install (--skip-apt)"
 elif dpkg -s migraphx &>/dev/null; then
@@ -207,6 +213,7 @@ step "4. Python dependencies"
 pip install -q -r requirements.txt
 info "requirements.txt installed"
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 step "5. Model weights"
 # ─────────────────────────────────────────────────────────────────────────────
@@ -258,106 +265,28 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-step "6. Export ONNX tracking modules"
-# ─────────────────────────────────────────────────────────────────────────────
-ONNX_DIR="onnx_files"
-[[ "$IMGSZ" == "1008" ]] && ONNX_DIR="onnx_files_1008"
-export HSA_OVERRIDE_GFX_VERSION=11.5.1
-export MIGRAPHX_GPU_HIP_FLAGS="-Wno-error -Wno-lifetime-safety-intra-tu-suggestions"
-export PYTORCH_ALLOC_CONF=expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:512
-export PYTHONPATH=/opt/rocm-7.2.0/lib${PYTHONPATH:+:$PYTHONPATH}
-
-# Sentinel: BOTH the ONNX module AND the temporal_pe.npy must exist. Older
-# checkouts that ran the broken export (before temporal_pe.npy was added)
-# have memory_attention_fixed_N7.onnx but no temporal_pe.npy, and the tracker
-# refuses to start without it.
-if [[ -f "$ONNX_DIR/memory_attention_fixed_N7.onnx" && -f "$ONNX_DIR/temporal_pe.npy" ]]; then
-    info "ONNX modules already exported ($ONNX_DIR/)"
-else
-    echo "  Exporting ONNX tracking modules (${IMGSZ}px, ~5 min)..."
-    python export/export_tracker_modules.py \
-        --checkpoint "$MODEL_DIR" \
-        --imgsz "$IMGSZ" \
-        --output-dir "$ONNX_DIR"
-    info "ONNX modules exported → $ONNX_DIR/"
-fi
-
-# ─────────────────────────────────────────────────────────────────────────────
-step "7. Build MIGraphX backbone cache (~5 min 504px / ~12 min 1008px, one-time)"
-# ─────────────────────────────────────────────────────────────────────────────
-MXR_CACHE="$ONNX_DIR/backbone_mxr_tuned.mxr"
-SINGLE_FP32="$ONNX_DIR/backbone_single_fp32.onnx"
-SINGLE_SIMP="$ONNX_DIR/backbone_single_simplified.onnx"
-
-if [[ -f "$MXR_CACHE" ]]; then
-    info "Backbone cache already present ($MXR_CACHE)"
-else
-    # 7a. Single-session export (~1 min)
-    if [[ -f "$SINGLE_FP32" || -f "$SINGLE_SIMP" ]]; then
-        info "Step 7a skipped — single-session ONNX already exists"
-    else
-        echo "  [7a/3] Exporting single-session backbone ONNX (~1 min)..."
-        python export/export_backbone_single.py \
-            --checkpoint "$MODEL_DIR" \
-            --imgsz "$IMGSZ" \
-            --output-dir "$ONNX_DIR"
-    fi
-
-    # 7b. onnxsim (~1 min)
-    if [[ -f "$SINGLE_SIMP" ]]; then
-        info "Step 7b skipped — simplified ONNX already exists"
-    else
-        echo "  [7b/3] Simplifying ONNX with onnxsim (~1 min)..."
-        python export/simplify_backbone.py \
-            --onnx-dir "$ONNX_DIR" \
-            --imgsz "$IMGSZ"
-    fi
-
-    # 7c. MIGraphX compile + autotune (the slow step)
-    echo "  [7c/3] Compiling + autotuning with MIGraphX (~3 min @504 / ~9 min @1008)..."
-    python export/compile_backbone_mxr.py \
-        --onnx-dir "$ONNX_DIR" \
-        --imgsz "$IMGSZ"
-    info "Backbone cache built → $MXR_CACHE"
-fi
-
-# ─────────────────────────────────────────────────────────────────────────────
-step "8. Pre-warm ORT MIGraphX caches (~1 min)"
-# ─────────────────────────────────────────────────────────────────────────────
-PREWARM_SENTINEL="$ONNX_DIR/mxr_cache/memory_attention_fp16.mxr"
-
-if [[ -f "$PREWARM_SENTINEL" ]]; then
-    info "ORT caches already warmed"
-else
-    echo "  Pre-warming tracking module caches..."
-    python export/prewarm_ort_cache.py --onnx-dir "$ONNX_DIR"
-    info "ORT caches warmed"
-fi
-
-# ─────────────────────────────────────────────────────────────────────────────
-step "9. Smoke test"
-# ─────────────────────────────────────────────────────────────────────────────
-echo "  Running demo on sample image..."
-python demo.py \
-    --checkpoint "$MODEL_DIR" \
-    --onnx-dir "$ONNX_DIR" \
-    --image assets/demo.jpg \
-    --output /tmp/sam3_smoke_test.jpg \
-    --box 85,281,1710,850
-
-info "Smoke test passed → /tmp/sam3_smoke_test.jpg"
-
+# Environment ready — print next-step instructions
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${G}══════════════════════════════════════════════════════${NC}"
-echo -e "${G}  Setup complete!${NC}"
+echo -e "${G}  Environment setup complete!${NC}"
 echo ""
-echo "  Activate and run:"
+echo "  Activate the conda environment:"
 echo "    conda activate $CONDA_ENV"
-echo "    export HSA_OVERRIDE_GFX_VERSION=11.5.1"
-echo "    export MIGRAPHX_GPU_HIP_FLAGS=\"-Wno-error -Wno-lifetime-safety-intra-tu-suggestions\""
-echo "    export PYTHONPATH=/opt/rocm-7.2.0/lib\${PYTHONPATH:+:\$PYTHONPATH}"
 echo ""
-echo "    python demo.py --checkpoint $MODEL_DIR --onnx-dir $ONNX_DIR \\"
-echo "        --image YOUR_IMAGE.jpg --box x1,y1,x2,y2"
+echo "  Then build the model artefacts for the pipeline(s) you want:"
+echo ""
+echo "  Box-prompt  (demo.py, ~10 min @504px):"
+echo "    python export/build.py --pipeline box --imgsz $IMGSZ"
+echo ""
+echo "  Text-prompt MIG  (demo_text.py --mig, ~18 min @504px):"
+echo "    python export/build.py --pipeline text --imgsz $IMGSZ"
+echo ""
+echo "  Both pipelines at once:"
+echo "    python export/build.py --pipeline all --imgsz $IMGSZ"
+echo ""
+echo "  Both pipelines, both resolutions (~90 min total):"
+echo "    python export/build.py --pipeline all --imgsz 504 1008"
+echo ""
+echo "  See python export/build.py --help for all options."
 echo -e "${G}══════════════════════════════════════════════════════${NC}"

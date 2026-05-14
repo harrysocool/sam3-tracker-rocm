@@ -1,0 +1,465 @@
+{
+  "config": {
+    "imgsz": 504,
+    "num_maskmem": 7,
+    "seed": 42,
+    "n_seqs": 50,
+    "backbone": "Sam3TrackerVideoModel.vision_encoder (PyTorch ROCm FP16, 504px)",
+    "memory_attention": "memory_attention_fixed_N7.onnx (MIGraphX)",
+    "onnx_dir": "/home/amd/project/sam3/results/onnx/tracker_504"
+  },
+  "mean_j": 0.3961489284621687,
+  "mean_fps": 3.842642836131499,
+  "sequences": [
+    {
+      "seq": "saco_sg_000196",
+      "noun": "a store's shelf",
+      "frames": 120,
+      "visible_gt": 7,
+      "mean_iou": 0.6906959485278323,
+      "mean_score": 4.238804738347729,
+      "fps": 2.84455958332448
+    },
+    {
+      "seq": "saco_sg_000419",
+      "noun": "van",
+      "frames": 120,
+      "visible_gt": 75,
+      "mean_iou": 0.051607889935993564,
+      "mean_score": 3.0017702302585048,
+      "fps": 2.7980215530325654
+    },
+    {
+      "seq": "saco_sg_000382",
+      "noun": "the binder",
+      "frames": 120,
+      "visible_gt": 31,
+      "mean_iou": 0.39188813130043276,
+      "mean_score": 2.5034096186359722,
+      "fps": 2.8297866262230325
+    },
+    {
+      "seq": "saco_sg_000675",
+      "noun": "potted plant",
+      "frames": 120,
+      "visible_gt": 120,
+      "mean_iou": 0.41832560596035306,
+      "mean_score": 8.049608075618744,
+      "fps": 2.780676847147533
+    },
+    {
+      "seq": "saco_sg_000250",
+      "noun": "taxi",
+      "frames": 120,
+      "visible_gt": 6,
+      "mean_iou": 0.2786213650609625,
+      "mean_score": 2.2525835879147054,
+      "fps": 2.8265156729207006
+    },
+    {
+      "seq": "saco_sg_000554",
+      "noun": "appliance",
+      "frames": 120,
+      "visible_gt": 88,
+      "mean_iou": 0.060900983664665696,
+      "mean_score": 1.2249941772470871,
+      "fps": 2.7911814036753215
+    },
+    {
+      "seq": "saco_sg_000352",
+      "noun": "a white wire",
+      "frames": 120,
+      "visible_gt": 75,
+      "mean_iou": 0.4965787585612309,
+      "mean_score": 8.763878300786018,
+      "fps": 2.8070506039435306
+    },
+    {
+      "seq": "saco_sg_000014",
+      "noun": "the vanilla ice cream",
+      "frames": 120,
+      "visible_gt": 79,
+      "mean_iou": 0.3080938255727489,
+      "mean_score": 4.648548468450705,
+      "fps": 2.804386875868643
+    },
+    {
+      "seq": "saco_sg_000374",
+      "noun": "a white vehicle",
+      "frames": 120,
+      "visible_gt": 51,
+      "mean_iou": 0.24162022261644614,
+      "mean_score": 3.168598703481257,
+      "fps": 2.800479423026161
+    },
+    {
+      "seq": "saco_sg_000549",
+      "noun": "a purse",
+      "frames": 120,
+      "visible_gt": 3,
+      "mean_iou": 0.8980869869134646,
+      "mean_score": 1.5860928154860934,
+      "fps": 2.8107596136560584
+    },
+    {
+      "seq": "saco_sg_000527",
+      "noun": "a granite",
+      "frames": 120,
+      "visible_gt": 109,
+      "mean_iou": 0.4241105659835214,
+      "mean_score": 3.5202707102522255,
+      "fps": 2.77570151783302
+    },
+    {
+      "seq": "saco_sg_000402",
+      "noun": "the toothbrush",
+      "frames": 120,
+      "visible_gt": 113,
+      "mean_iou": 0.3431398455255489,
+      "mean_score": 9.027787951628367,
+      "fps": 2.784277398533438
+    },
+    {
+      "seq": "saco_sg_000303",
+      "noun": "a decorative vase",
+      "frames": 120,
+      "visible_gt": 73,
+      "mean_iou": 0.20459393436893372,
+      "mean_score": 4.840128386269013,
+      "fps": 2.7988382979037247
+    },
+    {
+      "seq": "saco_sg_000221",
+      "noun": "a curtain",
+      "frames": 120,
+      "visible_gt": 31,
+      "mean_iou": 0.7503713293131746,
+      "mean_score": 4.9111344712475935,
+      "fps": 2.807675512465574
+    },
+    {
+      "seq": "saco_sg_000409",
+      "noun": "a door",
+      "frames": 120,
+      "visible_gt": 41,
+      "mean_iou": 0.22174360044750097,
+      "mean_score": 4.65749212950468,
+      "fps": 2.8284892382566142
+    },
+    {
+      "seq": "saco_sg_000305",
+      "noun": "rack of black jacket",
+      "frames": 120,
+      "visible_gt": 23,
+      "mean_iou": 0.6977361590200492,
+      "mean_score": 4.007621474874516,
+      "fps": 2.8220924597237356
+    },
+    {
+      "seq": "saco_sg_000253",
+      "noun": "the laptop computer",
+      "frames": 120,
+      "visible_gt": 82,
+      "mean_iou": 0.23182495298304734,
+      "mean_score": 3.1144893490398924,
+      "fps": 2.783017156291555
+    },
+    {
+      "seq": "saco_sg_000212",
+      "noun": "the person",
+      "frames": 120,
+      "visible_gt": 27,
+      "mean_iou": 0.6330085669404559,
+      "mean_score": 3.383740468136966,
+      "fps": 2.809829994187251
+    },
+    {
+      "seq": "saco_sg_000329",
+      "noun": "a sheet of paper",
+      "frames": 120,
+      "visible_gt": 108,
+      "mean_iou": 0.22616193204247662,
+      "mean_score": 8.035933391253154,
+      "fps": 2.789051920462241
+    },
+    {
+      "seq": "saco_sg_000589",
+      "noun": "the person's arm",
+      "frames": 120,
+      "visible_gt": 96,
+      "mean_iou": 0.24329806222934577,
+      "mean_score": 9.839101243019105,
+      "fps": 2.775022174540798
+    },
+    {
+      "seq": "saco_sg_000175",
+      "noun": "a ceiling's design",
+      "frames": 120,
+      "visible_gt": 80,
+      "mean_iou": 0.8324653029878238,
+      "mean_score": 4.6978415881594024,
+      "fps": 2.792555066373167
+    },
+    {
+      "seq": "saco_sg_000357",
+      "noun": "a clear roof",
+      "frames": 120,
+      "visible_gt": 96,
+      "mean_iou": 0.12412719377879018,
+      "mean_score": 4.78365032064418,
+      "fps": 2.77749959544986
+    },
+    {
+      "seq": "saco_sg_000051",
+      "noun": "device",
+      "frames": 120,
+      "visible_gt": 86,
+      "mean_iou": 0.19681995476163427,
+      "mean_score": 3.2264673870056866,
+      "fps": 2.785842790980434
+    },
+    {
+      "seq": "saco_sg_000355",
+      "noun": "a person's left arm",
+      "frames": 120,
+      "visible_gt": 35,
+      "mean_iou": 0.2218341999604636,
+      "mean_score": 4.717907737071315,
+      "fps": 2.8192733679700885
+    },
+    {
+      "seq": "saco_sg_000240",
+      "noun": "cabinet",
+      "frames": 120,
+      "visible_gt": 43,
+      "mean_iou": 0.1320365211609374,
+      "mean_score": 2.4106133840978146,
+      "fps": 2.7988486871762275
+    },
+    {
+      "seq": "saco_sg_000215",
+      "noun": "an american flag",
+      "frames": 120,
+      "visible_gt": 56,
+      "mean_iou": 0.5433636601887099,
+      "mean_score": 2.630471616735061,
+      "fps": 2.854180880446161
+    },
+    {
+      "seq": "saco_sg_000343",
+      "noun": "a wooden beam",
+      "frames": 120,
+      "visible_gt": 75,
+      "mean_iou": 0.09762686915544001,
+      "mean_score": 3.327600398659706,
+      "fps": 4.964264328285285
+    },
+    {
+      "seq": "saco_sg_000130",
+      "noun": "a pointed arch",
+      "frames": 120,
+      "visible_gt": 117,
+      "mean_iou": 0.31438053124014226,
+      "mean_score": 6.23901149580876,
+      "fps": 4.935243310408607
+    },
+    {
+      "seq": "saco_sg_000629",
+      "noun": "red coat",
+      "frames": 120,
+      "visible_gt": 16,
+      "mean_iou": 0.9153862684826651,
+      "mean_score": 3.483120541336636,
+      "fps": 4.991924660201251
+    },
+    {
+      "seq": "saco_sg_000453",
+      "noun": "a metal gate",
+      "frames": 120,
+      "visible_gt": 29,
+      "mean_iou": 0.8355062658635686,
+      "mean_score": 5.654697094236811,
+      "fps": 5.016696805243563
+    },
+    {
+      "seq": "saco_sg_000640",
+      "noun": "a note",
+      "frames": 120,
+      "visible_gt": 65,
+      "mean_iou": 0.5561491122129654,
+      "mean_score": 3.2141187459230425,
+      "fps": 4.971418550832723
+    },
+    {
+      "seq": "saco_sg_000389",
+      "noun": "a wooden table",
+      "frames": 120,
+      "visible_gt": 63,
+      "mean_iou": 0.20543060224821785,
+      "mean_score": 2.0744114678973955,
+      "fps": 4.949166578058105
+    },
+    {
+      "seq": "saco_sg_000097",
+      "noun": "the smartphone",
+      "frames": 120,
+      "visible_gt": 63,
+      "mean_iou": 0.08857424729413979,
+      "mean_score": 2.358072640498479,
+      "fps": 4.971635073963942
+    },
+    {
+      "seq": "saco_sg_000310",
+      "noun": "the white pegboard",
+      "frames": 120,
+      "visible_gt": 26,
+      "mean_iou": 0.40713262018150237,
+      "mean_score": 1.8477571700389186,
+      "fps": 4.982660541655574
+    },
+    {
+      "seq": "saco_sg_000128",
+      "noun": "moving vehicle",
+      "frames": 120,
+      "visible_gt": 10,
+      "mean_iou": 0.9801282928499739,
+      "mean_score": 3.6290569136540096,
+      "fps": 4.96268423360388
+    },
+    {
+      "seq": "saco_sg_000124",
+      "noun": "a person's hands",
+      "frames": 120,
+      "visible_gt": 67,
+      "mean_iou": 0.6810750372324266,
+      "mean_score": 6.731124048183362,
+      "fps": 4.984999296086383
+    },
+    {
+      "seq": "saco_sg_000602",
+      "noun": "the black truck",
+      "frames": 120,
+      "visible_gt": 65,
+      "mean_iou": 0.6646929290515331,
+      "mean_score": 4.428155947476625,
+      "fps": 4.962758629231565
+    },
+    {
+      "seq": "saco_sg_000588",
+      "noun": "the crosswalk",
+      "frames": 120,
+      "visible_gt": 97,
+      "mean_iou": 0.020653221595712683,
+      "mean_score": 5.8431524136414135,
+      "fps": 4.949921404862088
+    },
+    {
+      "seq": "saco_sg_000135",
+      "noun": "a mannequin",
+      "frames": 120,
+      "visible_gt": 17,
+      "mean_iou": 0.9210809011016787,
+      "mean_score": 2.948708181331555,
+      "fps": 4.990007715205525
+    },
+    {
+      "seq": "saco_sg_000231",
+      "noun": "a black suv",
+      "frames": 120,
+      "visible_gt": 19,
+      "mean_iou": 0.005595807249759391,
+      "mean_score": 1.2024074373145899,
+      "fps": 4.97100008916497
+    },
+    {
+      "seq": "saco_sg_000563",
+      "noun": "onion",
+      "frames": 120,
+      "visible_gt": 62,
+      "mean_iou": 0.775064860325954,
+      "mean_score": 4.612964218358199,
+      "fps": 5.003474956709092
+    },
+    {
+      "seq": "saco_sg_000360",
+      "noun": "the pan",
+      "frames": 120,
+      "visible_gt": 113,
+      "mean_iou": 0.2276540199897324,
+      "mean_score": 6.371722710132599,
+      "fps": 4.970113912290778
+    },
+    {
+      "seq": "saco_sg_000657",
+      "noun": "the mannequin",
+      "frames": 120,
+      "visible_gt": 51,
+      "mean_iou": 0.2549230236738692,
+      "mean_score": 2.0299303439756233,
+      "fps": 4.955998123985457
+    },
+    {
+      "seq": "saco_sg_000425",
+      "noun": "stuffed animal",
+      "frames": 120,
+      "visible_gt": 5,
+      "mean_iou": 0.7534657152467769,
+      "mean_score": 3.120592066148917,
+      "fps": 4.980292008611419
+    },
+    {
+      "seq": "saco_sg_000450",
+      "noun": "the gutter",
+      "frames": 120,
+      "visible_gt": 20,
+      "mean_iou": 0.24496330116866236,
+      "mean_score": 1.3865393889447053,
+      "fps": 4.954916526341407
+    },
+    {
+      "seq": "saco_sg_000003",
+      "noun": "white bag",
+      "frames": 120,
+      "visible_gt": 30,
+      "mean_iou": 0.18868811806487154,
+      "mean_score": 4.00367074739188,
+      "fps": 4.959677233658874
+    },
+    {
+      "seq": "saco_sg_000418",
+      "noun": "a potted plant",
+      "frames": 120,
+      "visible_gt": 105,
+      "mean_iou": 0.12413406849247105,
+      "mean_score": 6.552896735506753,
+      "fps": 4.933419603206234
+    },
+    {
+      "seq": "saco_sg_000346",
+      "noun": "individual's left hand",
+      "frames": 120,
+      "visible_gt": 87,
+      "mean_iou": 0.02067600434683628,
+      "mean_score": 2.783268309136232,
+      "fps": 4.956481015968921
+    },
+    {
+      "seq": "saco_sg_000322",
+      "noun": "the black lamppost",
+      "frames": 120,
+      "visible_gt": 106,
+      "mean_iou": 0.6006804134592695,
+      "mean_score": 7.156109539543589,
+      "fps": 4.965034327098828
+    },
+    {
+      "seq": "saco_sg_000254",
+      "noun": "a dark liquid",
+      "frames": 120,
+      "visible_gt": 100,
+      "mean_iou": 0.060728692773720526,
+      "mean_score": 5.42867739610374,
+      "fps": 4.952738620488571
+    }
+  ]
+}
