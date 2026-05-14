@@ -9,7 +9,7 @@ Optionally patches the detector vision_encoder with the MIGraphX backbone
 shim (--mig) so we can compare PT-only vs MIG-backbone profiles.
 
 Usage:
-    python eval/benchmarks/profile_video_pipeline.py --image assets/demo.jpg --text truck --frames 10 [--mig]
+    python eval/benchmarks/profile_video_pipeline.py --image assets/truck.jpg --text truck --frames 10 [--mig]
 """
 from __future__ import annotations
 

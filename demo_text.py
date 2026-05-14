@@ -13,7 +13,7 @@ Usage:
   # Single image
   python demo_text.py \\
       --checkpoint model/sam3 \\
-      --image assets/demo.jpg \\
+      --image assets/truck.jpg \\
       --text "truck"
 
   # Video (any mp4)

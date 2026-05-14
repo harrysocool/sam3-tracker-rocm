@@ -194,48 +194,48 @@ text-prompt paths do not need it.
 
 ### Box-prompt (`demo.py`) — tracking only, fastest
 
-> `assets/demo.jpg` and `assets/demo.mp4` are bundled demo files (a truck image and
+> `assets/truck.jpg` and `assets/blackswan.mp4` are bundled demo files (a truck image and
 > a short swan clip). Replace with your own image or video. `--box x1,y1,x2,y2` is
 > the bounding box around the target on frame 0, in pixel coordinates.
 
 ```bash
 # Image — MIGraphX backbone (default, ~115 ms / frame)
 python demo.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
-    --image assets/demo.jpg --box 85,281,1710,850   # x1,y1,x2,y2 in pixels
+    --image assets/truck.jpg --box 85,281,1710,850   # x1,y1,x2,y2 in pixels
 
 # Image — PyTorch backbone fallback (no MIGraphX needed)
 python demo.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
     --backbone pytorch \
-    --image assets/demo.jpg --box 85,281,1710,850
+    --image assets/truck.jpg --box 85,281,1710,850
 
 # Video (any mp4) — output written to outputs/box/<stem>_tracked.mp4
 python demo.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
-    --video assets/demo.mp4 --box 320,170,650,400
+    --video assets/blackswan.mp4 --box 320,170,650,400
 ```
 
 ### Text-prompt (`demo_text.py`) — detection + tracking, open-vocabulary
 
-> `assets/demo.mp4` is a bundled swan clip. Replace with your own video.
+> `assets/blackswan.mp4` is a bundled swan clip. Replace with your own video.
 > MIG commands (`--mig`) require Stage 2 artefacts to be built first.
 
 ```bash
 # Image — pure PyTorch path (no MIG artifacts needed)
 python demo_text.py --checkpoint model/sam3 \
-    --image assets/demo.jpg --text "truck"
+    --image assets/truck.jpg --text "truck"
 
 # Video — pure PyTorch (~0.5 FPS @ 1008px)
 python demo_text.py --checkpoint model/sam3 \
-    --video assets/demo.mp4 --text "swan" --max-frames 60  # omit for full video
+    --video assets/blackswan.mp4 --text "swan" --max-frames 60  # omit for full video
 
 # Video — MIG @504 (~5.1 FPS, 10× over PT baseline, best for demos)
 LD_PRELOAD=/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0 \
     python demo_text.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
-    --video assets/demo.mp4 --text "swan" --imgsz 504 --mig --max-frames 60
+    --video assets/blackswan.mp4 --text "swan" --imgsz 504 --mig --max-frames 60
 
 # Video — MIG @1008 (~1.5 FPS, highest mask quality)
 LD_PRELOAD=/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0 \
     python demo_text.py --checkpoint model/sam3 --onnx-dir onnx_files_1008 \
-    --video assets/demo.mp4 --text "swan" --mig --max-frames 60
+    --video assets/blackswan.mp4 --text "swan" --mig --max-frames 60
 ```
 
 Multi-object flags:
@@ -245,12 +245,12 @@ Multi-object flags:
 ```bash
 # Track all dogs in the scene
 python demo_text.py --checkpoint model/sam3 \
-    --video assets/demo.mp4 --text "dog" \
+    --video assets/blackswan.mp4 --text "dog" \
     --imgsz 504 --mig --onnx-dir onnx_files_504 --min-score 0.4
 
 # Track at most 2 people (highest scoring)
 python demo_text.py --checkpoint model/sam3 \
-    --video assets/demo.mp4 --text "person" \
+    --video assets/blackswan.mp4 --text "person" \
     --imgsz 504 --mig --onnx-dir onnx_files_504 --max-objects 2
 ```
 
@@ -272,14 +272,14 @@ conda activate sam3-tracker  # if not already active
 
 ```bash
 # After Stage 1 only:
-python eval/probes/probe_text_prompt.py --checkpoint model/sam3 --image assets/demo.jpg --text "truck"
+python eval/probes/probe_text_prompt.py --checkpoint model/sam3 --image assets/truck.jpg --text "truck"
 
 # After Stage 2 (box):
 python eval/benchmarks/bench_pipeline.py --checkpoint model/sam3 --onnx-dir onnx_files_504
 
 # After Stage 2 (text):
-python eval/probes/probe_text_prompt_mxr.py --checkpoint model/sam3 --onnx-dir onnx_files_504 --image assets/demo.jpg --text "truck"
-python eval/benchmarks/profile_text_prompt.py --checkpoint model/sam3 --image assets/demo.jpg --text "truck"
+python eval/probes/probe_text_prompt_mxr.py --checkpoint model/sam3 --onnx-dir onnx_files_504 --image assets/truck.jpg --text "truck"
+python eval/benchmarks/profile_text_prompt.py --checkpoint model/sam3 --image assets/truck.jpg --text "truck"
 ```
 
 ---
@@ -409,7 +409,7 @@ python eval/datasets/eval_davis.py \
 
 # PT vs MIG mask regression check
 python eval/datasets/mask_diff_pt_vs_mig.py \
-    --checkpoint model/sam3 --video assets/demo.mp4 \
+    --checkpoint model/sam3 --video assets/blackswan.mp4 \
     --text "swan" --imgsz 504 --max-frames 30 \
     --out results/eval/mask_diff_504.json
 
@@ -420,7 +420,7 @@ python eval/benchmarks/bench_pipeline.py \
 
 # Per-module profile (text-prompt, full MIG stack)
 python eval/benchmarks/profile_full_mig.py \
-    --checkpoint model/sam3 --video assets/demo.mp4 \
+    --checkpoint model/sam3 --video assets/blackswan.mp4 \
     --text "swan" --imgsz 504 \
     --out results/profile_504_mig.json
 ```

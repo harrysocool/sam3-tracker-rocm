@@ -169,11 +169,11 @@ fi
 # ── Stage 3: demos ────────────────────────────────────────────────────────
 ts "[5/6] Demo: box-prompt"
 check "demo box" python demo.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
-    --image assets/demo.jpg --box 85,281,1710,850 --output /tmp/out_box.jpg
+    --image assets/truck.jpg --box 85,281,1710,850 --output /tmp/out_box.jpg
 
 ts "[6/6] Demos: text-prompt"
 check "demo text PT" python demo_text.py --checkpoint model/sam3 \
-    --image assets/demo.jpg --text "truck" --output /tmp/out_text_pt.jpg
+    --image assets/truck.jpg --text "truck" --output /tmp/out_text_pt.jpg
 
 if [ "${BUILD_TEXT_FLAG}" = "true" ]; then
     export HSA_OVERRIDE_GFX_VERSION=11.5.1
@@ -181,7 +181,7 @@ if [ "${BUILD_TEXT_FLAG}" = "true" ]; then
     check "demo text MIG" env LD_PRELOAD=/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0 \
         python demo_text.py --checkpoint model/sam3 \
         --onnx-dir onnx_files_504 --imgsz 504 --mig \
-        --image assets/demo.jpg --text "truck" --output /tmp/out_text_mig.jpg
+        --image assets/truck.jpg --text "truck" --output /tmp/out_text_mig.jpg
 fi
 
 TOTAL=\$(( \$(date +%s) - T0 ))
