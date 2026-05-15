@@ -176,7 +176,7 @@ def main():
         imgsz_list = " ".join(str(i) for i in args.imgsz)
         print(f"""
 Next: run the demo with --mig
-  LD_PRELOAD=/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0 \\
+  LD_PRELOAD=/opt/rocm-7.2.x/lib/libmigraphx_c.so.3:/opt/rocm-7.2.x/lib/migraphx/lib/libmigraphx.so.2016000.0 \\
     python demo_text.py --checkpoint {args.checkpoint} \\
       --video assets/blackswan.mp4 --text "swan" \\
       --imgsz {args.imgsz[0]} --mig --onnx-dir onnx_files_{args.imgsz[0]} --max-frames 60

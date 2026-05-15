@@ -228,12 +228,12 @@ python demo_text.py --checkpoint model/sam3 \
     --video assets/blackswan.mp4 --text "swan" --max-frames 60  # omit for full video
 
 # Video — MIG @504 (~5.1 FPS, 10× over PT baseline, best for demos)
-LD_PRELOAD=/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0 \
+LD_PRELOAD=/opt/rocm-7.2.x/lib/libmigraphx_c.so.3:/opt/rocm-7.2.x/lib/migraphx/lib/libmigraphx.so.2016000.0 \
     python demo_text.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
     --video assets/blackswan.mp4 --text "swan" --imgsz 504 --mig --max-frames 60
 
 # Video — MIG @1008 (~1.5 FPS, highest mask quality)
-LD_PRELOAD=/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0 \
+LD_PRELOAD=/opt/rocm-7.2.x/lib/libmigraphx_c.so.3:/opt/rocm-7.2.x/lib/migraphx/lib/libmigraphx.so.2016000.0 \
     python demo_text.py --checkpoint model/sam3 --onnx-dir onnx_files_1008 \
     --video assets/blackswan.mp4 --text "swan" --mig --max-frames 60
 ```
@@ -499,7 +499,7 @@ sam3-tracker-rocm/
   fusion limitation in `find_splits`. See [`analysis/migraphx_backbone_investigation.md`](analysis/migraphx_backbone_investigation.md).
 - **Dual LD_PRELOAD required for text-prompt MIG.** The torch ROCm nightly wheels bundle
   their own HIP runtime; loading MIGraphX after torch corrupts `.mxr` deserialization. The
-  `LD_PRELOAD` in the demo commands forces `/opt/rocm-7.2.0` libs to load first.
+  `LD_PRELOAD` in the demo commands forces `/opt/rocm-7.2.x` libs to load first.
 
 ---
 

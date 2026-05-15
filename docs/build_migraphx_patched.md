@@ -28,7 +28,7 @@ sha256sum /tmp/migraphx-patched.tar.gz
 # 3. Extract
 mkdir -p /tmp/migraphx-patched && tar -xzf /tmp/migraphx-patched.tar.gz -C /tmp/migraphx-patched
 
-# 4. Install over stock /opt/rocm-7.2.0/lib (script back-ups the stock libs as *.bak)
+# 4. Install over stock /opt/rocm-7.2.x/lib (script back-ups the stock libs as *.bak)
 cd /tmp/migraphx-patched/migraphx-2.15+patches
 sudo BUILD=. bash install_migraphx_patched.sh
 ```
@@ -36,14 +36,14 @@ sudo BUILD=. bash install_migraphx_patched.sh
 Then add to your `~/.bashrc` or run-script env:
 
 ```bash
-export PYTHONPATH=/opt/rocm-7.2.0/lib:$PYTHONPATH
-export LD_LIBRARY_PATH=/opt/rocm-7.2.0/lib/migraphx/lib:/opt/rocm-7.2.0/lib:$LD_LIBRARY_PATH
+export PYTHONPATH=/opt/rocm-7.2.x/lib:$PYTHONPATH
+export LD_LIBRARY_PATH=/opt/rocm-7.2.x/lib/migraphx/lib:/opt/rocm-7.2.x/lib:$LD_LIBRARY_PATH
 ```
 
 Verify:
 ```bash
 python3 -c "import migraphx; print('MIGraphX from:', migraphx.__file__)"
-# Expect: /opt/rocm-7.2.0/lib/migraphx.cpython-312-x86_64-linux-gnu.so
+# Expect: /opt/rocm-7.2.x/lib/migraphx.cpython-312-x86_64-linux-gnu.so
 ```
 
 > **Compatibility caveat**: the tarball was built on Ubuntu 24.04 with ROCm 7.2 APT
@@ -76,7 +76,7 @@ checking that branch out gets you both fixes.
 
 | Item | Version / Notes |
 |---|---|
-| Stock ROCm 7.2 APT (`migraphx`, `migraphx-dev`) installed at `/opt/rocm-7.2.0/` | See README step 0 |
+| Stock ROCm 7.2 APT (`migraphx`, `migraphx-dev`) installed at `/opt/rocm-7.2.x/` | See README step 0 |
 | Clang from ROCm | `/opt/rocm/llvm/bin/clang++` (comes with ROCm 7.2) |
 | GPU target | `gfx1151` (or whatever your GPU reports — adjust `GPU_TARGETS`) |
 | Disk | ~10 GB build space |
@@ -144,10 +144,10 @@ build_docker/lib/libmigraphx_c.so.3.0               (the C API)
 build_docker/lib/migraphx.cpython-312-x86_64-linux-gnu.so   (Python binding)
 ```
 
-### 5. Install over stock 2.15 (`/opt/rocm-7.2.0/lib`)
+### 5. Install over stock 2.15 (`/opt/rocm-7.2.x/lib`)
 
 The install script back-ups the stock 2.15 libs (`*.bak`) and drops the
-patched 2.16-pre libs in their place under `/opt/rocm-7.2.0/lib/`. After
+patched 2.16-pre libs in their place under `/opt/rocm-7.2.x/lib/`. After
 install, the C API symlink `libmigraphx_c.so.3.0.70200` is repointed to the
 new patched lib, so the system loader (and ORT MIGraphX EP) picks up the
 patched code.
@@ -155,26 +155,26 @@ patched code.
 The script lives in this repo at [`tools/install_migraphx_patched.sh`](../tools/install_migraphx_patched.sh).
 
 ```bash
-# Default: BUILD=./build_docker, ROCM=/opt/rocm-7.2.0
+# Default: BUILD=./build_docker, ROCM=<auto-detected or /opt/rocm-7.2.x>
 sudo bash tools/install_migraphx_patched.sh
 
 # Override paths if needed:
-sudo BUILD=/path/to/AMDMIGraphX/build_docker ROCM=/opt/rocm-7.2.0 \
+sudo BUILD=/path/to/AMDMIGraphX/build_docker ROCM=/opt/rocm-7.2.x \
     bash tools/install_migraphx_patched.sh
 ```
 
 Then make sure your run scripts have:
 
 ```bash
-export PYTHONPATH=/opt/rocm-7.2.0/lib:$PYTHONPATH
-export LD_LIBRARY_PATH=/opt/rocm-7.2.0/lib/migraphx/lib:/opt/rocm-7.2.0/lib:$LD_LIBRARY_PATH
+export PYTHONPATH=/opt/rocm-7.2.x/lib:$PYTHONPATH
+export LD_LIBRARY_PATH=/opt/rocm-7.2.x/lib/migraphx/lib:/opt/rocm-7.2.x/lib:$LD_LIBRARY_PATH
 ```
 
 ### 6. Verify
 
 ```bash
 python3 -c "import migraphx; print('MIGraphX from:', migraphx.__file__)"
-# Expect: /opt/rocm-7.2.0/lib/migraphx.cpython-312-x86_64-linux-gnu.so
+# Expect: /opt/rocm-7.2.x/lib/migraphx.cpython-312-x86_64-linux-gnu.so
 ```
 
 End-to-end check — run the project's prewarm script (it compiles the patched
@@ -194,7 +194,7 @@ python export/prewarm_ort_cache.py --onnx-dir onnx_files
 The install script saves `*.bak` copies. To revert:
 
 ```bash
-cd /opt/rocm-7.2.0/lib
+cd /opt/rocm-7.2.x/lib
 sudo cp libmigraphx_c.so.3.0.70200.bak libmigraphx_c.so.3.0.70200
 cd migraphx/lib
 for lib in libmigraphx libmigraphx_gpu libmigraphx_device libmigraphx_onnx libmigraphx_tf; do

@@ -43,7 +43,16 @@ _MXR_BUILD_LIB = "/home/amd/project/tools/AMDMIGraphX/build_docker/lib"
 def _load_migraphx_module():
     """Import the patched MIGraphX 2.16.0 Python binding."""
     import sys
-    _mxr_py_dir = "/opt/rocm-7.2.0/lib"
+    import glob as _g, os as _o
+    _mxr_py_dir = (
+        (_o.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
+        if _o.path.isdir(_o.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
+        else next(
+            (p for p in sorted(_g.glob("/opt/rocm-7.2.*/lib"), reverse=True)
+             if _o.path.isdir(p)),
+            "/opt/rocm-7.2.0/lib"
+        )
+    )
     if _mxr_py_dir not in sys.path:
         sys.path.insert(0, _mxr_py_dir)
     if _MXR_BUILD_LIB not in sys.path:
@@ -120,7 +129,15 @@ class MIGraphXBackbone:
     def __init__(self, onnx_path: str | Path, cache_path: str | Path) -> None:
         import sys
         # Prefer the ROCm lib dir where the Python binding lives; fall back to build dir.
-        _mxr_py_dir = "/opt/rocm-7.2.0/lib"
+        import glob as _g2, os as _o2
+        _mxr_py_dir = (
+            (_o2.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
+            if _o2.path.isdir(_o2.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
+            else next(
+                (p for p in sorted(_g2.glob("/opt/rocm-7.2.*/lib"), reverse=True)
+                 if _o2.path.isdir(p)), "/opt/rocm-7.2.0/lib"
+            )
+        )
         if _mxr_py_dir not in sys.path:
             sys.path.insert(0, _mxr_py_dir)
         if _MXR_BUILD_LIB not in sys.path:

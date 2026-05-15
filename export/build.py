@@ -175,8 +175,8 @@ def build_text(imgsz: int, args) -> bool:
 # Final demo hints
 # ─────────────────────────────────────────────────────────────────────────────
 
-LD = ("LD_PRELOAD=/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:"
-      "/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0")
+LD = (f"LD_PRELOAD=" + _rocm_base + "/lib/libmigraphx_c.so.3:"
+      f"{_rocm_base}/lib/migraphx/lib/libmigraphx.so.2016000.0")
 
 def print_hints(pipeline: str, imgsz_list: list[int], checkpoint: Path) -> None:
     banner("Done — next steps")

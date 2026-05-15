@@ -26,7 +26,7 @@ if [[ -z "${ROCM:-}" ]]; then
             [[ -d "$_p/lib" ]] && ROCM="$_p" && break
         done
         # Last resort
-        ROCM="${ROCM:-/opt/rocm-7.2.0}"
+        ROCM="${ROCM:-/opt/rocm-7.2.0}"  # fallback only
     fi
 fi
 echo "  ROCm path: $ROCM"
