@@ -177,8 +177,10 @@ check "demo text PT" python demo_text.py --checkpoint model/sam3 \
 
 if [ "${BUILD_TEXT_FLAG}" = "true" ]; then
     export HSA_OVERRIDE_GFX_VERSION=11.5.1
-    export PYTHONPATH=/opt/rocm-7.2.0/lib:\$PYTHONPATH
-    check "demo text MIG" env LD_PRELOAD=/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0 \
+    ROCM_PATH="${ROCM_PATH:-$(ls -d /opt/rocm-7.2.* 2>/dev/null | sort -rV | head -1)}"
+    ROCM_PATH="${ROCM_PATH:-/opt/rocm-7.2.0}"  # last-resort fallback
+    export PYTHONPATH="$ROCM_PATH/lib:\$PYTHONPATH"
+    check "demo text MIG" env LD_PRELOAD="$ROCM_PATH/lib/libmigraphx_c.so.3:$ROCM_PATH/lib/migraphx/lib/libmigraphx.so.2016000.0" \
         python demo_text.py --checkpoint model/sam3 \
         --onnx-dir onnx_files_504 --imgsz 504 --mig \
         --image assets/truck.jpg --text "truck" --output /tmp/out_text_mig.jpg

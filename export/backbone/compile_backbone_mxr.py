@@ -9,10 +9,10 @@ Autotuning runs ~3 minutes for 504px and ~9 minutes for 1008px the first
 time; the resulting .mxr is hardware-specific (gfx1151) and locked to the
 MIGraphX build that produced it (currently 2.15+patches.20260511).
 
-Requires PYTHONPATH=/opt/rocm-7.2.0/lib so the patched migraphx Python
+Requires PYTHONPATH=/opt/rocm-7.2.x/lib so the patched migraphx Python
 binding loads. The wrapping setup.sh sets this; if running standalone:
 
-    PYTHONPATH=/opt/rocm-7.2.0/lib${PYTHONPATH:+:$PYTHONPATH} \\
+    PYTHONPATH=/opt/rocm-7.2.x/lib${PYTHONPATH:+:$PYTHONPATH} \\
         python export/backbone/compile_backbone_mxr.py --imgsz 504 --onnx-dir onnx_files_504
 """
 
@@ -73,9 +73,17 @@ def main():
 
     # Defer the import: it touches the dynamic linker and prints whatever
     # warning the patched library emits.
-    # MIGraphX Python binding lives in /opt/rocm-7.2.0/lib — add it if not
+    # MIGraphX Python binding lives in /opt/rocm-7.2.x/lib — add it if not
     # already on sys.path (e.g. when invoked as a subprocess without PYTHONPATH).
-    _mxr_lib = "/opt/rocm-7.2.0/lib"
+    import glob as _g
+    _mxr_lib = (
+        (os.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
+        if os.path.isdir(os.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
+        else next(
+            (p for p in sorted(_g.glob("/opt/rocm-7.2.*/lib"), reverse=True)
+             if os.path.isdir(p)), "/opt/rocm-7.2.0/lib"
+        )
+    )
     if _mxr_lib not in sys.path:
         sys.path.insert(0, _mxr_lib)
     import migraphx

@@ -8,18 +8,35 @@
 # Usage:
 #   sudo bash tools/install_migraphx_patched.sh
 #   sudo BUILD=/path/to/AMDMIGraphX/build_docker bash tools/install_migraphx_patched.sh
-#   sudo ROCM=/opt/rocm-7.2.0 bash tools/install_migraphx_patched.sh
+#   sudo ROCM=/opt/rocm-7.2.3 bash tools/install_migraphx_patched.sh  # override if needed
 set -euo pipefail
 
 BUILD="${BUILD:-./build_docker}"
-ROCM="${ROCM:-/opt/rocm-7.2.0}"
+
+# Auto-detect ROCm install path (supports 7.2.0, 7.2.1, 7.2.2, 7.2.3 …).
+# Override with:  sudo ROCM=/opt/rocm-7.2.3 bash install_migraphx_patched.sh
+if [[ -z "${ROCM:-}" ]]; then
+    # Prefer the path reported by the APT package itself
+    _dpkg_path="$(dpkg -L migraphx 2>/dev/null | grep 'lib/libmigraphx\.so$' | head -1 | sed 's|/lib/libmigraphx\.so||')"
+    if [[ -n "$_dpkg_path" && -d "$_dpkg_path/lib" ]]; then
+        ROCM="$_dpkg_path"
+    else
+        # Fall back: scan /opt/rocm-7.2.* descending (pick newest patch)
+        for _p in $(ls -d /opt/rocm-7.2.* 2>/dev/null | sort -rV); do
+            [[ -d "$_p/lib" ]] && ROCM="$_p" && break
+        done
+        # Last resort
+        ROCM="${ROCM:-/opt/rocm-7.2.0}"  # fallback only
+    fi
+fi
+echo "  ROCm path: $ROCM"
 
 if [[ ! -d "$BUILD/lib" ]]; then
     echo "ERROR: $BUILD/lib not found. Set BUILD=/path/to/AMDMIGraphX/build_docker." >&2
     exit 1
 fi
 if [[ ! -d "$ROCM/lib" ]]; then
-    echo "ERROR: $ROCM/lib not found. Set ROCM=/opt/rocm-7.2.0 (or wherever ROCm 7.2 APT installed)." >&2
+    echo "ERROR: $ROCM/lib not found. Set ROCM= to the ROCm 7.2.x install prefix." >&2
     exit 1
 fi
 
