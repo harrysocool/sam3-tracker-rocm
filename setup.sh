@@ -54,6 +54,21 @@ info()  { echo -e "  ${G}✓${NC} $*"; }
 warn()  { echo -e "  ${Y}⚠${NC}  $*"; }
 die()   { echo -e "  ${R}✗${NC}  $*"; exit 1; }
 
+
+# Auto-detect ROCm install path (supports any 7.2.x patch release).
+# Override with:  ROCM_PATH=/opt/rocm-7.2.3 ./setup.sh
+_detect_rocm_path() {
+    [[ -n "${ROCM_PATH:-}" && -d "$ROCM_PATH/lib" ]] && echo "$ROCM_PATH" && return
+    local _p
+    _p="$(dpkg -L migraphx 2>/dev/null | grep 'lib/libmigraphx\.so$' | head -1 | sed 's|/lib/libmigraphx\.so||')"
+    [[ -n "$_p" && -d "$_p/lib" ]] && echo "$_p" && return
+    for _p in $(ls -d /opt/rocm-7.2.* 2>/dev/null | sort -rV); do
+        [[ -d "$_p/lib" ]] && echo "$_p" && return
+    done
+    echo "/opt/rocm-7.2.0"
+}
+ROCM_PATH="$(_detect_rocm_path)"
+
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_DIR"
 
@@ -122,16 +137,16 @@ step "0b. Patched MIGraphX 2.15+patches"
 # ─────────────────────────────────────────────────────────────────────────────
 if $SKIP_MIGRAPHX; then
     info "Skipping patched MIGraphX install (--skip-migraphx)"
-elif [[ -f /opt/rocm-7.2.0/lib/libmigraphx_c.so.3.0.2016000 \
-     && -f /opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx_ref.so.2016000.0 \
-     && -f /opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx_cpu.so.2016000.0 \
-     && -f /opt/rocm-7.2.0/lib/migraphx/lib/libdnnl.so.1 \
-     && -f /opt/rocm-7.2.0/lib/migraphx/lib/libomp.so \
+elif [[ -f "$ROCM_PATH/lib/libmigraphx_c.so.3.0.2016000" \
+     && -f "$ROCM_PATH/lib/migraphx/lib/libmigraphx_ref.so.2016000.0" \
+     && -f "$ROCM_PATH/lib/migraphx/lib/libmigraphx_cpu.so.2016000.0" \
+     && -f "$ROCM_PATH/lib/migraphx/lib/libdnnl.so.1" \
+     && -f "$ROCM_PATH/lib/migraphx/lib/libomp.so" \
      && -f /etc/ld.so.conf.d/rocm-migraphx-2016.conf ]]; then
     # Marker + libs that older releases (<=20260511) shipped without + the
     # ldconfig conf the older install script forgot to write. Reinstall if any
     # of these is missing so users with broken older installs auto-recover.
-    info "Patched MIGraphX already installed"
+    info "Patched MIGraphX already installed (ROCm: $ROCM_PATH)"
 else
     echo "  Downloading patched MIGraphX (~85 MB)..."
     TMP_MXR=$(mktemp -d)
@@ -141,7 +156,7 @@ else
     echo "  Installing (requires sudo)..."
     tar -xzf "$TMP_MXR/$MXR_ASSET" -C "$TMP_MXR"
     cd "$TMP_MXR/migraphx-2.15+patches"
-    sudo BUILD=. bash install_migraphx_patched.sh
+    sudo BUILD=. ROCM="$ROCM_PATH" bash install_migraphx_patched.sh
     cd "$REPO_DIR"
     rm -rf "$TMP_MXR"
     info "Patched MIGraphX installed"
