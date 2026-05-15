@@ -229,8 +229,21 @@ def main():
             from tracker.mig_detr_encoder import patch_sam3_video_model_detr_encoder
             patch_sam3_video_model_detr_encoder(model, detr_onnx)
             print(f"  MIG detr_encoder ready")
-        # Optional: also MIG-ize memory_attention (steady-state padding)
-        mem_attn_onnx = args.onnx_dir / "tracker_modules" / "memory_attention_fixed_S7_P32.onnx"
+        # Optional: also MIG-ize memory_attention (steady-state padding).
+        # K (pointer-token cap) is resolution-dependent because the MIGraphX
+        # MLIR attention kernel has a shape-dependent perf cliff:
+        #   504px:  no cliff up to K=64 (deploy K=64 → 16 obj capacity)
+        #   1008px: cliff between K=48 and K=56 (deploy K=48 → 12 obj capacity)
+        _K_PER_IMGSZ = {504: 64, 1008: 48}
+        _k = _K_PER_IMGSZ.get(args.imgsz, 32)
+        mem_attn_onnx = args.onnx_dir / "tracker_modules" / f"memory_attention_fixed_S7_P{_k}.onnx"
+        if not mem_attn_onnx.exists():
+            # Fall back to whatever P-variant exists for this resolution
+            for _alt in (32, 48, 64, 16, 4):
+                _alt_path = args.onnx_dir / "tracker_modules" / f"memory_attention_fixed_S7_P{_alt}.onnx"
+                if _alt_path.exists():
+                    mem_attn_onnx = _alt_path
+                    break
         if mem_attn_onnx.exists():
             print(f"Patching tracker_model.memory_attention with MIGraphX shim ...")
             from tracker.mig_memory_attention import patch_sam3_video_model_memory_attention

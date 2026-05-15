@@ -35,12 +35,14 @@ import onnxruntime as ort
 
 # ----- shape constants -----
 SPATIAL_SLOTS = 7
-# K=32 is the practical max imposed by MIGraphX runtime at 1008px:
-# at K=64 the compiler picks a kernel that's 14× slower (791 ms vs 55 ms).
-# At 504px the cliff may sit at a different K — we still default to 32 since
-# it covers the typical text-prompt single-object use case (≤8 conditioning
-# frames worth of pointers); when actual N > 32 we keep the most-recent 32.
-DEFAULT_PTR_TOKENS = 32
+# K is the pointer-token cap. Resolution matters because the MIGraphX MLIR
+# attention kernel selection is shape-dependent (measured 2026-05-15):
+#   504px:  K=4..64 all ≈ 20 ms  (no cliff — production K=64, 16 obj cap)
+#   1008px: K=4..48 all ≈ 87 ms  (fast)
+#   1008px: K=56..64 = 768..806 ms  (cliff, ~9× regression — kernel-pick bug)
+# Production K is selected per-imgsz in demo_text.py and the build scripts
+# (504→64, 1008→48). Runtime adapts to whatever K is baked into the loaded ONNX.
+DEFAULT_PTR_TOKENS = 64  # only the export-script default; runtime reads from ONNX
 
 
 class MIGMemoryAttention(nn.Module):
