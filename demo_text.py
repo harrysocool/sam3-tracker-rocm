@@ -253,6 +253,12 @@ def main():
             print(f"  (skipping detr_encoder MIG: build with "
                   f"export/detector/export_detr_encoder.py to enable)")
 
+        # Batched mask_decoder: ~2× speedup on multi-object propagation
+        # (single-object falls through to original per-obj path with no overhead).
+        from tracker.batched_mask_decoder import patch_batched_mask_decoder
+        patch_batched_mask_decoder(model)
+        print(f"  Batched mask_decoder patch applied (active for N>1 obj)")
+
     # Collect frames
     if args.image is not None:
         bgr0 = cv2.imread(str(args.image))
