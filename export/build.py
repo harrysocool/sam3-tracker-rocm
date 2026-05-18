@@ -161,8 +161,11 @@ def build_text(imgsz: int, args) -> bool:
         "export/build_text_prompt_mig.py",
         "--imgsz", str(imgsz),
         "--checkpoint", str(args.checkpoint),
-        "--ptr-tokens", str(args.ptr_tokens),
     ]
+    # Only forward --ptr-tokens if user explicitly set it; otherwise let
+    # build_text_prompt_mig.py pick the per-imgsz default (504→64, 1008→48).
+    if args.ptr_tokens is not None:
+        cmd += ["--ptr-tokens", str(args.ptr_tokens)]
     if args.force:
         cmd.append("--force")
     if "all" not in args.steps:
@@ -218,8 +221,8 @@ def parse_args():
     p.add_argument("--steps", nargs="+", default=["all"],
                    help=("Limit to specific stages. Box: tracker_modules, backbone, prewarm. "
                          "Text: backbone, detr_encoder, memory_attention."))
-    p.add_argument("--ptr-tokens", type=int, default=32,
-                   help="Pointer token slots for memory_attention (text pipeline, default 32)")
+    p.add_argument("--ptr-tokens", type=int, default=None,  # 504→64, 1008→48
+                   help="Pointer token slots for memory_attention. Default: 64 at 504px, 48 at 1008px (highest safe K per kernel cliff). Set explicitly to override.")
     return p.parse_args()
 
 
