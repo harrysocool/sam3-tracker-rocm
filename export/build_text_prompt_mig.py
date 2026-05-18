@@ -49,8 +49,10 @@ def parse_args():
                    choices=["backbone", "detr_encoder", "memory_attention", "all"],
                    default=["all"],
                    help="Which steps to run (default: all)")
-    p.add_argument("--ptr-tokens", type=int, default=32,
-                   help="Pointer token slots for memory_attention (default 32, max safe for MIG)")
+    p.add_argument("--ptr-tokens", type=int, default=None,
+                   help="Pointer token slots for memory_attention. "
+                        "Default: 64 at 504px, 48 at 1008px (highest safe K per kernel cliff). "
+                        "Set explicitly to override.")
     return p.parse_args()
 
 
@@ -137,16 +139,18 @@ def build_for_imgsz(imgsz: int, args) -> bool:
 
     # ── Step 5: export memory_attention ──────────────────────────────────
     if run_all or "memory_attention" in steps:
-        name = f"memory_attention_fixed_S7_P{args.ptr_tokens}.onnx"
+        # Resolve None default per imgsz (504→64, 1008→48 — kernel cliff aware)
+        ptr_tokens = args.ptr_tokens if args.ptr_tokens is not None else {504: 64, 1008: 48}.get(imgsz, 32)
+        name = f"memory_attention_fixed_S7_P{ptr_tokens}.onnx"
         out = trk_dir / name
         if not exists(out, name, args.force):
             ok = ok and run([
                 sys.executable,
                 "export/tracker_modules/export_memory_attention_padded.py",
                 "--imgsz", str(imgsz),
-                "--ptr-tokens", str(args.ptr_tokens),
+                "--ptr-tokens", str(ptr_tokens),
                 "--checkpoint", str(args.checkpoint),
-            ], f"[5/5] Export memory_attention (S7_P{args.ptr_tokens}) @{imgsz}px")
+            ], f"[5/5] Export memory_attention (S7_P{ptr_tokens}) @{imgsz}px")
 
     return ok
 
