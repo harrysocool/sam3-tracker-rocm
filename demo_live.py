@@ -244,6 +244,32 @@ def main():
     writer.release()
     t_total = time.perf_counter() - t_total
 
+    # Transcode to H.264 if ffmpeg is available — cv2 writes MPEG-4 Part 2
+    # (mp4v) which most browsers and VS Code's built-in video player don't
+    # render. H.264 (avc1) works everywhere. Falls back silently if ffmpeg
+    # is missing or the transcode errors out.
+    import shutil
+    import subprocess
+    if shutil.which("ffmpeg"):
+        tmp_h264 = out_path.with_suffix(".h264.mp4")
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-loglevel", "error",
+                 "-i", str(out_path),
+                 "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                 "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+                 str(tmp_h264)],
+                check=True,
+            )
+            tmp_h264.replace(out_path)
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            tmp_h264.unlink(missing_ok=True)
+            print(f"  ffmpeg transcode failed ({e}); leaving cv2 mp4v output as-is "
+                  f"(may not play in browsers/VS Code).")
+    else:
+        print(f"  ffmpeg not found on PATH; output is cv2 mp4v "
+              f"(may not play in browsers/VS Code).")
+
     if latencies:
         lat = np.asarray(latencies)
         # Separate first-frame (cold) from steady state
