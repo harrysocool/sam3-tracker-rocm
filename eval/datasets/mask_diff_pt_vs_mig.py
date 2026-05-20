@@ -21,6 +21,7 @@ WORKSPACE = Path(__file__).resolve().parent
 sys.path.insert(0, str(WORKSPACE))
 
 from transformers import Sam3VideoModel, AutoProcessor, Sam3VideoConfig
+import tracker  # noqa: F401  -- applies ROCm patches (scipy fill_holes + PyTorch NMS)
 
 
 def parse_args():

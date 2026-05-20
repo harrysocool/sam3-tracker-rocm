@@ -40,6 +40,7 @@ import torch
 from PIL import Image
 
 from transformers import Sam3VideoModel, AutoProcessor
+import tracker  # noqa: F401  -- applies ROCm patches (scipy fill_holes + PyTorch NMS)
 
 
 
