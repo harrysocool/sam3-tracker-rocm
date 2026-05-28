@@ -75,3 +75,13 @@ tunableop_results*.csv
 # Local mxr cache (legacy 3-session compile artifacts)
 mxr_cache/
 docs/inference_stack_explained.md
+
+# Local test assets (4 stuff-class mp4s used by PoC validation; not committed
+# to keep repo size sane). Re-acquire from team shared drive if needed.
+assets/pexels_baseball_field_drone.mp4
+assets/sidewalk_running_man.mp4
+assets/sideway_lawn.mp4
+assets/two_person_dog_lawn.mp4
+
+# Steve customer rosbag (large, customer-supplied)
+data/
