@@ -85,6 +85,10 @@ def parse_args():
                         "mask freshness on intermediate frames.")
     p.add_argument("--keyframe-every-ms", type=float, default=1000.0,
                    help="Hybrid: wall-clock interval between SAM3 keyframe detections.")
+    p.add_argument("--periodic-rebootstrap-seconds", type=float, default=15.0,
+                   help="Force re-bootstrap every N seconds wall-clock. Catches scene "
+                        "changes the score-only drift signal cannot detect. "
+                        "Default 15s; set to 0 to disable.")
     p.add_argument("--max-objects", type=int, default=-1,
                    help="Cap tracked objects per prompt. -1 = use SAM3Live default (5). "
                         "0 = explicitly unlimited (NOT recommended — session accumulates "
@@ -107,8 +111,15 @@ def parse_args():
 
 
 def overlay(bgr: np.ndarray, result: dict, prompts: list[str],
-            frame_idx: int, fps: float) -> np.ndarray:
-    """Draw multi-class masks + per-prompt legend."""
+            frame_idx: int, fps: float, live) -> np.ndarray:
+    """Draw multi-class masks + 4-line drift/bootstrap HUD.
+
+    HUD layout (top-left):
+      L1: frame + keyframe/propagation + mode (BOOT/REBOOT/EXEM) + kept count
+      L2: per-prompt mask pixel counts
+      L3: per-prompt current avg score / drift baseline (ratio %)
+      L4: per-prompt drift rolling mean + critical-warning + trigger threshold
+    """
     H, W = bgr.shape[:2]
     vis = bgr.copy()
 
@@ -140,11 +151,77 @@ def overlay(bgr: np.ndarray, result: dict, prompts: list[str],
             cv2.putText(vis, label, (max(x, 4), max(y - 6, 18)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
 
-    # Header: frame + per-prompt object counts + live fps
-    counts = ", ".join(f"{p}:{len(result['prompt_to_obj_ids'].get(p, []))}"
-                       for p in prompts)
-    cv2.putText(vis, f"f={frame_idx}  {counts}  {fps:.1f} FPS",
-                (10, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+    # ── 4-line drift/bootstrap HUD (mirrors opennav poc_on_mp4 visualisation) ──
+    # `live` is either SAM3Live (direct) or SAM3HybridLive (wraps SAM3Live as .live)
+    inner = live.live if hasattr(live, "live") else live
+
+    # L1: mode + keyframe marker + kept count
+    keyframe = result.get("keyframe", True)
+    mark = "[K]" if keyframe else "[P]"
+    bootstrap_remaining = getattr(inner, "_bootstrap_remaining", {})
+    booting = any(v > 0 for v in bootstrap_remaining.values()) if bootstrap_remaining else False
+    rebooting = getattr(inner, "_drift_pending_rebootstrap", False)
+    if rebooting:
+        mode, mode_color = "REBOOT", (0, 0, 255)
+    elif booting:
+        mode, mode_color = "BOOT", (0, 165, 255)
+    else:
+        mode, mode_color = "EXEM", (0, 255, 0)
+    kept = sum(len(result['prompt_to_obj_ids'].get(p, [])) for p in prompts)
+    total_obj = len(result.get('object_ids', []))
+    hud1 = f"f={frame_idx:4d} {mark} [{mode}] kept={kept}/{total_obj}  {fps:.1f} FPS"
+    cv2.putText(vis, hud1, (10, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.6, mode_color, 2)
+
+    # L2: per-prompt mask pixel count
+    px_parts = []
+    for p in prompts:
+        px = 0
+        for oid in result['prompt_to_obj_ids'].get(p, []):
+            m = result['masks'].get(oid)
+            if m is not None and m.any():
+                px += int(m.sum())
+        px_parts.append(f"{p}:{px}")
+    cv2.putText(vis, "  ".join(px_parts), (10, 50),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+
+    # L3: per-prompt cur_avg / baseline / ratio (drift signal)
+    text_to_id = {}
+    try:
+        text_to_id = {v: k for k, v in inner.session.prompts.items()}
+    except Exception:
+        pass
+    baseline_map = getattr(inner, "_drift_baseline_score", {}) or {}
+    score_parts = []
+    for prompt in prompts:
+        pid = text_to_id.get(prompt)
+        oids = result['prompt_to_obj_ids'].get(prompt, [])
+        cur_avg = (sum(float(result['scores'].get(o, 0)) for o in oids) / len(oids)) if oids else 0.0
+        baseline = baseline_map.get(pid)
+        if baseline is None:
+            score_parts.append(f"{prompt}:{cur_avg:.2f}/-")
+        else:
+            ratio = cur_avg / max(baseline, 1e-6)
+            score_parts.append(f"{prompt}:{cur_avg:.2f}/{baseline:.2f}({ratio*100:.0f}%)")
+    hud3 = "  ".join(score_parts) + "  (now/baseline)"
+    cv2.putText(vis, hud3, (10, 72), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+
+    # L4: rolling mean + critical warning + trigger threshold
+    recent_map = getattr(inner, "_drift_recent_scores", {}) or {}
+    drop_thresh = getattr(inner, "_drift_drop_threshold", 0.4)
+    roll_parts = []
+    for prompt in prompts:
+        pid = text_to_id.get(prompt)
+        recent = recent_map.get(pid)
+        if recent and len(recent) > 0:
+            rmean = sum(recent) / len(recent)
+            baseline = baseline_map.get(pid, 0)
+            min_acceptable = baseline * (1.0 - drop_thresh) if baseline else 0
+            crit = "!" if (baseline and rmean < min_acceptable * 1.05) else " "
+            roll_parts.append(f"{prompt}:roll{rmean:.2f}{crit}")
+        else:
+            roll_parts.append(f"{prompt}:roll-")
+    hud4 = "  ".join(roll_parts) + f"  trigger<baseline*{1 - drop_thresh:.2f}"
+    cv2.putText(vis, hud4, (10, 92), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
     return vis
 
 
@@ -199,6 +276,7 @@ def main():
             max_objects_per_prompt=max_obj,
             bootstrap_frames=args.bootstrap_frames,
             bootstrap_min_score=args.bootstrap_min_score,
+            periodic_rebootstrap_seconds=args.periodic_rebootstrap_seconds,
         )
     else:
         live = SAM3Live(
@@ -212,6 +290,7 @@ def main():
             max_objects_per_prompt=max_obj,
             bootstrap_frames=args.bootstrap_frames,
             bootstrap_min_score=args.bootstrap_min_score,
+            periodic_rebootstrap_seconds=args.periodic_rebootstrap_seconds,
         )
 
     cap = cv2.VideoCapture(str(args.video))
@@ -262,7 +341,7 @@ def main():
         # Rolling FPS over last 10 frames
         window = latencies[-10:]
         live_fps = 1000.0 / (sum(window) / len(window))
-        vis = overlay(frame_bgr, result, current_prompts, n, live_fps)
+        vis = overlay(frame_bgr, result, current_prompts, n, live_fps, live)
         writer.write(vis)
 
         if n % 20 == 0:
