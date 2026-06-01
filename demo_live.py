@@ -78,6 +78,13 @@ def parse_args():
     )
     p.add_argument("--bootstrap-min-score", type=float, default=0.3,
                    help="Confidence floor for boxes captured during bootstrap.")
+    p.add_argument("--hybrid", action="store_true",
+                   help="Use SAM3HybridLive: SAM3 detect every --keyframe-every-ms, "
+                        "lightweight SAM2-style tracker propagates between keyframes. "
+                        "Significantly faster for multi-prompt at the cost of some "
+                        "mask freshness on intermediate frames.")
+    p.add_argument("--keyframe-every-ms", type=float, default=1000.0,
+                   help="Hybrid: wall-clock interval between SAM3 keyframe detections.")
     p.add_argument("--max-objects", type=int, default=-1,
                    help="Cap tracked objects per prompt. -1 = use SAM3Live default (5). "
                         "0 = explicitly unlimited (NOT recommended — session accumulates "
@@ -175,22 +182,37 @@ def main():
     import torch
     dtype = torch.float16 if args.dtype == "fp16" else torch.float32
 
-    live = SAM3Live(
-        checkpoint=args.checkpoint,
-        prompts=current_prompts,
-        onnx_dir=args.onnx_dir,
-        imgsz=args.imgsz,
-        dtype=dtype,
-        mig=args.mig,
-        redetect_every=args.redetect_every,
-        # -1 = let SAM3Live use its default; 0 = explicit None (unlimited); >0 = cap
-        max_objects_per_prompt=(
-            None if args.max_objects == 0
-            else (args.max_objects if args.max_objects > 0 else 5)
-        ),
-        bootstrap_frames=args.bootstrap_frames,
-        bootstrap_min_score=args.bootstrap_min_score,
+    max_obj = (
+        None if args.max_objects == 0
+        else (args.max_objects if args.max_objects > 0 else 5)
     )
+    if args.hybrid:
+        from tracker.hybrid_inference import SAM3HybridLive
+        live = SAM3HybridLive(
+            checkpoint=args.checkpoint,
+            prompts=current_prompts,
+            onnx_dir=args.onnx_dir,
+            imgsz=args.imgsz,
+            dtype=dtype,
+            mig=args.mig,
+            keyframe_every_ms=args.keyframe_every_ms,
+            max_objects_per_prompt=max_obj,
+            bootstrap_frames=args.bootstrap_frames,
+            bootstrap_min_score=args.bootstrap_min_score,
+        )
+    else:
+        live = SAM3Live(
+            checkpoint=args.checkpoint,
+            prompts=current_prompts,
+            onnx_dir=args.onnx_dir,
+            imgsz=args.imgsz,
+            dtype=dtype,
+            mig=args.mig,
+            redetect_every=args.redetect_every,
+            max_objects_per_prompt=max_obj,
+            bootstrap_frames=args.bootstrap_frames,
+            bootstrap_min_score=args.bootstrap_min_score,
+        )
 
     cap = cv2.VideoCapture(str(args.video))
     if not cap.isOpened():
