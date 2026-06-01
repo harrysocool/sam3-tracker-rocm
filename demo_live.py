@@ -120,9 +120,10 @@ def overlay(bgr: np.ndarray, result: dict, prompts: list[str],
         mask = result["masks"][oid]
         if not mask.any():
             continue
-        layer = np.zeros_like(bgr)
-        layer[mask] = color
-        vis = cv2.addWeighted(vis, 0.55, layer, 0.45, 0)
+        # Mask-only blend: addWeighted on the whole frame darkens pixels
+        # outside the mask too, compounding per object.
+        color_arr = np.array(color, dtype=np.float32)
+        vis[mask] = (vis[mask] * 0.55 + color_arr * 0.45).astype(np.uint8)
         contours, _ = cv2.findContours(mask.astype(np.uint8),
                                        cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cv2.drawContours(vis, contours, -1, color, 2)
