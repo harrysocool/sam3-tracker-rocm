@@ -85,6 +85,10 @@ def parse_args():
                         "mask freshness on intermediate frames.")
     p.add_argument("--keyframe-every-ms", type=float, default=1000.0,
                    help="Hybrid: wall-clock interval between SAM3 keyframe detections.")
+    p.add_argument("--periodic-rebootstrap-seconds", type=float, default=15.0,
+                   help="Force re-bootstrap every N seconds wall-clock. Catches scene "
+                        "changes the score-only drift signal cannot detect. "
+                        "Default 15s; set to 0 to disable.")
     p.add_argument("--max-objects", type=int, default=-1,
                    help="Cap tracked objects per prompt. -1 = use SAM3Live default (5). "
                         "0 = explicitly unlimited (NOT recommended — session accumulates "
@@ -272,6 +276,7 @@ def main():
             max_objects_per_prompt=max_obj,
             bootstrap_frames=args.bootstrap_frames,
             bootstrap_min_score=args.bootstrap_min_score,
+            periodic_rebootstrap_seconds=args.periodic_rebootstrap_seconds,
         )
     else:
         live = SAM3Live(
@@ -285,6 +290,7 @@ def main():
             max_objects_per_prompt=max_obj,
             bootstrap_frames=args.bootstrap_frames,
             bootstrap_min_score=args.bootstrap_min_score,
+            periodic_rebootstrap_seconds=args.periodic_rebootstrap_seconds,
         )
 
     cap = cv2.VideoCapture(str(args.video))

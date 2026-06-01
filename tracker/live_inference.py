@@ -89,6 +89,7 @@ class SAM3Live:
         max_objects_per_prompt: int | dict[str, int] | None = 5,
         bootstrap_frames: int = 0,
         bootstrap_min_score: float = 0.3,
+        periodic_rebootstrap_seconds: float | None = None,
     ):
         """
         Args:
@@ -204,14 +205,18 @@ class SAM3Live:
         self._drift_pending_rebootstrap: bool = False
         # Optional periodic re-bootstrap. Independent of the condition-based
         # drift detection above (both can be enabled simultaneously — OR
-        # logic). Useful as a safety net in environments where you want to
-        # force fresh exemplars on a fixed schedule regardless of score
-        # signal (validated default — score-only drift cannot catch scene changes
-        # where exemplars find visually similar surfaces in the new scene).
-        # Default 15s; set to 0 to disable.
-        self._periodic_rebootstrap_seconds = float(
-            _os.environ.get("SAM3_PERIODIC_REBOOTSTRAP_SECONDS", "15")
-        )
+        # logic). Catches scene changes (e.g. indoor → outdoor) that the
+        # score-only drift signal cannot detect — when exemplars find visually
+        # similar surfaces in the new scene, scores stay high even though the
+        # semantic content has changed.
+        # Precedence: constructor kwarg > env var > default 15s.
+        # Set to 0 to disable.
+        if periodic_rebootstrap_seconds is not None:
+            self._periodic_rebootstrap_seconds = float(periodic_rebootstrap_seconds)
+        else:
+            self._periodic_rebootstrap_seconds = float(
+                _os.environ.get("SAM3_PERIODIC_REBOOTSTRAP_SECONDS", "15")
+            )
         self._last_bootstrap_complete_time: float = 0.0
         # Monotonic frame_idx we hand to model.forward. We MUST assign this
         # ourselves rather than letting HF auto-assign, because HF computes
