@@ -69,6 +69,15 @@ def parse_args():
                    help="Full SAM3 every Nth frame; intermediate frames are tracker "
                         "propagation only (faster, no new objects discovered). "
                         "Default 1 = full detection every frame.")
+    p.add_argument(
+        "--bootstrap-frames", type=int, default=0,
+        help="First N frames run in pure text mode to capture high-confidence "
+             "exemplar boxes; subsequent frames inject them as box prompts. "
+             "Default 0 = pure text-prompt (original behaviour). 5 is a good "
+             "starting value when multi-prompt empty-mask is a problem.",
+    )
+    p.add_argument("--bootstrap-min-score", type=float, default=0.3,
+                   help="Confidence floor for boxes captured during bootstrap.")
     p.add_argument("--max-objects", type=int, default=-1,
                    help="Cap tracked objects per prompt. -1 = use SAM3Live default (5). "
                         "0 = explicitly unlimited (NOT recommended — session accumulates "
@@ -111,9 +120,10 @@ def overlay(bgr: np.ndarray, result: dict, prompts: list[str],
         mask = result["masks"][oid]
         if not mask.any():
             continue
-        layer = np.zeros_like(bgr)
-        layer[mask] = color
-        vis = cv2.addWeighted(vis, 0.55, layer, 0.45, 0)
+        # Mask-only blend: addWeighted on the whole frame darkens pixels
+        # outside the mask too, compounding per object.
+        color_arr = np.array(color, dtype=np.float32)
+        vis[mask] = (vis[mask] * 0.55 + color_arr * 0.45).astype(np.uint8)
         contours, _ = cv2.findContours(mask.astype(np.uint8),
                                        cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cv2.drawContours(vis, contours, -1, color, 2)
@@ -178,6 +188,8 @@ def main():
             None if args.max_objects == 0
             else (args.max_objects if args.max_objects > 0 else 5)
         ),
+        bootstrap_frames=args.bootstrap_frames,
+        bootstrap_min_score=args.bootstrap_min_score,
     )
 
     cap = cv2.VideoCapture(str(args.video))
