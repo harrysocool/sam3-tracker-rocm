@@ -206,10 +206,11 @@ class SAM3Live:
         # drift detection above (both can be enabled simultaneously — OR
         # logic). Useful as a safety net in environments where you want to
         # force fresh exemplars on a fixed schedule regardless of score
-        # signal (e.g., long-running deployments, slow gradual drift that
-        # never trips the score threshold). Default 0 = off.
+        # signal (validated default — score-only drift cannot catch scene changes
+        # where exemplars find visually similar surfaces in the new scene).
+        # Default 15s; set to 0 to disable.
         self._periodic_rebootstrap_seconds = float(
-            _os.environ.get("SAM3_PERIODIC_REBOOTSTRAP_SECONDS", "0")
+            _os.environ.get("SAM3_PERIODIC_REBOOTSTRAP_SECONDS", "15")
         )
         self._last_bootstrap_complete_time: float = 0.0
         # Monotonic frame_idx we hand to model.forward. We MUST assign this
