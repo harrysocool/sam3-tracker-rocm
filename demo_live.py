@@ -85,10 +85,10 @@ def parse_args():
                         "mask freshness on intermediate frames.")
     p.add_argument("--keyframe-every-ms", type=float, default=1000.0,
                    help="Hybrid: wall-clock interval between SAM3 keyframe detections.")
-    p.add_argument("--periodic-rebootstrap-seconds", type=float, default=15.0,
+    p.add_argument("--periodic-rebootstrap-seconds", type=float, default=180.0,
                    help="Force re-bootstrap every N seconds wall-clock. Catches scene "
                         "changes the score-only drift signal cannot detect. "
-                        "Default 15s; set to 0 to disable.")
+                        "Default 180s (3 min safety net); set to 0 to disable.")
     p.add_argument("--max-objects", type=int, default=-1,
                    help="Cap tracked objects per prompt. -1 = use SAM3Live default (5). "
                         "0 = explicitly unlimited (NOT recommended — session accumulates "
