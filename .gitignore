@@ -36,15 +36,15 @@ results/**
 !results/archive/*.mp4
 !results/archive/*.json
 
-# outputs/ — ignore contents but keep subdir scaffolding for demo defaults
-outputs/**
-!outputs/.gitkeep
-!outputs/box/
-!outputs/box/.gitkeep
-!outputs/text/
-!outputs/text/.gitkeep
-!outputs/probes/
-!outputs/probes/.gitkeep
+# demo_out/ — ignore contents but keep subdir scaffolding for demo defaults
+demo_out/**
+!demo_out/.gitkeep
+!demo_out/box/
+!demo_out/box/.gitkeep
+!demo_out/text/
+!demo_out/text/.gitkeep
+!demo_out/probes/
+!demo_out/probes/.gitkeep
 
 # Big generated media (catch-all). Whitelisted source / docs / archive below.
 *.mp4
