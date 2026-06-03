@@ -40,7 +40,7 @@ SPATIAL_SLOTS = 7
 #   504px:  K=4..64 all ≈ 20 ms  (no cliff — production K=64, 16 obj cap)
 #   1008px: K=4..48 all ≈ 87 ms  (fast)
 #   1008px: K=56..64 = 768..806 ms  (cliff, ~9× regression — kernel-pick bug)
-# Production K is selected per-imgsz in demo_text.py and the build scripts
+# Production K is selected per-imgsz in tools/text_baseline.py and the build scripts
 # (504→64, 1008→48). Runtime adapts to whatever K is baked into the loaded ONNX.
 DEFAULT_PTR_TOKENS = 64  # only the export-script default; runtime reads from ONNX
 

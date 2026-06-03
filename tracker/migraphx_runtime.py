@@ -1,5 +1,5 @@
 """MIGraphX runtime helpers — low-level building blocks used by both
-``SAM3OnnxTracker`` (single-object SAM2-style tracker) and the
+``SAM3OnnxTracker`` (single-object SAM3 tracker) and the
 text-prompt ``Sam3VideoModel`` MIG shims.
 
 Contents:

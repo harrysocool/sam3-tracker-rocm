@@ -5,7 +5,7 @@ Two pipelines, pick one or both:
 
   box   — SAM3OnnxTracker (demo_box.py): tracker modules + MIGraphX backbone
             ~10 min @504px / ~20 min @1008px
-  text  — Sam3VideoModel (demo_text.py --mig): detector backbone + DETR encoder
+  text  — Sam3VideoModel (tools/text_baseline.py --mig): detector backbone + DETR encoder
             + padded memory_attention
             ~18 min @504px / ~30 min @1008px
 
@@ -196,7 +196,7 @@ def print_hints(pipeline: str, imgsz_list: list[int], checkpoint: Path) -> None:
         print(f"""\
 {B}Text-prompt demo (MIG-accelerated):{NC}
   {LD} \\
-      python demo_text.py --checkpoint {checkpoint} \\
+      python tools/text_baseline.py --checkpoint {checkpoint} \\
           --video YOUR_VIDEO.mp4 --text "object" \\
           --imgsz {first} --mig --onnx-dir onnx_files_{first}
 """)

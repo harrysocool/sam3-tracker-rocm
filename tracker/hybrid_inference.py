@@ -1,4 +1,4 @@
-"""Hybrid SAM3 detect + SAM2-style tracker propagation pipeline.
+"""Hybrid SAM3 detect + SAM3 tracker propagation pipeline.
 
 Why:
   ``SAM3Live`` with ``redetect_every > 1`` is broken for stuff-class prompts:
@@ -6,12 +6,12 @@ Why:
   every frame, so propagation-only frames return empty masks. ``rd=1`` is the
   only stable config, capping us at ~3 FPS on 2-3 prompt scenes.
 
-  Meanwhile ``SAM3OnnxTracker`` (SAM2-style box-prompt tracker) propagates
+  Meanwhile ``SAM3OnnxTracker`` (SAM3 box-prompt tracker) propagates
   fine for many frames from a single box prompt (12.21 FPS @504 on DAVIS).
 
 How:
   ``SAM3HybridLive`` runs SAM3 detection every ``redetect_interval_ms`` milliseconds to
-  refresh per-prompt detections, then runs SAM2 trackers on intermediate frames
+  refresh per-prompt detections, then runs SAM3 trackers on intermediate frames
   in between. At each keyframe we re-associate new SAM3 detections to
   existing trackers by mask IoU to preserve obj_id continuity.
 
@@ -71,7 +71,7 @@ def _mask_to_bbox(mask: np.ndarray) -> tuple[float, float, float, float]:
 
 
 class SAM3HybridLive:
-    """SAM3 text-prompt detection at keyframes + SAM2-tracker propagation in between.
+    """SAM3 text-prompt detection at keyframes + SAM3-tracker propagation in between.
 
     Matches ``SAM3Live`` public API (constructor kwargs subset, ``infer``,
     ``reset_prompts``, ``reset_tracking``) and ``infer`` return-dict schema
