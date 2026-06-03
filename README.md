@@ -291,12 +291,12 @@ LD_PRELOAD=/opt/rocm-7.2.x/lib/libmigraphx_c.so.3:/opt/rocm-7.2.x/lib/migraphx/l
 python demo_box.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
     --image assets/truck.jpg --box 85,281,1710,850
 
-# Video (any mp4) — output written to outputs/box/<stem>_tracked.mp4
+# Video (any mp4) — output written to demo_out/box/<stem>_tracked.mp4
 python demo_box.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
     --video assets/blackswan.mp4 --box 320,170,650,400
 ```
 
-Outputs default to `outputs/{box,text}/<input-stem>_{tracked,text}.{jpg,mp4}` (overridable
+Outputs default to `demo_out/{box,text}/<input-stem>_{tracked,text}.{jpg,mp4}` (overridable
 with `--output`). Try short noun phrases: `"swan"`, `"a person on a bike"`, `"yellow taxi"`.
 
 ### Quick checks
