@@ -411,7 +411,7 @@ Mask quality (text-prompt): PT vs MIG mean IoU = 0.999 @1008px.
 
 | Stage | Latency | Backend |
 |---|---:|---|
-| backbone (`backbone_mxr_tuned.mxr`) | ~67 ms | MIGraphX 2.15+patches + MLIR attention (FP16) |
+| backbone (`backbone_tracker/tuned.mxr`) | ~67 ms | MIGraphX 2.15+patches + MLIR attention (FP16) |
 | memory_attention | ~7 ms | ORT MIGraphX EP FP16 ¹ |
 | mask_decoder_propagate (`dec_prop_fp32.mxr`) | ~14 ms | MIGraphX direct API FP32 |
 | memory_encoder (`mem_enc_fp32.mxr`) | ~2 ms | MIGraphX direct API FP16 |
