@@ -506,36 +506,16 @@ sam3-tracker-rocm/
 
 ## Known limitations
 
-- **MIGraphX backbone cold-start**: first compile of `backbone_mxr_tuned.mxr` takes
-  ~3 min (504px) or ~9 min (1008px) with kernel autotuning. Subsequent runs load in ~3s.
-  Run `python export/build.py --pipeline box --imgsz 504` once to pre-build the cache.
-- **Text-prompt: vision_encoder dominates** (65% of propagation time at 504px, 57% at 1008px).
-  The ViT backbone already runs via MIGraphX, but each frame requires a GPU→CPU→GPU numpy
-  round-trip through the MIG bridge (~37 ms overhead at 1008px). Eliminating this round-trip
-  (GPU-resident MIG via HIP IPC) is the primary remaining optimization target.
-- **Text-prompt: modules under ~30 ms do not benefit from ORT MIG EP** — the CPU↔GPU
-  round-trip overhead matches or exceeds the PT runtime. `detr_decoder` (~11–25 ms) was
-  investigated and confirmed net-neutral; `mask_decoder` (~5 ms) and `memory_encoder`
-  (~6 ms) are too small to MIG-ize profitably.
-- **MIG attention modules MUST go through ORT MIG EP.** Direct
-  `migraphx.parse_onnx + quantize_fp16` on attention layers (`memory_attention`,
-  `detr_encoder`) produces NaN outputs (FP16 attention bug analogous to
-  [ROCm/AMDMIGraphX#3596](https://github.com/ROCm/AMDMIGraphX/issues/3596));
-  even FP32 produces ~0.05 max-diff that breaks downstream detection thresholds.
-  ORT EP with `migraphx_fp16_enable=1` uses a different FP16 quantization path
-  that produces correct results.
-- **memory_attention K=64 cliff.** MIGraphX picks a 14× slower kernel at
-  `num_object_pointer_tokens=64` (791 ms vs 55 ms at K≤32). The shim caps at K=32
-  and truncates the oldest pointers — quality impact is invisible for continuous
-  tracking; long-video re-identification across long disappearances may degrade slightly.
-- **Box-prompt: `dec_propagate` FP16 corrupts results.** ConvTranspose upsampling is
-  numerically sensitive — keep it at FP32 (`dec_prop_fp32.mxr`). All other modules run FP16.
-- **MIGraphX 2.15+patches required** for box-prompt headline FPS. The stock MIGraphX 2.15.0
-  from the ROCm 7.2 APT package produces ~916 ms for the HF backbone (6.6× slower) due to a
-  fusion limitation in `find_splits`. See [`analysis/migraphx_backbone_investigation.md`](analysis/migraphx_backbone_investigation.md).
-- **Dual LD_PRELOAD required for text-prompt MIG.** The torch ROCm nightly wheels bundle
-  their own HIP runtime; loading MIGraphX after torch corrupts `.mxr` deserialization. The
-  `LD_PRELOAD` in the demo commands forces `/opt/rocm-7.2.x` libs to load first.
+| Limitation | Detail / workaround |
+|---|---|
+| **Backbone cold-start** | First `.mxr` compile takes ~3 min (504px) / ~9 min (1008px) with autotuning; then loads in ~3s. Pre-build once: `python export/build.py --pipeline box --imgsz 504`. |
+| **Text-prompt: vision_encoder dominates** | 65% of prop time @504px (57% @1008px). Each frame does a GPU→CPU→GPU round-trip through the MIG bridge (~37 ms @1008px). GPU-resident MIG (HIP IPC) is the main remaining optimization target. |
+| **Small modules don't gain from ORT MIG EP** | Under ~30 ms the CPU↔GPU round-trip ≥ PT runtime. `detr_decoder` (~11–25 ms) confirmed net-neutral; `mask_decoder` (~5 ms) / `memory_encoder` (~6 ms) too small to MIG-ize. |
+| **MIG attention must use ORT MIG EP** | Direct `parse_onnx + quantize_fp16` on `memory_attention` / `detr_encoder` yields NaN ([AMDMIGraphX#3596](https://github.com/ROCm/AMDMIGraphX/issues/3596)); even FP32 has ~0.05 max-diff that breaks detection thresholds. ORT EP with `migraphx_fp16_enable=1` is correct. |
+| **memory_attention K=64 cliff** | MIGraphX picks a 14× slower kernel at `num_object_pointer_tokens=64` (791 ms vs 55 ms at K≤32). Shim caps K=32 and truncates oldest pointers — invisible for continuous tracking; re-ID across long disappearances may degrade slightly. |
+| **Box-prompt `dec_propagate` stays FP32** | ConvTranspose upsampling is numerically sensitive; keep it FP32 (`dec_prop_fp32.mxr`). All other modules run FP16. |
+| **MIGraphX 2.15+patches required** | Stock 2.15.0 (ROCm 7.2 APT) runs the HF backbone in ~916 ms (6.6× slower) due to a `find_splits` fusion limit. See [analysis](analysis/migraphx_backbone_investigation.md). |
+| **Dual LD_PRELOAD for text-prompt MIG** | torch ROCm nightly bundles its own HIP runtime; loading MIGraphX after torch corrupts `.mxr` deserialization. `LD_PRELOAD` forces `/opt/rocm-7.2.x` libs to load first. |
 
 ---
 
