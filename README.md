@@ -21,7 +21,7 @@ DAVIS 2017 val Mean J: **81.6%** (504px box-prompt).
 
 - [How it works](#how-it-works)
 - [Setup](#setup)
-- [Run the demo](#run-the-demo)
+- [Run the demos](#run-the-demos)
 - [Results](#results)
 - [Performance](#performance)
 - [Evaluation](#evaluation)
@@ -197,7 +197,7 @@ see [`docs/manual_setup.md`](docs/manual_setup.md).
 
 ---
 
-## Run the demo
+## Run the demos
 
 Three entry points — pick the one matching your use case:
 
@@ -253,6 +253,22 @@ LD_PRELOAD=/opt/rocm-7.2.x/lib/libmigraphx_c.so.3:/opt/rocm-7.2.x/lib/migraphx/l
     --video assets/blackswan.mp4 --text "swan" --imgsz 504 --mig --max-frames 60
 ```
 
+**Multi-object flags** (text-prompt detection — `text_baseline.py` / `demo_live.py`):
+- `--min-score 0.5` — only track detections above this confidence (default 0.5)
+- `--max-objects 0` — cap by score rank, 0 = all above threshold (default 0 = all)
+
+```bash
+# Track every person above 0.4 confidence
+python tools/text_baseline.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
+    --video assets/two_person_dog_lawn.mp4 --text "person" \
+    --imgsz 504 --mig --min-score 0.4
+
+# Track at most 2 people (highest scoring)
+python tools/text_baseline.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
+    --video assets/two_person_dog_lawn.mp4 --text "person" \
+    --imgsz 504 --mig --max-objects 2
+```
+
 <details>
 <summary><b>1008px text-prompt (higher quality, ~1.5 FPS)</b></summary>
 
@@ -278,22 +294,6 @@ python demo_box.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
 # Video (any mp4) — output written to outputs/box/<stem>_tracked.mp4
 python demo_box.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
     --video assets/blackswan.mp4 --box 320,170,650,400
-```
-
-Multi-object flags:
-- `--min-score 0.5` — only track detections above this confidence (default 0.5)
-- `--max-objects 0` — cap by score rank, 0 = all above threshold (default 0 = all)
-
-```bash
-# Track all dogs in the scene
-python tools/text_baseline.py --checkpoint model/sam3 \
-    --video assets/blackswan.mp4 --text "dog" \
-    --imgsz 504 --mig --onnx-dir onnx_files_504 --min-score 0.4
-
-# Track at most 2 people (highest scoring)
-python tools/text_baseline.py --checkpoint model/sam3 \
-    --video assets/blackswan.mp4 --text "person" \
-    --imgsz 504 --mig --onnx-dir onnx_files_504 --max-objects 2
 ```
 
 Outputs default to `outputs/{box,text}/<input-stem>_{tracked,text}.{jpg,mp4}` (overridable
@@ -336,7 +336,7 @@ python eval/benchmarks/profile_text_prompt.py --checkpoint model/sam3 --image as
 
 ### Box-prompt: tracking only (`demo_box.py`)
 
-| truck — single image | dog-agility — video (8.87 FPS) |
+| truck — single image | dog-agility — video |
 |:---:|:---:|
 | <img src="docs/images/demo_tracked.jpg" width="400" alt="truck box-prompt"> | <img src="docs/images/demo_dog_agility_box.gif" width="400" alt="dog-agility box-prompt"> |
 
@@ -396,7 +396,7 @@ Mask quality (text-prompt): PT vs MIG mean IoU = 0.999 @1008px.
 
 ### Per-module latency breakdown (504px, MIGraphX backbone)
 
-**Text-prompt propagation** (169 ms/frame → 5.9 FPS, with MLIR attention backbone):
+**Text-prompt propagation** (169 ms/frame → 5.9 FPS per-module sum; ~5.5 measured end-to-end, see table above) — MLIR attention backbone:
 
 | Stage | Latency | Backend |
 |---|---:|---|
