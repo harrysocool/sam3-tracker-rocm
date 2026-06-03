@@ -3,7 +3,7 @@
 
 Two pipelines, pick one or both:
 
-  box   — SAM3OnnxTracker (demo.py): tracker modules + MIGraphX backbone
+  box   — SAM3OnnxTracker (demo_box.py): tracker modules + MIGraphX backbone
             ~10 min @504px / ~20 min @1008px
   text  — Sam3VideoModel (demo_text.py --mig): detector backbone + DETR encoder
             + padded memory_attention
@@ -188,7 +188,7 @@ def print_hints(pipeline: str, imgsz_list: list[int], checkpoint: Path) -> None:
     if pipeline in ("box", "all"):
         print(f"""
 {B}Box-prompt demo:{NC}
-  python demo.py --checkpoint {checkpoint} --onnx-dir onnx_files_{first} \\
+  python demo_box.py --checkpoint {checkpoint} --onnx-dir onnx_files_{first} \\
       --video YOUR_VIDEO.mp4 --box x1,y1,x2,y2
 """)
 

@@ -19,7 +19,7 @@ from PIL import Image
 from transformers import AutoProcessor, Sam3VideoModel
 from transformers.models.sam3.modeling_sam3 import Sam3VisionEncoderOutput
 
-from tracker.tracker import MIGraphXBackbone
+from tracker.migraphx_runtime import MIGraphXBackbone
 
 
 def stats(t: torch.Tensor, name: str):

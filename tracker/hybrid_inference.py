@@ -32,7 +32,8 @@ import numpy as np
 import torch
 
 from .live_inference import SAM3Live
-from .tracker import SAM3OnnxTracker, SharedTrackerResources, preprocess_image
+from .sam3_onnx_tracker import SAM3OnnxTracker, SharedTrackerResources
+from .migraphx_runtime import preprocess_image
 
 
 def _upscale_mask(mask_imgsz: np.ndarray, H: int, W: int) -> np.ndarray:

@@ -92,7 +92,7 @@ def main():
     model = Sam3VideoModel.from_pretrained(str(args.checkpoint), config=config).to(device).to(dtype).eval()
 
     if args.mig:
-        from tracker.tracker import MIGraphXBackbone
+        from tracker.migraphx_runtime import MIGraphXBackbone
         from tracker.mig_vision_encoder import patch_sam3_video_model_with_mig
         from tracker.mig_detr_encoder import patch_sam3_video_model_detr_encoder
         from tracker.mig_memory_attention import patch_sam3_video_model_memory_attention

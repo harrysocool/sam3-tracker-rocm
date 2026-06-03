@@ -96,7 +96,7 @@ def main():
     sub_dir.mkdir(parents=True, exist_ok=True)
     out_path = sub_dir / "single_fp32.onnx"
 
-    from tracker.tracker import retarget_resolution
+    from tracker.migraphx_runtime import retarget_resolution
 
     if args.backbone_source == "tracker":
         from transformers.models.sam3_tracker_video.modeling_sam3_tracker_video import (

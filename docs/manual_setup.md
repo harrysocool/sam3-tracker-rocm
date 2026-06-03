@@ -114,7 +114,7 @@ Use the unified build script — it handles both pipelines and both resolutions,
 and skips steps whose output already exists.
 
 ```bash
-# Box-prompt pipeline (demo.py) — ~10 min @504px
+# Box-prompt pipeline (demo_box.py) — ~10 min @504px
 python export/build.py --pipeline box --imgsz 504
 
 # Text-prompt MIG pipeline (demo_text.py --mig) — ~18 min @504px

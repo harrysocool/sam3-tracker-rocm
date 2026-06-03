@@ -32,7 +32,7 @@ from PIL import Image
 from transformers import AutoProcessor, Sam3VideoModel
 from transformers.models.sam3.modeling_sam3 import Sam3VisionEncoderOutput
 
-from tracker.tracker import MIGraphXBackbone
+from tracker.migraphx_runtime import MIGraphXBackbone
 from tracker.text_detector_postproc import (
     Detection,
     bbox_from_mask,
