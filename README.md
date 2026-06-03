@@ -488,41 +488,18 @@ python eval/benchmarks/profile_full_mig.py \
 
 ```
 sam3-tracker-rocm/
-├── tracker/                       # Tracker implementations
-│   ├── migraphx_runtime.py        #   MIG runtime: MIGraphXBackbone/Session, MemoryBank, utils
-│   ├── sam3_onnx_tracker.py       #   SAM3OnnxTracker (single-obj SAM3 tracker) + SharedTrackerResources
-│   ├── live_inference.py          #   SAM3Live: per-frame HF Sam3VideoModel wrapper (text-prompt)
-│   ├── hybrid_inference.py        #   SAM3HybridLive: keyframe SAM3 + N-obj SAM3OnnxTracker pool
-│   ├── mig_vision_encoder.py      #   MIG shim: Sam3VideoModel vision_encoder
-│   ├── mig_detr_encoder.py        #   MIG shim: Sam3DetrEncoder (ORT MIG EP)
-│   └── mig_memory_attention.py    #   MIG shim: memory_attention (ORT MIG EP, padded)
-├── export/                        # ONNX export + .mxr compile scripts
-│   ├── build.py                   # ← unified build entry point (box + text, any resolution)
-│   ├── backbone/                  #   ViT backbone: export → simplify → MIGraphX compile
-│   ├── detector/                  #   DETR encoder export (text-prompt path)
-│   └── tracker_modules/           #   mask_decoder_*, memory_*, memory_attention (padded)
-├── examples/
-│   ├── README.md                  # SAM3Live integrator guide
-│   └── ros_node_skeleton.py       # ROS 2 node template
-├── eval/                          # Benchmarks, dataset evals, regression tools
-│   ├── benchmarks/                #   bench_pipeline, profile_full_mig, profile_text_prompt
-│   ├── datasets/                  #   eval_davis, mask_diff_pt_vs_mig
-│   ├── probes/                    #   smoke tests for text-prompt + correctness checks
-│   └── debug/                     #   investigation scripts (FPN diagnostics, ONNX-CPU vs PT)
-├── docs/                          # Setup guide, technical report
-│   ├── historical/                #   archived analyses (1008px deep-dive etc.)
-│   └── images/                    #   README/doc visuals
-├── model/sam3/                    # Config + tokenizer (weights downloaded separately)
-├── assets/                        # Bundled demo inputs
-├── onnx_files_504/                # Generated, gitignored — 504px MIG artefacts (recommended)
-├── onnx_files_1008/               # Generated, gitignored — 1008px artefacts (advanced)
-├── outputs/                       # Demo outputs (gitignored, auto-created)
-├── results/                       # Eval outputs: JSON metrics, profiles
-├── demo_live.py                   # ← Streaming live API (primary entry point)
-├── tools/text_baseline.py         # ← Offline batch text-prompt (reference / debugging)
-├── demo_box.py                    # ← Specialized: box-prompt, max single-object FPS
-├── setup.sh                       # ← One-command setup
-└── environment.yml
+├── demo_live.py            # ← Streaming live API (primary entry point)
+├── tools/text_baseline.py  # ← Offline batch text-prompt (reference / debugging)
+├── demo_box.py             # ← Specialized box-prompt (max single-object FPS)
+├── setup.sh                # ← One-command environment setup
+├── tracker/                # Inference: SAM3Live, SAM3HybridLive, SAM3OnnxTracker, MIG shims
+├── export/                 # ONNX export + .mxr compile (build.py = unified entry point)
+├── eval/                   # Benchmarks, dataset evals, probes, debug tools
+├── examples/               # ROS 2 node skeleton + integrator guide
+├── docs/                   # Setup guide, technical report, images
+├── model/sam3/             # Config + tokenizer (weights downloaded separately)
+├── assets/                 # Bundled demo inputs
+└── onnx_files_504/         # Generated, gitignored — 504px MIG artefacts (1008 also supported)
 ```
 
 ---
