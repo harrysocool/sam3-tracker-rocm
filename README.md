@@ -33,13 +33,13 @@ DAVIS 2017 val Mean J: **81.6%** (504px box-prompt).
 
 ## How it works
 
-All three entry points share the same ViT backbone, SAM3 mask decoder, and SAM2-style
+All three entry points share the same ViT backbone, SAM3 mask decoder, and SAM3
 tracker propagation. They differ in **how the first-frame mask is obtained** and **whether
 SAM3 detection re-runs after frame 0**:
 
 ```
 demo_live.py             text → SAM3 keyframe (every N ms)  ──┐
-                         └── propagate via SAM2 tracker ──────┴──► streaming mask output
+                         └── propagate via SAM3 tracker ──────┴──► streaming mask output
 tools/text_baseline.py   text → full SAM3 every frame          ──────► offline batch output
 demo_box.py              [box] (frame 0 only)                  ──────► fastest, single-object
 ```
@@ -48,7 +48,7 @@ demo_box.py              [box] (frame 0 only)                  ─────�
 
 The deployment shape used by robotics / ROS consumers. Frame 0 runs SAM3 detection
 on the text prompts and captures exemplar boxes; subsequent frames run SAM3 only every
-`--redetect-interval-ms` (default 1000ms), with a lightweight SAM2-style tracker
+`--redetect-interval-ms` (default 1000ms), with a lightweight SAM3 tracker
 propagating masks in between. Internally combines `SAM3Live` (per-frame HF
 `Sam3VideoModel`) for keyframes and `SAM3OnnxTracker` for tracker propagation. Supports
 multi-prompt, periodic re-bootstrap on drift / scene change, runtime prompt swap.
@@ -490,7 +490,7 @@ python eval/benchmarks/profile_full_mig.py \
 sam3-tracker-rocm/
 ├── tracker/                       # Tracker implementations
 │   ├── migraphx_runtime.py        #   MIG runtime: MIGraphXBackbone/Session, MemoryBank, utils
-│   ├── sam3_onnx_tracker.py       #   SAM3OnnxTracker (single-obj SAM2-style tracker) + SharedTrackerResources
+│   ├── sam3_onnx_tracker.py       #   SAM3OnnxTracker (single-obj SAM3 tracker) + SharedTrackerResources
 │   ├── live_inference.py          #   SAM3Live: per-frame HF Sam3VideoModel wrapper (text-prompt)
 │   ├── hybrid_inference.py        #   SAM3HybridLive: keyframe SAM3 + N-obj SAM3OnnxTracker pool
 │   ├── mig_vision_encoder.py      #   MIG shim: Sam3VideoModel vision_encoder
