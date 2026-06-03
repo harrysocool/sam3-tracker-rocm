@@ -6,11 +6,11 @@
 #   ./setup.sh --skip-apt             # skip ROCm 7.2 APT install (already done)
 #   ./setup.sh --skip-migraphx        # skip patched MIGraphX install (already done)
 #   ./setup.sh --env my-env           # custom conda environment name
-#   ./setup.sh --imgsz 1008           # 1008px instead of 504px
+#   ./setup.sh --imgsz 1008           # (advanced) 1008px instead of default 504
 #
 # Environment variables (alternative to flags):
 #   SAM3_CONDA_ENV=sam3-tracker       conda environment name
-#   SAM3_IMGSZ=504                    backbone resolution (504 or 1008)
+#   SAM3_IMGSZ=504                    backbone resolution (504 is primary; 1008 advanced)
 #   SAM3_MODEL_DIR=model/sam3         where to place model weights
 set -euo pipefail
 
@@ -291,7 +291,7 @@ echo "    conda activate $CONDA_ENV"
 echo ""
 echo "  Then build the model artefacts for the pipeline(s) you want:"
 echo ""
-echo "  Box-prompt  (demo.py, ~10 min @504px):"
+echo "  Box-prompt  (demo_box.py, ~10 min @504px):"
 echo "    python export/build.py --pipeline box --imgsz $IMGSZ"
 echo ""
 echo "  Text-prompt MIG  (demo_text.py --mig, ~18 min @504px):"
@@ -300,8 +300,6 @@ echo ""
 echo "  Both pipelines at once:"
 echo "    python export/build.py --pipeline all --imgsz $IMGSZ"
 echo ""
-echo "  Both pipelines, both resolutions (~90 min total):"
-echo "    python export/build.py --pipeline all --imgsz 504 1008"
-echo ""
-echo "  See python export/build.py --help for all options."
+echo "  See python export/build.py --help for all options"
+echo "  (1008px is supported via --imgsz 1008 but is not the recommended path)."
 echo -e "${G}══════════════════════════════════════════════════════${NC}"

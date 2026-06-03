@@ -11,7 +11,7 @@ import torch
 from PIL import Image
 
 from transformers import AutoProcessor, Sam3VideoModel
-from tracker.tracker import MIGraphXBackbone, MIGraphXSession
+from tracker.migraphx_runtime import MIGraphXBackbone, MIGraphXSession
 from tracker.mig_vision_encoder import patch_sam3_video_model_with_mig
 from tracker.mig_detr_encoder import precompute_cross_attn_mask
 

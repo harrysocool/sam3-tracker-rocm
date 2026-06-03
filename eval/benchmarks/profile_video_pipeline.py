@@ -48,7 +48,7 @@ def main():
     model = Sam3VideoModel.from_pretrained(str(args.checkpoint)).to(device).to(dtype).eval()
 
     if args.mig:
-        from tracker.tracker import MIGraphXBackbone
+        from tracker.migraphx_runtime import MIGraphXBackbone
         from tracker.mig_vision_encoder import patch_sam3_video_model_with_mig
         det_dir = args.onnx_dir / "backbone_detector"
         mxr = MIGraphXBackbone(

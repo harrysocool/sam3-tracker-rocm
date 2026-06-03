@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from tracker.tracker import MIGraphXBackbone
+from tracker.migraphx_runtime import MIGraphXBackbone
 
 device = torch.device("cuda")
 dtype = torch.float16

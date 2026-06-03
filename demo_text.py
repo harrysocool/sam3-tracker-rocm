@@ -2,7 +2,7 @@
 """Text-prompt demo for SAM3 — single image or any mp4 video.
 
 Uses Sam3VideoModel (PyTorch + CLIP) end-to-end. Slower than the box-prompt
-demo.py path (which is MIGraphX-accelerated) but supports open-vocabulary
+demo_box.py path (which is MIGraphX-accelerated) but supports open-vocabulary
 text prompts like "swan", "person on a bike", etc.
 
 Pipeline:
@@ -212,7 +212,7 @@ def main():
     if args.mig:
         print(f"Patching detector_model.vision_encoder with MIGraphX backbone ...")
         t = time.perf_counter()
-        from tracker.tracker import MIGraphXBackbone
+        from tracker.migraphx_runtime import MIGraphXBackbone
         from tracker.mig_vision_encoder import patch_sam3_video_model_with_mig
         det_dir = args.onnx_dir / "backbone_detector"
         mxr = MIGraphXBackbone(

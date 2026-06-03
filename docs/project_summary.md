@@ -5,7 +5,7 @@
 
 | Pipeline | 504px FPS | 1008px FPS |
 |---|---|---|
-| Box-prompt (`demo.py`) | **12.21** | **3.22** |
+| Box-prompt (`demo_box.py`) | **12.21** | **3.22** |
 | Text-prompt MIG (`demo_text.py --mig`) | **5.5** | **~1.5** |
 | Text-prompt PyTorch | 2.6 | 0.52 |
 
@@ -29,7 +29,7 @@
 
 ## Two Pipelines
 
-### Box-prompt (`demo.py`) — Tracking only
+### Box-prompt (`demo_box.py`) — Tracking only
 
 ```
 Input frame
@@ -217,4 +217,4 @@ BIOS UMA=64GB maximizes the fast non-coherent GPU pool (see Finding #7).
 | Backbone optimization research (gfx1151 env vars, community findings) | [`analysis/backbone_optimization_research.md`](backbone_optimization_research.md) |
 | Tracking module optimization (memory_attention, dec/enc, ORT cache) | [`analysis/module_optimization.md`](../analysis/module_optimization.md) |
 | MIGraphX backbone investigation (detailed, pre-patch) | [`analysis/migraphx_backbone_investigation.md`](../analysis/migraphx_backbone_investigation.md) |
-| 1008px performance deep-dive (NHWC, rocprof, op analysis) | [`analysis/1008px_perf_analysis.md`](../analysis/1008px_perf_analysis.md) |
+| 1008px performance deep-dive (NHWC, rocprof, op analysis) | [`analysis/1008px_perf_analysis.md`](historical/1008px_perf_analysis.md) |

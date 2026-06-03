@@ -73,7 +73,7 @@ def build_model(ckpt: Path, imgsz: int, device, dtype):
 
 
 def patch_mig(model, onnx_dir: Path):
-    from tracker.tracker import MIGraphXBackbone
+    from tracker.migraphx_runtime import MIGraphXBackbone
     from tracker.mig_vision_encoder import patch_sam3_video_model_with_mig
     det_dir = onnx_dir / "backbone_detector"
     mxr = MIGraphXBackbone(

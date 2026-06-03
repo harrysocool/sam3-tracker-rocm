@@ -168,7 +168,7 @@ fi
 
 # ── Stage 3: demos ────────────────────────────────────────────────────────
 ts "[5/6] Demo: box-prompt"
-check "demo box" python demo.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
+check "demo box" python demo_box.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
     --image assets/truck.jpg --box 85,281,1710,850 --output /tmp/out_box.jpg
 
 ts "[6/6] Demos: text-prompt"

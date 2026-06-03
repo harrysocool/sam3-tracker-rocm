@@ -79,7 +79,7 @@ class SAM3Live:
         prompts: Sequence[str],
         *,
         onnx_dir: str | Path | None = None,
-        imgsz: int = 1008,
+        imgsz: int = 504,
         dtype: torch.dtype = torch.float16,
         device: str | torch.device | None = None,
         mig: bool = False,
@@ -285,7 +285,7 @@ class SAM3Live:
     # MIG patch wiring (mirrors demo_text.py)
     # ------------------------------------------------------------------
     def _apply_mig_patches(self, onnx_dir: Path, imgsz: int) -> None:
-        from .tracker import MIGraphXBackbone
+        from .migraphx_runtime import MIGraphXBackbone
         from .mig_vision_encoder import patch_sam3_video_model_with_mig
 
         det_dir = onnx_dir / "backbone_detector"
