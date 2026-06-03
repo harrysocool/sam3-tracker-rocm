@@ -33,7 +33,7 @@
 
 ```
 Input frame
-  → backbone_mxr_tuned.mxr       [MIGraphX 2.15+patches, MLIR attn, FP16]   ~67ms / ~236ms
+  → backbone_tracker/tuned.mxr   [MIGraphX 2.15+patches, MLIR attn, FP16]   ~67ms / ~236ms
   → memory_attention             [ORT MIGraphX EP, FP16] ¹                     ~7ms /  ~60ms
   → mask_decoder_propagate.mxr   [MIGraphX direct API, FP32]                  ~14ms /  ~98ms
   → memory_encoder.mxr           [MIGraphX direct API, FP16]                   ~2ms /   ~7ms
