@@ -65,10 +65,11 @@ def parse_args():
     p.add_argument("--switch-every", type=int, default=0,
                    help="With --text-set: rotate to next prompt set every N frames. "
                         "0 disables switching.")
-    p.add_argument("--redetect-every", type=int, default=1,
-                   help="Full SAM3 every Nth frame; intermediate frames are tracker "
-                        "propagation only (faster, no new objects discovered). "
-                        "Default 1 = full detection every frame.")
+    p.add_argument("--redetect-interval-ms", type=float, default=1000.0,
+                   help="Wall-clock interval between SAM3 detections (ms). "
+                        "0 = SAM3 every frame (slowest, most accurate). "
+                        ">0 = SAM3 on keyframes, lightweight tracker propagates between. "
+                        "Default 1000ms (1Hz keyframes) for typical multi-prompt deploys.")
     p.add_argument(
         "--bootstrap-frames", type=int, default=0,
         help="First N frames run in pure text mode to capture high-confidence "
@@ -78,13 +79,6 @@ def parse_args():
     )
     p.add_argument("--bootstrap-min-score", type=float, default=0.3,
                    help="Confidence floor for boxes captured during bootstrap.")
-    p.add_argument("--hybrid", action="store_true",
-                   help="Use SAM3HybridLive: SAM3 detect every --keyframe-every-ms, "
-                        "lightweight SAM2-style tracker propagates between keyframes. "
-                        "Significantly faster for multi-prompt at the cost of some "
-                        "mask freshness on intermediate frames.")
-    p.add_argument("--keyframe-every-ms", type=float, default=1000.0,
-                   help="Hybrid: wall-clock interval between SAM3 keyframe detections.")
     p.add_argument("--periodic-rebootstrap-seconds", type=float, default=180.0,
                    help="Force re-bootstrap every N seconds wall-clock. Catches scene "
                         "changes the score-only drift signal cannot detect. "
@@ -263,7 +257,21 @@ def main():
         None if args.max_objects == 0
         else (args.max_objects if args.max_objects > 0 else 5)
     )
-    if args.hybrid:
+    if args.redetect_interval_ms <= 0.0:
+        live = SAM3Live(
+            checkpoint=args.checkpoint,
+            prompts=current_prompts,
+            onnx_dir=args.onnx_dir,
+            imgsz=args.imgsz,
+            dtype=dtype,
+            mig=args.mig,
+            redetect_every=1,
+            max_objects_per_prompt=max_obj,
+            bootstrap_frames=args.bootstrap_frames,
+            bootstrap_min_score=args.bootstrap_min_score,
+            periodic_rebootstrap_seconds=args.periodic_rebootstrap_seconds,
+        )
+    else:
         from tracker.hybrid_inference import SAM3HybridLive
         live = SAM3HybridLive(
             checkpoint=args.checkpoint,
@@ -272,21 +280,7 @@ def main():
             imgsz=args.imgsz,
             dtype=dtype,
             mig=args.mig,
-            keyframe_every_ms=args.keyframe_every_ms,
-            max_objects_per_prompt=max_obj,
-            bootstrap_frames=args.bootstrap_frames,
-            bootstrap_min_score=args.bootstrap_min_score,
-            periodic_rebootstrap_seconds=args.periodic_rebootstrap_seconds,
-        )
-    else:
-        live = SAM3Live(
-            checkpoint=args.checkpoint,
-            prompts=current_prompts,
-            onnx_dir=args.onnx_dir,
-            imgsz=args.imgsz,
-            dtype=dtype,
-            mig=args.mig,
-            redetect_every=args.redetect_every,
+            redetect_interval_ms=args.redetect_interval_ms,
             max_objects_per_prompt=max_obj,
             bootstrap_frames=args.bootstrap_frames,
             bootstrap_min_score=args.bootstrap_min_score,
