@@ -12,7 +12,7 @@ Uses the HF streaming entry point:
 which is explicitly designed for "frames provided one at a time" mode
 (``streaming=True`` inside the model). All existing MIG / ROCm patches from
 ``tracker/`` are reused so steady-state per-frame latency matches
-``demo_text.py --mig``.
+``tools/text_baseline.py --mig``.
 
 Quick start
 -----------
@@ -282,7 +282,7 @@ class SAM3Live:
               f"bootstrap_frames={self.bootstrap_frames}")
 
     # ------------------------------------------------------------------
-    # MIG patch wiring (mirrors demo_text.py)
+    # MIG patch wiring (mirrors tools/text_baseline.py)
     # ------------------------------------------------------------------
     def _apply_mig_patches(self, onnx_dir: Path, imgsz: int) -> None:
         from .migraphx_runtime import MIGraphXBackbone

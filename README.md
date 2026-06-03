@@ -9,7 +9,7 @@ the masks through subsequent frames.
 consumers. Multi-prompt, hybrid keyframes + lightweight tracker propagation, ~5 FPS at 504px.
 
 Reference paths:
-- `demo_text.py` — offline batch text-prompt via HF `Sam3VideoModel` (debugging / regression)
+- `tools/text_baseline.py` — offline batch text-prompt via HF `Sam3VideoModel` (debugging / regression)
 - `demo_box.py` — specialized: bounding-box prompt, skips detection, **12.21 FPS** propagation (single-object benchmark / interactive UI)
 
 DAVIS 2017 val Mean J: **81.6%** (504px box-prompt).
@@ -38,10 +38,10 @@ tracker propagation. They differ in **how the first-frame mask is obtained** and
 SAM3 detection re-runs after frame 0**:
 
 ```
-demo_live.py   text → SAM3 keyframe (every N ms)  ──┐
-               └── propagate via SAM2 tracker ──────┴──► streaming mask output
-demo_text.py   text → full SAM3 every frame    ──────► offline batch output
-demo_box.py    [box] (frame 0 only)            ──────► fastest, single-object
+demo_live.py             text → SAM3 keyframe (every N ms)  ──┐
+                         └── propagate via SAM2 tracker ──────┴──► streaming mask output
+tools/text_baseline.py   text → full SAM3 every frame          ──────► offline batch output
+demo_box.py              [box] (frame 0 only)                  ──────► fastest, single-object
 ```
 
 ### Streaming live API (`demo_live.py`) — primary
@@ -53,7 +53,7 @@ propagating masks in between. Internally combines `SAM3Live` (per-frame HF
 `Sam3VideoModel`) for keyframes and `SAM3OnnxTracker` for tracker propagation. Supports
 multi-prompt, periodic re-bootstrap on drift / scene change, runtime prompt swap.
 
-### Offline batch text-prompt (`demo_text.py`)
+### Offline batch text-prompt (`tools/text_baseline.py`)
 
 Uses HF `Sam3VideoModel` directly with a fixed video session. Slower than the streaming
 path because SAM3 detection runs every frame, but it's the cleanest path against the
@@ -126,7 +126,7 @@ After `setup.sh`, activate the environment and build artefacts for the pipeline(
 ```bash
 conda activate sam3-tracker
 
-# Text-prompt MIG — demo_live.py / demo_text.py --mig  (~18 min @504px)
+# Text-prompt MIG — demo_live.py / tools/text_baseline.py --mig  (~18 min @504px)
 python export/build.py --pipeline text --imgsz 504
 
 # Box-prompt only — demo_box.py  (~10 min @504px)
@@ -204,7 +204,7 @@ Three entry points — pick the one matching your use case:
 | Demo | Prompt | Pipeline | Steady-state FPS @504 | Use for |
 |---|---|---|---|---|
 | **`demo_live.py`** | text(s) | **Streaming hybrid** — SAM3 keyframe + tracker propagate | **~5 FPS multi-prompt** | production / ROS / live sensor |
-| `demo_text.py --mig` | text | Offline HF Sam3VideoModel, SAM3 every frame | 5.5 (1 obj) / 4.4 (4 obj) | debugging / regression baseline |
+| `tools/text_baseline.py --mig` | text | Offline HF Sam3VideoModel, SAM3 every frame | 5.5 (1 obj) / 4.4 (4 obj) | debugging / regression baseline |
 | `demo_box.py` | bounding box | Tracking only (no detection) | **12.2** (single-object) | specialized: annotation / max-perf |
 
 All commands below assume you have activated the conda env (`conda activate sam3-tracker`)
@@ -233,23 +233,23 @@ Key flags: `--redetect-interval-ms` (0 = SAM3 every frame; >0 = keyframe-every-N
 tracker propagate); `--periodic-rebootstrap-seconds` (drift safety net, default 180s).
 See `python demo_live.py --help` for the full set.
 
-### Offline batch text-prompt (`demo_text.py`) — reference / debugging
+### Offline batch text-prompt (`tools/text_baseline.py`) — reference / debugging
 
 > `assets/blackswan.mp4` is a bundled swan clip. Replace with your own video.
 > MIG commands (`--mig`) require Stage 2 artefacts to be built first.
 
 ```bash
 # Image — pure PyTorch path (no MIG artifacts needed)
-python demo_text.py --checkpoint model/sam3 \
+python tools/text_baseline.py --checkpoint model/sam3 \
     --image assets/truck.jpg --text "truck"
 
 # Video — pure PyTorch baseline
-python demo_text.py --checkpoint model/sam3 \
+python tools/text_baseline.py --checkpoint model/sam3 \
     --video assets/blackswan.mp4 --text "swan" --max-frames 60
 
 # Video — MIG @504 (~5.1 FPS, 10× over PT baseline, best for offline demos)
 LD_PRELOAD=/opt/rocm-7.2.x/lib/libmigraphx_c.so.3:/opt/rocm-7.2.x/lib/migraphx/lib/libmigraphx.so.2016000.0 \
-    python demo_text.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
+    python tools/text_baseline.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
     --video assets/blackswan.mp4 --text "swan" --imgsz 504 --mig --max-frames 60
 ```
 
@@ -258,7 +258,7 @@ LD_PRELOAD=/opt/rocm-7.2.x/lib/libmigraphx_c.so.3:/opt/rocm-7.2.x/lib/migraphx/l
 
 ```bash
 LD_PRELOAD=/opt/rocm-7.2.x/lib/libmigraphx_c.so.3:/opt/rocm-7.2.x/lib/migraphx/lib/libmigraphx.so.2016000.0 \
-    python demo_text.py --checkpoint model/sam3 --onnx-dir onnx_files_1008 \
+    python tools/text_baseline.py --checkpoint model/sam3 --onnx-dir onnx_files_1008 \
     --video assets/blackswan.mp4 --text "swan" --mig --max-frames 60
 ```
 
@@ -286,12 +286,12 @@ Multi-object flags:
 
 ```bash
 # Track all dogs in the scene
-python demo_text.py --checkpoint model/sam3 \
+python tools/text_baseline.py --checkpoint model/sam3 \
     --video assets/blackswan.mp4 --text "dog" \
     --imgsz 504 --mig --onnx-dir onnx_files_504 --min-score 0.4
 
 # Track at most 2 people (highest scoring)
-python demo_text.py --checkpoint model/sam3 \
+python tools/text_baseline.py --checkpoint model/sam3 \
     --video assets/blackswan.mp4 --text "person" \
     --imgsz 504 --mig --onnx-dir onnx_files_504 --max-objects 2
 ```
@@ -328,7 +328,7 @@ python eval/benchmarks/profile_text_prompt.py --checkpoint model/sam3 --image as
 
 ## Results
 
-### Text-prompt: detection + tracking (`demo_text.py --mig --imgsz 504`)
+### Text-prompt: detection + tracking (`tools/text_baseline.py --mig --imgsz 504`)
 
 | `"swan"` | `"camel"` | `"pig"` (3 objects) |
 |:---:|:---:|:---:|
@@ -348,20 +348,20 @@ python eval/benchmarks/profile_text_prompt.py --checkpoint model/sam3 --image as
 backbone + memory_attention + DETR encoder. To reproduce, see the [Evaluation](#evaluation)
 section.*
 
-### Text-prompt (`demo_text.py --mig` / `demo_live.py`)
+### Text-prompt (`tools/text_baseline.py --mig` / `demo_live.py`)
 
 | Path | Pipeline | Steady-state FPS |
 |---|---|---|
 | **`demo_live.py` (hybrid)** | SAM3 every 1000ms keyframe + tracker propagate between | **~5 FPS multi-prompt** |
-| `demo_text.py --mig` | SAM3 every frame (offline batch) | 5.5 (1 obj) / 4.4 (4 obj) |
-| `demo_text.py` (no MIG) | Pure PyTorch baseline | ~2.6 |
+| `tools/text_baseline.py --mig` | SAM3 every frame (offline batch) | 5.5 (1 obj) / 4.4 (4 obj) |
+| `tools/text_baseline.py` (no MIG) | Pure PyTorch baseline | ~2.6 |
 
 Mask quality: PT vs MIG mean IoU = **0.994** @504px (verified frame-by-frame on 20-30 frames).
 Detection score: truck 0.95, swan 0.93-0.96.
 
 Multi-object scaling @504 MIG (backbone shared across all objects):
 
-| Objects tracked | demo_text.py prop FPS |
+| Objects tracked | tools/text_baseline.py prop FPS |
 |---|---|
 | 1 | 5.5 |
 | 4 | ~4.4 |
@@ -382,8 +382,8 @@ Multi-object scaling @504 MIG (backbone shared across all objects):
 
 | Demo | Resolution | DAVIS J | Prop FPS |
 |---|---|---|---|
-| `demo_text.py --mig` | 1008px | — | 1.5 |
-| `demo_text.py` (no MIG) | 1008px | — | 0.52 |
+| `tools/text_baseline.py --mig` | 1008px | — | 1.5 |
+| `tools/text_baseline.py` (no MIG) | 1008px | — | 0.52 |
 | `demo_box.py` (MIG) | 1008px | 84.8% | 3.22 |
 | `demo_box.py` (PyTorch) | 1008px | 84.8% | 1.35 |
 
@@ -519,7 +519,7 @@ sam3-tracker-rocm/
 ├── outputs/                       # Demo outputs (gitignored, auto-created)
 ├── results/                       # Eval outputs: JSON metrics, profiles
 ├── demo_live.py                   # ← Streaming live API (primary entry point)
-├── demo_text.py                   # ← Offline batch text-prompt (reference / debugging)
+├── tools/text_baseline.py         # ← Offline batch text-prompt (reference / debugging)
 ├── demo_box.py                    # ← Specialized: box-prompt, max single-object FPS
 ├── setup.sh                       # ← One-command setup
 └── environment.yml

@@ -2,7 +2,7 @@
 """Streaming SAM3 demo — frame-by-frame, multi-prompt.
 
 Simulates a live sensor by reading a video file frame-by-frame with OpenCV and
-feeding each frame into ``SAM3Live.infer()``. Unlike ``demo_text.py``, no video
+feeding each frame into ``SAM3Live.infer()``. Unlike ``tools/text_baseline.py``, no video
 is pre-loaded into the session; frames arrive one at a time, as they would
 from a webcam, RTSP stream, or robot camera.
 

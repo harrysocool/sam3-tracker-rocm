@@ -37,7 +37,7 @@ def main():
                     help="Optional mp4 — profile propagation frames 1..N (frame 0 init separate). "
                          "Without this, profiles N independent init frames (re-init every iter).")
     ap.add_argument("--max-frames", type=int, default=11, help="Cap video frames")
-    ap.add_argument("--mig", action="store_true", help="Use MIG backbone (matches demo_text.py --mig)")
+    ap.add_argument("--mig", action="store_true", help="Use MIG backbone (matches tools/text_baseline.py --mig)")
     args = ap.parse_args()
 
     device = torch.device("cuda")

@@ -6,7 +6,7 @@
 | Pipeline | 504px FPS | 1008px FPS |
 |---|---|---|
 | Box-prompt (`demo_box.py`) | **12.21** | **3.22** |
-| Text-prompt MIG (`demo_text.py --mig`) | **5.5** | **~1.5** |
+| Text-prompt MIG (`tools/text_baseline.py --mig`) | **5.5** | **~1.5** |
 | Text-prompt PyTorch | 2.6 | 0.52 |
 
 ---
@@ -41,7 +41,7 @@ Input frame
   Total:  504px → ~82ms → 12.21 FPS   |   1008px → ~310ms → 3.22 FPS
 ```
 
-### Text-prompt (`demo_text.py --mig`) — Detection + Tracking
+### Text-prompt (`tools/text_baseline.py --mig`) — Detection + Tracking
 
 ```
 Input frame

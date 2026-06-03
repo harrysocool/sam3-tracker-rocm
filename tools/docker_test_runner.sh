@@ -172,7 +172,7 @@ check "demo box" python demo_box.py --checkpoint model/sam3 --onnx-dir onnx_file
     --image assets/truck.jpg --box 85,281,1710,850 --output /tmp/out_box.jpg
 
 ts "[6/6] Demos: text-prompt"
-check "demo text PT" python demo_text.py --checkpoint model/sam3 \
+check "demo text PT" python tools/text_baseline.py --checkpoint model/sam3 \
     --image assets/truck.jpg --text "truck" --output /tmp/out_text_pt.jpg
 
 if [ "${BUILD_TEXT_FLAG}" = "true" ]; then
@@ -181,7 +181,7 @@ if [ "${BUILD_TEXT_FLAG}" = "true" ]; then
     ROCM_PATH="${ROCM_PATH:-/opt/rocm-7.2.0}"  # last-resort fallback
     export PYTHONPATH="$ROCM_PATH/lib:\$PYTHONPATH"
     check "demo text MIG" env LD_PRELOAD="$ROCM_PATH/lib/libmigraphx_c.so.3:$ROCM_PATH/lib/migraphx/lib/libmigraphx.so.2016000.0" \
-        python demo_text.py --checkpoint model/sam3 \
+        python tools/text_baseline.py --checkpoint model/sam3 \
         --onnx-dir onnx_files_504 --imgsz 504 --mig \
         --image assets/truck.jpg --text "truck" --output /tmp/out_text_mig.jpg
 fi

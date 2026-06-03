@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Text-prompt demo for SAM3 — single image or any mp4 video.
+"""Reference text-prompt baseline for SAM3 — single image or any mp4 video.
+
+NOT a deployment entry point. Production live input is frame-by-frame via
+demo_live.py / SAM3Live; this script pre-loads a whole clip and runs the
+unmodified HF Sam3VideoModel, serving as the correctness / regression baseline
+that demo_live's streaming approximations (hybrid keyframe, drift re-bootstrap)
+are validated against.
 
 Uses Sam3VideoModel (PyTorch + CLIP) end-to-end. Slower than the box-prompt
 demo_box.py path (which is MIGraphX-accelerated) but supports open-vocabulary
@@ -11,13 +17,13 @@ Pipeline:
 
 Usage:
   # Single image
-  python demo_text.py \\
+  python tools/text_baseline.py \\
       --checkpoint model/sam3 \\
       --image assets/truck.jpg \\
       --text "truck"
 
   # Video (any mp4)
-  python demo_text.py \\
+  python tools/text_baseline.py \\
       --checkpoint model/sam3 \\
       --video docs/images/demo_blackswan_mxr_504.mp4 \\
       --text "swan" \\
@@ -39,8 +45,12 @@ import numpy as np
 import torch
 from PIL import Image
 
+# This script lives under tools/; add the repo root to sys.path so the
+# top-level `tracker` package resolves regardless of the invocation cwd.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from transformers import Sam3VideoModel, AutoProcessor
-import tracker  # noqa: F401  -- applies ROCm patches (scipy fill_holes + PyTorch NMS)
+import tracker  # noqa: F401,E402  -- applies ROCm patches (scipy fill_holes + PyTorch NMS)
 
 
 
