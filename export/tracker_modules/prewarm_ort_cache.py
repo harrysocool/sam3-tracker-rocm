@@ -37,7 +37,7 @@ import sys
 import glob as _g, os as _o
 _rocm_lib = (
     (_o.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
-    if _o.path.isdir(_o.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
+    if _o.environ.get("ROCM_PATH", "").rstrip("/") and _o.path.isdir(_o.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
     else next(
         (p for p in sorted(_g.glob("/opt/rocm-7.2.*/lib"), reverse=True)
          if _o.path.isdir(p)), "/opt/rocm-7.2.0/lib"
