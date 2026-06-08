@@ -335,6 +335,7 @@ class SAM3OnnxTracker:
     # ------------------------------------------------------------------
 
     def _backbone(self, img_np: np.ndarray):
+        import torch
         t0 = time.perf_counter()
         if self._mxr_backbone is not None:
             result = self._mxr_backbone(img_np)
