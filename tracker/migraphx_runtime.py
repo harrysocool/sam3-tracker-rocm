@@ -46,7 +46,7 @@ def _load_migraphx_module():
     import glob as _g, os as _o
     _mxr_py_dir = (
         (_o.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
-        if _o.path.isdir(_o.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
+        if _o.environ.get("ROCM_PATH", "").rstrip("/") and _o.path.isdir(_o.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
         else next(
             (p for p in sorted(_g.glob("/opt/rocm-7.2.*/lib"), reverse=True)
              if _o.path.isdir(p)),
@@ -132,7 +132,7 @@ class MIGraphXBackbone:
         import glob as _g2, os as _o2
         _mxr_py_dir = (
             (_o2.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
-            if _o2.path.isdir(_o2.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
+            if _o2.environ.get("ROCM_PATH", "").rstrip("/") and _o2.path.isdir(_o2.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
             else next(
                 (p for p in sorted(_g2.glob("/opt/rocm-7.2.*/lib"), reverse=True)
                  if _o2.path.isdir(p)), "/opt/rocm-7.2.0/lib"
