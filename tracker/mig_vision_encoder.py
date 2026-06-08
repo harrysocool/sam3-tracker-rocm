@@ -25,7 +25,7 @@ import torch.nn as nn
 
 from transformers.models.sam3.modeling_sam3 import Sam3VisionEncoderOutput
 
-from tracker.tracker import MIGraphXBackbone
+from .migraphx_runtime import MIGraphXBackbone
 
 
 class MIGVisionEncoder(nn.Module):

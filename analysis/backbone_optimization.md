@@ -74,7 +74,7 @@ NHWC→NCHW — a race condition that corrupted the HIP context.
 - 504px: ~10ms saved → 9.0 FPS
 - 1008px: ~94ms saved → 2.39 FPS (+53% vs state before fix)
 
-Detailed analysis: [`1008px_perf_analysis.md`](1008px_perf_analysis.md)
+Detailed analysis: [`1008px_perf_analysis.md`](../docs/historical/1008px_perf_analysis.md)
 
 ---
 

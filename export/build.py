@@ -3,9 +3,9 @@
 
 Two pipelines, pick one or both:
 
-  box   — SAM3OnnxTracker (demo.py): tracker modules + MIGraphX backbone
+  box   — SAM3OnnxTracker (demo_box.py): tracker modules + MIGraphX backbone
             ~10 min @504px / ~20 min @1008px
-  text  — Sam3VideoModel (demo_text.py --mig): detector backbone + DETR encoder
+  text  — Sam3VideoModel (tools/text_baseline.py --mig): detector backbone + DETR encoder
             + padded memory_attention
             ~18 min @504px / ~30 min @1008px
 
@@ -31,6 +31,7 @@ Each step skips if its output already exists. Safe to re-run after interruption.
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import time
@@ -178,6 +179,7 @@ def build_text(imgsz: int, args) -> bool:
 # Final demo hints
 # ─────────────────────────────────────────────────────────────────────────────
 
+_rocm_base = os.environ.get("ROCM_PATH", "/opt/rocm-7.2.0").rstrip("/")
 LD = (f"LD_PRELOAD=" + _rocm_base + "/lib/libmigraphx_c.so.3:"
       f"{_rocm_base}/lib/migraphx/lib/libmigraphx.so.2016000.0")
 
@@ -188,7 +190,7 @@ def print_hints(pipeline: str, imgsz_list: list[int], checkpoint: Path) -> None:
     if pipeline in ("box", "all"):
         print(f"""
 {B}Box-prompt demo:{NC}
-  python demo.py --checkpoint {checkpoint} --onnx-dir onnx_files_{first} \\
+  python demo_box.py --checkpoint {checkpoint} --onnx-dir onnx_files_{first} \\
       --video YOUR_VIDEO.mp4 --box x1,y1,x2,y2
 """)
 
@@ -196,7 +198,7 @@ def print_hints(pipeline: str, imgsz_list: list[int], checkpoint: Path) -> None:
         print(f"""\
 {B}Text-prompt demo (MIG-accelerated):{NC}
   {LD} \\
-      python demo_text.py --checkpoint {checkpoint} \\
+      python tools/text_baseline.py --checkpoint {checkpoint} \\
           --video YOUR_VIDEO.mp4 --text "object" \\
           --imgsz {first} --mig --onnx-dir onnx_files_{first}
 """)

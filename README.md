@@ -1,12 +1,18 @@
 # SAM3 Video Tracker — ROCm / AMD
 
-Open-vocabulary video tracking built on [SAM3](https://github.com/facebookresearch/sam3),
-optimized for AMD ROCm hardware. A **text prompt** finds the target on frame 0; SAM3
-propagates the mask through subsequent frames. **Box-prompt** mode skips detection for
-maximum throughput.
+Open-vocabulary video tracking and segmentation built on [SAM3](https://github.com/facebookresearch/sam3),
+optimized for AMD ROCm hardware. A **text prompt** like `"floor"` or `"person on a bike"`
+finds the target on frame 0 (or every Nth keyframe in streaming mode); SAM3 propagates
+the masks through subsequent frames.
 
-Achieves **5.5 FPS** text-prompt and **12.21 FPS** box-prompt (propagation, 504px) on an
-AMD Ryzen AI Max+ 395. DAVIS 2017 val Mean J: **81.6%** (504px).
+**Primary path** — streaming live API (`demo_live.py`), the deployment shape used by ROS / robotics
+consumers. Multi-prompt, hybrid keyframes + lightweight tracker propagation, ~5 FPS at 504px.
+
+Reference paths:
+- `tools/text_baseline.py` — offline batch text-prompt via HF `Sam3VideoModel` (debugging / regression)
+- `demo_box.py` — specialized: bounding-box prompt, skips detection, **12.21 FPS** propagation (single-object benchmark / interactive UI)
+
+DAVIS 2017 val Mean J: **81.6%** (504px box-prompt).
 
 > **Hardware requirement**: AMD gfx1151 (Radeon 8060S / Ryzen AI Max+ 395) with ROCm 7.x.
 > Other AMD GPUs supporting ROCm may work but are untested.
@@ -15,7 +21,7 @@ AMD Ryzen AI Max+ 395. DAVIS 2017 val Mean J: **81.6%** (504px).
 
 - [How it works](#how-it-works)
 - [Setup](#setup)
-- [Run the demo](#run-the-demo)
+- [Run the demos](#run-the-demos)
 - [Results](#results)
 - [Performance](#performance)
 - [Evaluation](#evaluation)
@@ -27,36 +33,42 @@ AMD Ryzen AI Max+ 395. DAVIS 2017 val Mean J: **81.6%** (504px).
 
 ## How it works
 
-Two pipelines share the same ViT backbone and SAM3 mask decoder. The difference is
-how the first-frame mask is obtained:
+All three entry points share the same ViT backbone, SAM3 mask decoder, and SAM3
+tracker propagation. They differ in **how the first-frame mask is obtained** and **whether
+SAM3 detection re-runs after frame 0**:
 
 ```
-Text-prompt:  "swan" ──► CLIP encoder ──► DETR detector ──► mask init ──► memory propagation
-Box-prompt:   [box]                                       ──► mask init ──► memory propagation
+demo_live.py             text → SAM3 keyframe (every N ms)  ──┐
+                         └── propagate via SAM3 tracker ──────┴──► streaming mask output
+tools/text_baseline.py   text → full SAM3 every frame          ──────► offline batch output
+demo_box.py              [box] (frame 0 only)                  ──────► fastest, single-object
 ```
 
-### Text-prompt pipeline (`demo_text.py`)
+### Streaming live API (`demo_live.py`) — primary
 
-Uses `Sam3VideoModel` — the full SAM3 detection + tracking stack:
+The deployment shape used by robotics / ROS consumers. Frame 0 runs SAM3 detection
+on the text prompts and captures exemplar boxes; subsequent frames run SAM3 only every
+`--redetect-interval-ms` (default 1000ms), with a lightweight SAM3 tracker
+propagating masks in between. Internally combines `SAM3Live` (per-frame HF
+`Sam3VideoModel`) for keyframes and `SAM3OnnxTracker` for tracker propagation. Supports
+multi-prompt, periodic re-bootstrap on drift / scene change, runtime prompt swap.
 
-1. **CLIP text encoder** converts the prompt (e.g. `"swan"`) into query embeddings
-2. **ViT backbone** extracts multi-scale visual features from frame 0
-3. **DETR encoder + decoder** localises **all matching objects**; presence-aware
-   scoring + greedy mask-IoU NMS ranks them by score
-4. **SAM3 mask decoder** produces the initial segmentation mask
-5. **Memory propagation** (frames 1+): backbone features + memory bank drive the mask
-   decoder each frame; object pointers accumulate in the memory bank
+### Offline batch text-prompt (`tools/text_baseline.py`)
 
-All detected objects above `--min-score` are tracked simultaneously — backbone runs
-once per frame regardless of object count, so 4 objects costs only ~20% more than 1.
+Uses HF `Sam3VideoModel` directly with a fixed video session. Slower than the streaming
+path because SAM3 detection runs every frame, but it's the cleanest path against the
+upstream HF API — useful for debugging the wrapper and as a regression baseline.
 
-All three heavy modules — backbone, DETR encoder, memory attention — are MIG-accelerated.
+Pipeline: CLIP text encoder → ViT backbone → DETR encoder/decoder → SAM3 mask decoder
+on frame 0; backbone + memory_attention + mask_decoder on frames 1+. All three heavy
+modules (backbone, DETR encoder, memory attention) are MIG-accelerated.
 
-### Box-prompt pipeline (`demo.py`)
+### Specialized box-prompt (`demo_box.py`)
 
-The user draws a bounding box on frame 0 — detection is skipped entirely.
-Uses `SAM3OnnxTracker`: a lightweight ONNX pipeline with MIGraphX-compiled modules for
-maximum propagation FPS.
+The user draws a bounding box on frame 0 — detection is skipped entirely. Uses
+`SAM3OnnxTracker`: a single-object ONNX pipeline with MIGraphX-compiled modules. This
+is the **fastest** path (12.21 FPS @504px) but specialized to one object and assumes
+the user already knows where the target is.
 
 ### Shared propagation loop (frames 1+)
 
@@ -114,24 +126,33 @@ After `setup.sh`, activate the environment and build artefacts for the pipeline(
 ```bash
 conda activate sam3-tracker
 
-# Box-prompt only — demo.py  (~10 min @504px)
-python export/build.py --pipeline box --imgsz 504
-
-# Text-prompt MIG — demo_text.py --mig  (~18 min @504px)
+# Text-prompt MIG — demo_live.py / tools/text_baseline.py --mig  (~18 min @504px)
 python export/build.py --pipeline text --imgsz 504
 
-# Both pipelines at 504px
-python export/build.py --pipeline all --imgsz 504
+# Box-prompt only — demo_box.py  (~10 min @504px)
+python export/build.py --pipeline box --imgsz 504
 
-# Both pipelines, both resolutions (~90 min total)
-python export/build.py --pipeline all --imgsz 504 1008
+# Both pipelines at 504px (recommended)
+python export/build.py --pipeline all --imgsz 504
 ```
 
 Each step skips if output already exists — safe to re-run after interruption.
 Use `--force` to rebuild from scratch.
 
-> **Which resolution?** 504px runs 3-10× faster with slightly lower mask quality.
-> Start with 504 — switch to 1008 if you need higher accuracy.
+<details>
+<summary><b>1008px (higher mask quality, 3-10× slower)</b></summary>
+
+1008px is supported as an advanced option but isn't the recommended path. Build with:
+
+```bash
+python export/build.py --pipeline all --imgsz 1008
+# or both resolutions in one run (~90 min total):
+python export/build.py --pipeline all --imgsz 504 1008
+```
+
+Requires `BIOS UMA Frame Buffer Size = 64 GB` on 128 GB systems to avoid backbone OOM.
+
+</details>
 
 ### Manual / alternative paths
 
@@ -176,85 +197,106 @@ see [`docs/manual_setup.md`](docs/manual_setup.md).
 
 ---
 
-## Run the demo
+## Run the demos
 
-Two demo entry points — pick the one matching your use case:
+Three entry points — pick the one matching your use case:
 
-| Demo | Prompt | Pipeline | Steady-state FPS | Use for |
+| Demo | Prompt | Pipeline | Steady-state FPS @504 | Use for |
 |---|---|---|---|---|
-| `demo.py` | bounding box | Tracking only (no detection) | **12.2 FPS @ 504px** | known target, real-time |
-| `demo_text.py --mig --imgsz 504` | text | Detection + tracking @ 504px, N objects | **5.5 FPS** (1 obj) / **4.4 FPS** (4 obj) | open-vocabulary, multi-object |
-| `demo_text.py --mig` | text | Detection + tracking @ 1008px | **1.5 FPS @ 1008px** | open-vocabulary, higher quality |
-| `demo_text.py` | text | Detection + tracking (pure PyTorch) | 0.5 FPS @ 1008px | open-vocabulary, no MIG setup |
+| **`demo_live.py`** | text(s) | **Streaming hybrid** — SAM3 keyframe + tracker propagate | **~5 FPS multi-prompt** | production / ROS / live sensor |
+| `tools/text_baseline.py --mig` | text | Offline HF Sam3VideoModel, SAM3 every frame | 5.5 (1 obj) / 4.4 (4 obj) | debugging / regression baseline |
+| `demo_box.py` | bounding box | Tracking only (no detection) | **12.2** (single-object) | specialized: annotation / max-perf |
 
 All commands below assume you have activated the conda env (`conda activate sam3-tracker`)
 and are in the project root. The MIGraphX text-prompt path requires the `LD_PRELOAD` shown
 in the commands below to resolve a dual-ROCm-version conflict; the box-prompt and PyTorch
 text-prompt paths do not need it.
 
-### Box-prompt (`demo.py`) — tracking only, fastest
+### Streaming live API (`demo_live.py`) — primary
 
-> `assets/truck.jpg` and `assets/blackswan.mp4` are bundled demo files (a truck image and
-> a short swan clip). Replace with your own image or video. `--box x1,y1,x2,y2` is
-> the bounding box around the target on frame 0, in pixel coordinates.
+The deployment shape used by robotics consumers. Reads frames from a video file (or
+later, a ROS image topic — see `examples/ros_node_skeleton.py`) and emits a multi-prompt
+mask per frame.
 
 ```bash
-# Image — MIGraphX backbone (default, ~115 ms / frame)
-python demo.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
-    --image assets/truck.jpg --box 85,281,1710,850   # x1,y1,x2,y2 in pixels
+# Multi-prompt live (default: 1000ms keyframe interval, hybrid pipeline)
+LD_PRELOAD=/opt/rocm-7.2.x/lib/libmigraphx_c.so.3:/opt/rocm-7.2.x/lib/migraphx/lib/libmigraphx.so.2016000.0 \
+    python demo_live.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
+    --video assets/office_hallway.mp4 --text floor wall --mig
 
-# Image — PyTorch backbone fallback (no MIGraphX needed)
-python demo.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
-    --backbone pytorch \
-    --image assets/truck.jpg --box 85,281,1710,850
-
-# Video (any mp4) — output written to outputs/box/<stem>_tracked.mp4
-python demo.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
-    --video assets/blackswan.mp4 --box 320,170,650,400
+# Single-prompt, baseline mode (SAM3 every frame — equivalent to old --hybrid off)
+LD_PRELOAD=... python demo_live.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
+    --video assets/blackswan.mp4 --text swan --mig --redetect-interval-ms 0
 ```
 
-### Text-prompt (`demo_text.py`) — detection + tracking, open-vocabulary
+Key flags: `--redetect-interval-ms` (0 = SAM3 every frame; >0 = keyframe-every-N-ms +
+tracker propagate); `--periodic-rebootstrap-seconds` (drift safety net, default 180s).
+See `python demo_live.py --help` for the full set.
+
+### Offline batch text-prompt (`tools/text_baseline.py`) — reference / debugging
 
 > `assets/blackswan.mp4` is a bundled swan clip. Replace with your own video.
 > MIG commands (`--mig`) require Stage 2 artefacts to be built first.
 
 ```bash
 # Image — pure PyTorch path (no MIG artifacts needed)
-python demo_text.py --checkpoint model/sam3 \
+python tools/text_baseline.py --checkpoint model/sam3 \
     --image assets/truck.jpg --text "truck"
 
-# Video — pure PyTorch (~0.5 FPS @ 1008px)
-python demo_text.py --checkpoint model/sam3 \
-    --video assets/blackswan.mp4 --text "swan" --max-frames 60  # omit for full video
+# Video — pure PyTorch baseline
+python tools/text_baseline.py --checkpoint model/sam3 \
+    --video assets/blackswan.mp4 --text "swan" --max-frames 60
 
-# Video — MIG @504 (~5.1 FPS, 10× over PT baseline, best for demos)
+# Video — MIG @504 (~5.1 FPS, 10× over PT baseline, best for offline demos)
 LD_PRELOAD=/opt/rocm-7.2.x/lib/libmigraphx_c.so.3:/opt/rocm-7.2.x/lib/migraphx/lib/libmigraphx.so.2016000.0 \
-    python demo_text.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
+    python tools/text_baseline.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
     --video assets/blackswan.mp4 --text "swan" --imgsz 504 --mig --max-frames 60
-
-# Video — MIG @1008 (~1.5 FPS, highest mask quality)
-LD_PRELOAD=/opt/rocm-7.2.x/lib/libmigraphx_c.so.3:/opt/rocm-7.2.x/lib/migraphx/lib/libmigraphx.so.2016000.0 \
-    python demo_text.py --checkpoint model/sam3 --onnx-dir onnx_files_1008 \
-    --video assets/blackswan.mp4 --text "swan" --mig --max-frames 60
 ```
 
-Multi-object flags:
+**Multi-object flags** (text-prompt detection — `text_baseline.py` / `demo_live.py`):
 - `--min-score 0.5` — only track detections above this confidence (default 0.5)
 - `--max-objects 0` — cap by score rank, 0 = all above threshold (default 0 = all)
 
 ```bash
-# Track all dogs in the scene
-python demo_text.py --checkpoint model/sam3 \
-    --video assets/blackswan.mp4 --text "dog" \
-    --imgsz 504 --mig --onnx-dir onnx_files_504 --min-score 0.4
+# Track every person above 0.4 confidence
+python tools/text_baseline.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
+    --video assets/two_person_dog_lawn.mp4 --text "person" \
+    --imgsz 504 --mig --min-score 0.4
 
 # Track at most 2 people (highest scoring)
-python demo_text.py --checkpoint model/sam3 \
-    --video assets/blackswan.mp4 --text "person" \
-    --imgsz 504 --mig --onnx-dir onnx_files_504 --max-objects 2
+python tools/text_baseline.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
+    --video assets/two_person_dog_lawn.mp4 --text "person" \
+    --imgsz 504 --mig --max-objects 2
 ```
 
-Outputs default to `outputs/{box,text}/<input-stem>_{tracked,text}.{jpg,mp4}` (overridable
+<details>
+<summary><b>1008px text-prompt (higher quality, ~1.5 FPS)</b></summary>
+
+```bash
+LD_PRELOAD=/opt/rocm-7.2.x/lib/libmigraphx_c.so.3:/opt/rocm-7.2.x/lib/migraphx/lib/libmigraphx.so.2016000.0 \
+    python tools/text_baseline.py --checkpoint model/sam3 --onnx-dir onnx_files_1008 \
+    --video assets/blackswan.mp4 --text "swan" --mig --max-frames 60
+```
+
+</details>
+
+### Specialized box-prompt (`demo_box.py`)
+
+> `assets/truck.jpg` and `assets/blackswan.mp4` are bundled demo files. Replace with
+> your own image or video. `--box x1,y1,x2,y2` is the bounding box around the target on
+> frame 0, in pixel coordinates.
+
+```bash
+# Image — MIGraphX backbone (default, ~115 ms / frame)
+python demo_box.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
+    --image assets/truck.jpg --box 85,281,1710,850
+
+# Video (any mp4) — output written to demo_out/box/<stem>_tracked.mp4
+python demo_box.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
+    --video assets/blackswan.mp4 --box 320,170,650,400
+```
+
+Outputs default to `demo_out/{box,text}/<input-stem>_{tracked,text}.{jpg,mp4}` (overridable
 with `--output`). Try short noun phrases: `"swan"`, `"a person on a bike"`, `"yellow taxi"`.
 
 ### Quick checks
@@ -286,15 +328,15 @@ python eval/benchmarks/profile_text_prompt.py --checkpoint model/sam3 --image as
 
 ## Results
 
-### Text-prompt: detection + tracking (`demo_text.py --mig --imgsz 504`)
+### Text-prompt: detection + tracking (`tools/text_baseline.py --mig --imgsz 504`)
 
 | `"swan"` | `"camel"` | `"pig"` (3 objects) |
 |:---:|:---:|:---:|
 | <img src="docs/images/demo_swan_text_mig.gif" width="260" alt="swan"> | <img src="docs/images/demo_camel_text_mig.gif" width="260" alt="camel"> | <img src="docs/images/demo_pigs_multi_object.gif" width="260" alt="pigs multi-object"> |
 
-### Box-prompt: tracking only (`demo.py`)
+### Box-prompt: tracking only (`demo_box.py`)
 
-| truck — single image | dog-agility — video (8.87 FPS) |
+| truck — single image | dog-agility — video |
 |:---:|:---:|
 | <img src="docs/images/demo_tracked.jpg" width="400" alt="truck box-prompt"> | <img src="docs/images/demo_dog_agility_box.gif" width="400" alt="dog-agility box-prompt"> |
 
@@ -302,44 +344,59 @@ python eval/benchmarks/profile_text_prompt.py --checkpoint model/sam3 --image as
 
 ## Performance
 
-*To reproduce the accuracy numbers below, see the [Evaluation](#evaluation) section.*
+*All numbers measured on AMD Ryzen AI Max+ 395 (gfx1151) at 504px with MIG-accelerated
+backbone + memory_attention + DETR encoder. To reproduce, see the [Evaluation](#evaluation)
+section.*
 
-### Text-prompt: Detection + Tracking (`demo_text.py`)
+### Text-prompt (`tools/text_baseline.py --mig` / `demo_live.py`)
 
-| Resolution | Path | Prop FPS | vs PT @1008 |
-|---|---|---|---|
-| **504px** | **MIG** (backbone + detr_encoder + memory_attention) | **5.5** | **10.6×** |
-| 504px | PyTorch | 2.6 | 5.0× |
-| **1008px** | **MIG** | **1.5** | **2.9×** |
-| 1008px | PyTorch | 0.52 | baseline |
+| Path | Pipeline | Steady-state FPS |
+|---|---|---|
+| **`demo_live.py` (hybrid)** | SAM3 every 1000ms keyframe + tracker propagate between | **~5 FPS multi-prompt** |
+| `tools/text_baseline.py --mig` | SAM3 every frame (offline batch) | 5.5 (1 obj) / 4.4 (4 obj) |
+| `tools/text_baseline.py` (no MIG) | Pure PyTorch baseline | ~2.6 |
 
-Mask quality: PT vs MIG mean IoU = **0.999** @1008px, **0.994** @504px (verified
-frame-by-frame on 20–30 frames). Detection score: truck 0.95, swan 0.93–0.96 across resolutions.
+Mask quality: PT vs MIG mean IoU = **0.994** @504px (verified frame-by-frame on 20-30 frames).
+Detection score: truck 0.95, swan 0.93-0.96.
 
 Multi-object scaling @504 MIG (backbone shared across all objects):
 
-| Objects tracked | Prop FPS |
+| Objects tracked | tools/text_baseline.py prop FPS |
 |---|---|
 | 1 | 5.5 |
-| 4 (estimated) | ~4.4 |
+| 4 | ~4.4 |
 | 8 (estimated) | ~2.9 |
 
-### Box-prompt: Tracking only (`demo.py`)
+### Box-prompt (`demo_box.py`) — specialized, fastest
 
-| Resolution | DAVIS 2017 val J | Prop FPS | Backbone |
-|---|---|---|---|
-| **504px** | **81.6%** | **12.21** | MIGraphX 2.15+patches + MLIR |
-| 1008px | **84.8%** | **3.22** | MIGraphX 2.15+patches + MLIR |
-| 504px (PyTorch) | 81.6% | 5.72 | PyTorch ROCm FP16 |
-| 1008px (PyTorch) | 84.8% | 1.35 | PyTorch ROCm FP16 |
+| Backbone | DAVIS 2017 val J | Prop FPS |
+|---|---|---|
+| **MIGraphX 2.15+patches + MLIR** | **81.6%** | **12.21** |
+| PyTorch ROCm FP16 | 81.6% | 5.72 |
 
 > **Reference**: SAM2-L (official, GT first-frame mask) achieves **J&F=91.6%** on DAVIS 2017 val.
 > Our box-prompt uses a box-derived mask on frame 0 instead of GT — the gap reflects prompt quality, not tracker propagation quality.
 
+<details>
+<summary><b>1008px numbers (higher quality, 3-10× slower)</b></summary>
+
+| Demo | Resolution | DAVIS J | Prop FPS |
+|---|---|---|---|
+| `tools/text_baseline.py --mig` | 1008px | — | 1.5 |
+| `tools/text_baseline.py` (no MIG) | 1008px | — | 0.52 |
+| `demo_box.py` (MIG) | 1008px | 84.8% | 3.22 |
+| `demo_box.py` (PyTorch) | 1008px | 84.8% | 1.35 |
+
+Mask quality (text-prompt): PT vs MIG mean IoU = 0.999 @1008px.
+
+1008px deep-dive: [`docs/historical/1008px_perf_analysis.md`](docs/historical/1008px_perf_analysis.md).
+
+</details>
+
 
 ### Per-module latency breakdown (504px, MIGraphX backbone)
 
-**Text-prompt propagation** (169 ms/frame → 5.9 FPS, with MLIR attention backbone):
+**Text-prompt propagation** (169 ms/frame → 5.9 FPS per-module sum; ~5.5 measured end-to-end, see table above) — MLIR attention backbone:
 
 | Stage | Latency | Backend |
 |---|---:|---|
@@ -354,7 +411,7 @@ Multi-object scaling @504 MIG (backbone shared across all objects):
 
 | Stage | Latency | Backend |
 |---|---:|---|
-| backbone (`backbone_mxr_tuned.mxr`) | ~67 ms | MIGraphX 2.15+patches + MLIR attention (FP16) |
+| backbone (`backbone_tracker/tuned.mxr`) | ~67 ms | MIGraphX 2.15+patches + MLIR attention (FP16) |
 | memory_attention | ~7 ms | ORT MIGraphX EP FP16 ¹ |
 | mask_decoder_propagate (`dec_prop_fp32.mxr`) | ~14 ms | MIGraphX direct API FP32 |
 | memory_encoder (`mem_enc_fp32.mxr`) | ~2 ms | MIGraphX direct API FP16 |
@@ -431,75 +488,34 @@ python eval/benchmarks/profile_full_mig.py \
 
 ```
 sam3-tracker-rocm/
-├── tracker/                # Tracker implementations
-│   ├── tracker.py          #   SAM3OnnxTracker (box-prompt) + MIGraphXBackbone
-│   ├── mig_vision_encoder.py    #   MIG shim: Sam3VideoModel vision_encoder
-│   ├── mig_detr_encoder.py      #   MIG shim: Sam3DetrEncoder (ORT MIG EP)
-│   └── mig_memory_attention.py  #   MIG shim: memory_attention (ORT MIG EP, padded)
-├── export/                      # ONNX export + .mxr compile scripts
-│   ├── build.py             # ← unified build entry point (box + text, any resolution)
-│   ├── build_text_prompt_mig.py  #   text-prompt sub-script (called by build.py)
-│   ├── backbone/            #   ViT backbone: export → simplify → MIGraphX compile
-│   ├── detector/            #   DETR encoder export (text-prompt path)
-│   └── tracker_modules/     #   mask_decoder_*, memory_*, memory_attention (padded)
-├── eval/                   # Benchmarks, dataset evals, regression tools
-│   ├── benchmarks/         #   bench_pipeline, profile_full_mig, profile_text_prompt
-│   ├── datasets/           #   eval_davis, mask_diff_pt_vs_mig
-│   ├── probes/             #   smoke tests for text-prompt + correctness checks
-│   └── debug/              #   investigation scripts (FPN diagnostics, ONNX-CPU vs PT)
-├── docs/                   # Setup guide, technical report
-│   └── images/             #   README/doc visuals
+├── demo_live.py            # ← Streaming live API (primary entry point)
+├── tools/text_baseline.py  # ← Offline batch text-prompt (reference / debugging)
+├── demo_box.py             # ← Specialized box-prompt (max single-object FPS)
+├── setup.sh                # ← One-command environment setup
+├── tracker/                # Inference: SAM3Live, SAM3HybridLive, SAM3OnnxTracker, MIG shims
+├── export/                 # ONNX export + .mxr compile (build.py = unified entry point)
+├── eval/                   # Benchmarks, dataset evals, probes, debug tools
+├── examples/               # ROS 2 node skeleton + integrator guide
+├── docs/                   # Setup guide, technical report, images
 ├── model/sam3/             # Config + tokenizer (weights downloaded separately)
-├── assets/                 # Demo inputs: demo.jpg, demo.mp4
-├── onnx_files_504/         # Generated, gitignored — 504px MIG artefacts
-│   ├── backbone_tracker/   #   Box-prompt: tuned.mxr + supporting ONNX
-│   ├── backbone_detector/  #   Text-prompt: detector FPN + last_hidden_state
-│   ├── detector_modules/   #   detr_encoder_simplified.onnx + ORT cache
-│   └── tracker_modules/    #   mask_decoder_*, memory_*, memory_attention + caches
-├── onnx_files_1008/        # Generated, gitignored — 1008px (same subdir structure)
-├── outputs/                # Demo outputs (gitignored, auto-created)
-├── results/                # Eval outputs: JSON metrics, profiles
-├── dataset/                # Downloaded datasets (DAVIS)
-├── demo.py                 # ← Box-prompt: image / video tracking demo
-├── demo_text.py            # ← Text-prompt: open-vocabulary detection + tracking
-├── setup.sh                # ← One-command setup
-└── environment.yml
+├── assets/                 # Bundled demo inputs
+└── onnx_files_504/         # Generated, gitignored — 504px MIG artefacts (1008 also supported)
 ```
 
 ---
 
 ## Known limitations
 
-- **MIGraphX backbone cold-start**: first compile of `backbone_mxr_tuned.mxr` takes
-  ~3 min (504px) or ~9 min (1008px) with kernel autotuning. Subsequent runs load in ~3s.
-  Run `python export/build.py --pipeline box --imgsz 504` once to pre-build the cache.
-- **Text-prompt: vision_encoder dominates** (65% of propagation time at 504px, 57% at 1008px).
-  The ViT backbone already runs via MIGraphX, but each frame requires a GPU→CPU→GPU numpy
-  round-trip through the MIG bridge (~37 ms overhead at 1008px). Eliminating this round-trip
-  (GPU-resident MIG via HIP IPC) is the primary remaining optimization target.
-- **Text-prompt: modules under ~30 ms do not benefit from ORT MIG EP** — the CPU↔GPU
-  round-trip overhead matches or exceeds the PT runtime. `detr_decoder` (~11–25 ms) was
-  investigated and confirmed net-neutral; `mask_decoder` (~5 ms) and `memory_encoder`
-  (~6 ms) are too small to MIG-ize profitably.
-- **MIG attention modules MUST go through ORT MIG EP.** Direct
-  `migraphx.parse_onnx + quantize_fp16` on attention layers (`memory_attention`,
-  `detr_encoder`) produces NaN outputs (FP16 attention bug analogous to
-  [ROCm/AMDMIGraphX#3596](https://github.com/ROCm/AMDMIGraphX/issues/3596));
-  even FP32 produces ~0.05 max-diff that breaks downstream detection thresholds.
-  ORT EP with `migraphx_fp16_enable=1` uses a different FP16 quantization path
-  that produces correct results.
-- **memory_attention K=64 cliff.** MIGraphX picks a 14× slower kernel at
-  `num_object_pointer_tokens=64` (791 ms vs 55 ms at K≤32). The shim caps at K=32
-  and truncates the oldest pointers — quality impact is invisible for continuous
-  tracking; long-video re-identification across long disappearances may degrade slightly.
-- **Box-prompt: `dec_propagate` FP16 corrupts results.** ConvTranspose upsampling is
-  numerically sensitive — keep it at FP32 (`dec_prop_fp32.mxr`). All other modules run FP16.
-- **MIGraphX 2.15+patches required** for box-prompt headline FPS. The stock MIGraphX 2.15.0
-  from the ROCm 7.2 APT package produces ~916 ms for the HF backbone (6.6× slower) due to a
-  fusion limitation in `find_splits`. See [`analysis/migraphx_backbone_investigation.md`](analysis/migraphx_backbone_investigation.md).
-- **Dual LD_PRELOAD required for text-prompt MIG.** The torch ROCm nightly wheels bundle
-  their own HIP runtime; loading MIGraphX after torch corrupts `.mxr` deserialization. The
-  `LD_PRELOAD` in the demo commands forces `/opt/rocm-7.2.x` libs to load first.
+| Limitation | Detail / workaround |
+|---|---|
+| **Backbone cold-start** | First `.mxr` compile takes ~3 min (504px) / ~9 min (1008px) with autotuning; then loads in ~3s. Pre-build once: `python export/build.py --pipeline box --imgsz 504`. |
+| **Text-prompt: vision_encoder dominates** | 65% of prop time @504px (57% @1008px). Each frame does a GPU→CPU→GPU round-trip through the MIG bridge (~37 ms @1008px). GPU-resident MIG (HIP IPC) is the main remaining optimization target. |
+| **Small modules don't gain from ORT MIG EP** | Under ~30 ms the CPU↔GPU round-trip ≥ PT runtime. `detr_decoder` (~11–25 ms) confirmed net-neutral; `mask_decoder` (~5 ms) / `memory_encoder` (~6 ms) too small to MIG-ize. |
+| **MIG attention must use ORT MIG EP** | Direct `parse_onnx + quantize_fp16` on `memory_attention` / `detr_encoder` yields NaN ([AMDMIGraphX#3596](https://github.com/ROCm/AMDMIGraphX/issues/3596)); even FP32 has ~0.05 max-diff that breaks detection thresholds. ORT EP with `migraphx_fp16_enable=1` is correct. |
+| **memory_attention K=64 cliff** | MIGraphX picks a 14× slower kernel at `num_object_pointer_tokens=64` (791 ms vs 55 ms at K≤32). Shim caps K=32 and truncates oldest pointers — invisible for continuous tracking; re-ID across long disappearances may degrade slightly. |
+| **Box-prompt `dec_propagate` stays FP32** | ConvTranspose upsampling is numerically sensitive; keep it FP32 (`dec_prop_fp32.mxr`). All other modules run FP16. |
+| **MIGraphX 2.15+patches required** | Stock 2.15.0 (ROCm 7.2 APT) runs the HF backbone in ~916 ms (6.6× slower) due to a `find_splits` fusion limit. See [analysis](analysis/migraphx_backbone_investigation.md). |
+| **Dual LD_PRELOAD for text-prompt MIG** | torch ROCm nightly bundles its own HIP runtime; loading MIGraphX after torch corrupts `.mxr` deserialization. `LD_PRELOAD` forces `/opt/rocm-7.2.x` libs to load first. |
 
 ---
 

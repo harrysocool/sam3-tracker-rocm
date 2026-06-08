@@ -36,15 +36,15 @@ results/**
 !results/archive/*.mp4
 !results/archive/*.json
 
-# outputs/ — ignore contents but keep subdir scaffolding for demo defaults
-outputs/**
-!outputs/.gitkeep
-!outputs/box/
-!outputs/box/.gitkeep
-!outputs/text/
-!outputs/text/.gitkeep
-!outputs/probes/
-!outputs/probes/.gitkeep
+# demo_out/ — ignore contents but keep subdir scaffolding for demo defaults
+demo_out/**
+!demo_out/.gitkeep
+!demo_out/box/
+!demo_out/box/.gitkeep
+!demo_out/text/
+!demo_out/text/.gitkeep
+!demo_out/probes/
+!demo_out/probes/.gitkeep
 
 # Big generated media (catch-all). Whitelisted source / docs / archive below.
 *.mp4
@@ -75,3 +75,13 @@ tunableop_results*.csv
 # Local mxr cache (legacy 3-session compile artifacts)
 mxr_cache/
 docs/inference_stack_explained.md
+
+# Local test assets (4 stuff-class mp4s used by PoC validation; not committed
+# to keep repo size sane). Re-acquire from team shared drive if needed.
+assets/pexels_baseball_field_drone.mp4
+assets/sidewalk_running_man.mp4
+assets/sideway_lawn.mp4
+assets/two_person_dog_lawn.mp4
+
+# Steve customer rosbag (large, customer-supplied)
+data/

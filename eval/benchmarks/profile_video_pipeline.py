@@ -37,7 +37,7 @@ def main():
                     help="Optional mp4 — profile propagation frames 1..N (frame 0 init separate). "
                          "Without this, profiles N independent init frames (re-init every iter).")
     ap.add_argument("--max-frames", type=int, default=11, help="Cap video frames")
-    ap.add_argument("--mig", action="store_true", help="Use MIG backbone (matches demo_text.py --mig)")
+    ap.add_argument("--mig", action="store_true", help="Use MIG backbone (matches tools/text_baseline.py --mig)")
     args = ap.parse_args()
 
     device = torch.device("cuda")
@@ -48,7 +48,7 @@ def main():
     model = Sam3VideoModel.from_pretrained(str(args.checkpoint)).to(device).to(dtype).eval()
 
     if args.mig:
-        from tracker.tracker import MIGraphXBackbone
+        from tracker.migraphx_runtime import MIGraphXBackbone
         from tracker.mig_vision_encoder import patch_sam3_video_model_with_mig
         det_dir = args.onnx_dir / "backbone_detector"
         mxr = MIGraphXBackbone(

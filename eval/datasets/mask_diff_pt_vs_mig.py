@@ -21,6 +21,7 @@ WORKSPACE = Path(__file__).resolve().parent
 sys.path.insert(0, str(WORKSPACE))
 
 from transformers import Sam3VideoModel, AutoProcessor, Sam3VideoConfig
+import tracker  # noqa: F401  -- applies ROCm patches (scipy fill_holes + PyTorch NMS)
 
 
 def parse_args():
@@ -72,7 +73,7 @@ def build_model(ckpt: Path, imgsz: int, device, dtype):
 
 
 def patch_mig(model, onnx_dir: Path):
-    from tracker.tracker import MIGraphXBackbone
+    from tracker.migraphx_runtime import MIGraphXBackbone
     from tracker.mig_vision_encoder import patch_sam3_video_model_with_mig
     det_dir = onnx_dir / "backbone_detector"
     mxr = MIGraphXBackbone(

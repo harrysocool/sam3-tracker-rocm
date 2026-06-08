@@ -32,7 +32,7 @@ from PIL import Image
 from transformers import AutoProcessor, Sam3VideoModel
 from transformers.models.sam3.modeling_sam3 import Sam3VisionEncoderOutput
 
-from tracker.tracker import MIGraphXBackbone
+from tracker.migraphx_runtime import MIGraphXBackbone
 from tracker.text_detector_postproc import (
     Detection,
     bbox_from_mask,
@@ -134,7 +134,7 @@ def main():
                     help="Resolution root (e.g. onnx_files_1008). Reads <onnx-dir>/backbone_detector/.")
     ap.add_argument("--image", type=Path, required=True)
     ap.add_argument("--text", type=str, required=True)
-    ap.add_argument("--output-stem", type=Path, default=Path("outputs/probes/text_probe"))
+    ap.add_argument("--output-stem", type=Path, default=Path("demo_out/probes/text_probe"))
     ap.add_argument("--score-threshold", type=float, default=0.5)
     ap.add_argument("--nms-iou", type=float, default=0.1,
                     help="Mask-IoU threshold for NMS (0 to disable)")

@@ -37,10 +37,11 @@ for frame_bgr in your_camera_stream():       # HxWx3 uint8, OpenCV BGR
 The constructor does the slow stuff once (model load + MIG compile, ~5 s);
 each `infer()` is the per-frame call you put in your callback.
 
-The constructor defaults inside `SAM3Live` are conservative (`imgsz=1008`,
-`mig=False`) so the class is usable without artifacts. **For deployment
-always pass `imgsz=504` and `mig=True` as shown above**; all numbers in
-this guide assume that config.
+The constructor default is `imgsz=504` (the primary supported resolution).
+`mig=False` by default so the class is usable without MIG artifacts; for
+deployment **pass `mig=True` as shown above** to get the ~5 FPS numbers in
+this guide. 1008px is supported as an advanced option but isn't the
+recommended path — most numbers in this guide assume 504 + MIG.
 
 ---
 

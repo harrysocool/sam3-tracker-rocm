@@ -84,7 +84,7 @@ def main():
     config = Sam3VideoConfig.from_pretrained(str(args.checkpoint))
     if args.imgsz != 1008:
         # Rewrite config BEFORE from_pretrained so RoPE buffers are sized correctly.
-        # Same pattern as demo_text.py config-based init.
+        # Same pattern as tools/text_baseline.py config-based init.
         config.image_size = args.imgsz
         config.low_res_mask_size = 4 * args.imgsz // 14
     model = Sam3VideoModel.from_pretrained(
