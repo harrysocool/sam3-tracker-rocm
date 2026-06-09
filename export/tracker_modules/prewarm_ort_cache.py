@@ -19,9 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-os.environ.setdefault("HSA_OVERRIDE_GFX_VERSION", "11.5.1")
-os.environ.setdefault("MIGRAPHX_GPU_HIP_FLAGS",
-                      "-Wno-error -Wno-lifetime-safety-intra-tu-suggestions")
+from tracker.rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
 # Do NOT set MIGRAPHX_SKIP_BENCHMARKING here — kernel autotuning is critical:
 # memory_attention: 758ms without autotuning vs 53ms with autotuning (14× difference).
 # ORT sessions use their own provider options for SKIP_BENCHMARKING.

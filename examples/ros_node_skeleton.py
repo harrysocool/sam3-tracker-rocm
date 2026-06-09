@@ -57,7 +57,7 @@ import time
 from pathlib import Path
 from typing import Callable, Protocol
 
-os.environ.setdefault("HSA_OVERRIDE_GFX_VERSION", "11.5.1")
+from tracker.rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
 
 # Add project root to path so this example works when run from anywhere
 # (``python examples/ros_node_skeleton.py`` or from the project root).

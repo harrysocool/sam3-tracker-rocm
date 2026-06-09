@@ -33,7 +33,7 @@ Output goes to demo_out/text/<input-stem>_text.{jpg,mp4} unless --output is give
 """
 from __future__ import annotations
 import os
-os.environ.setdefault("HSA_OVERRIDE_GFX_VERSION", "11.5.1")
+from tracker.rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
 
 import argparse
 import sys

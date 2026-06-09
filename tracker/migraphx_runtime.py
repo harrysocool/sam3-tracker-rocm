@@ -30,7 +30,7 @@ os.environ.setdefault("MIGRAPHX_SKIP_BENCHMARKING", "1")
 # Suppress clang -Werror on lifetimebound warnings in MIGraphX JIT kernel compilation.
 # Without this flag, newer comgr/clang versions fail with:
 #   "parameter ... should be marked [[clang::lifetimebound]] [-Werror,-Wlifetime-safety-intra-tu-suggestions]"
-os.environ.setdefault("MIGRAPHX_GPU_HIP_FLAGS", "-Wno-error -Wno-lifetime-safety-intra-tu-suggestions")
+from tracker.rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
 
 
 # ---------------------------------------------------------------------------

@@ -36,6 +36,7 @@ WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
 LOCAL_HF_MODEL  = WORKSPACE_ROOT / "model" / "sam3"
 
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
+from tracker.rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
 
 
 def parse_args() -> argparse.Namespace:
