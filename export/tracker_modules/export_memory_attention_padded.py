@@ -23,7 +23,7 @@ import torch
 # Script lives at <repo>/export/tracker_modules/<this>.py — go up THREE levels.
 WORKSPACE = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(WORKSPACE))
-os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+from tracker.rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
 
 # Re-use the wrapper class from the main tracker_modules export to keep
 # the wrapper interface in one place.

@@ -31,7 +31,7 @@ import torch.nn as nn
 # Script lives at <repo>/export/detector/<this>.py — go up THREE levels.
 WORKSPACE = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(WORKSPACE))
-os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+from tracker.rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
 
 
 def parse_args():
