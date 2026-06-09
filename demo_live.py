@@ -32,7 +32,7 @@ import sys
 import time
 from pathlib import Path
 
-os.environ.setdefault("HSA_OVERRIDE_GFX_VERSION", "11.5.1")
+from tracker.rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
 
 import cv2
 import numpy as np

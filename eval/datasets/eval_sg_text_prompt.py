@@ -16,8 +16,7 @@ from pycocotools import mask as mask_utils
 
 WORKSPACE = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(WORKSPACE))
-os.environ.setdefault("HSA_OVERRIDE_GFX_VERSION", "11.5.1")
-os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+from tracker.rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
 
 import torch
 from transformers import Sam3VideoModel, AutoProcessor

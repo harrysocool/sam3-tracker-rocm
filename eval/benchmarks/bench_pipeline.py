@@ -46,7 +46,6 @@ def clear(tracker):
 
 
 def main():
-    os.environ.setdefault("HSA_OVERRIDE_GFX_VERSION", "11.5.1")
     args = parse_args()
 
     img_bgr = cv2.imread(str(args.image))

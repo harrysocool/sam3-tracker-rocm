@@ -38,6 +38,9 @@ CONTAINER_NAME="${DOCKER_CONTAINER:-sam3_clean_test}"
 IMAGE="${DOCKER_IMAGE:-ubuntu:24.04}"
 BUILD_TEXT=true
 REMOVE_AFTER=false
+ROCM_PATH="${ROCM_PATH:-}"  # auto-detected later if BUILD_TEXT=true
+PYTHONPATH="${PYTHONPATH:-}"
+_ROCM_PATH="${_ROCM_PATH:-}"  # temp var for MIG demo LD_PRELOAD setup
 LOG_DIR="${SAM3_LOG_DIR:-/tmp/sam3_docker_test_logs}"
 
 # ── Arg parsing ───────────────────────────────────────────────────────────────
@@ -101,6 +104,9 @@ echo ""
 echo "[Step 2] Preparing bootstrap script"
 
 BUILD_TEXT_FLAG=$( $BUILD_TEXT && echo "true" || echo "false" )
+# Pre-compute ROCm path in outer shell so it gets hardcoded into bootstrap
+_MXR_ROCM=$(ls -d /opt/rocm-7.2.* 2>/dev/null | sort -rV | head -1)
+_MXR_ROCM="${_MXR_ROCM:-/opt/rocm-7.2.0}"
 
 cat > /tmp/sam3_bootstrap.sh << BOOTSTRAP
 #!/bin/bash
@@ -154,6 +160,12 @@ ts "  setup.sh done (\$(elapsed))"
 source ~/miniforge3/etc/profile.d/conda.sh
 conda activate sam3-tracker
 
+# Load patched MIGraphX 2.15 ahead of conda's bundled ROCm 7.13.
+# LD_PRELOAD path hardcoded from outer shell (both dev box and container
+# use /opt/rocm-7.2.0 — setup.sh installs the patched MIGraphX there).
+export LD_PRELOAD="$_MXR_ROCM/lib/libmigraphx_c.so.3:$_MXR_ROCM/lib/migraphx/lib/libmigraphx.so.2016000.0"
+export PYTHONPATH="$_MXR_ROCM/lib:\${PYTHONPATH:-}"
+
 ts "[3/6] Build box-prompt @504"
 check "build box" python export/build.py --pipeline box --imgsz 504
 ts "  box build done (\$(elapsed))"
@@ -176,11 +188,7 @@ check "demo text PT" python tools/text_baseline.py --checkpoint model/sam3 \
     --image assets/truck.jpg --text "truck" --output /tmp/out_text_pt.jpg
 
 if [ "${BUILD_TEXT_FLAG}" = "true" ]; then
-    export HSA_OVERRIDE_GFX_VERSION=11.5.1
-    ROCM_PATH="${ROCM_PATH:-$(ls -d /opt/rocm-7.2.* 2>/dev/null | sort -rV | head -1)}"
-    ROCM_PATH="${ROCM_PATH:-/opt/rocm-7.2.0}"  # last-resort fallback
-    export PYTHONPATH="$ROCM_PATH/lib:\$PYTHONPATH"
-    check "demo text MIG" env LD_PRELOAD="$ROCM_PATH/lib/libmigraphx_c.so.3:$ROCM_PATH/lib/migraphx/lib/libmigraphx.so.2016000.0" \
+    check "demo text MIG" env LD_PRELOAD="$_MXR_ROCM/lib/libmigraphx_c.so.3:$_MXR_ROCM/lib/migraphx/lib/libmigraphx.so.2016000.0" \
         python tools/text_baseline.py --checkpoint model/sam3 \
         --onnx-dir onnx_files_504 --imgsz 504 --mig \
         --image assets/truck.jpg --text "truck" --output /tmp/out_text_mig.jpg

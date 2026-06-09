@@ -32,7 +32,7 @@ from PIL import Image
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(WORKSPACE_ROOT))
 os.environ.setdefault("MIGRAPHX_SKIP_BENCHMARKING", "1")
-os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+from tracker.rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
 
 from tracker import SAM3OnnxTracker, preprocess_image
 
