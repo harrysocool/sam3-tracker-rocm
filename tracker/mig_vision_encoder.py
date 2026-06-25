@@ -88,8 +88,12 @@ def patch_sam3_video_model_with_mig(model, mxr_backbone: MIGraphXBackbone) -> No
     `_det_track_one_frame` runs the MIGraphX backbone for the vision encoder
     and the original PyTorch detector head, tracker_neck, and tracker_model.
     """
-    pe = model.detector_model.vision_encoder.neck.position_encoding
+    orig_enc = model.detector_model.vision_encoder
+    pe = orig_enc.neck.position_encoding
     shim = MIGVisionEncoder(mxr_backbone, pe)
+    # Save original backbone/neck so NPU patch can access them even after MIG replaces vision_encoder
+    shim._orig_backbone = orig_enc.backbone
+    shim._orig_neck = orig_enc.neck
     # Move to model's device + dtype so children behave consistently
     target_dtype = next(model.detector_model.parameters()).dtype
     target_device = next(model.detector_model.parameters()).device

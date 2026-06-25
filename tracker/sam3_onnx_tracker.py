@@ -54,6 +54,7 @@ class SharedTrackerResources:
         imgsz: int = 504,
         num_maskmem: int = 7,
         backbone: str = "auto",
+        npu_dir: str | None = None,
     ):
         # Build a temporary SAM3OnnxTracker (with checkpoint=None — backbone="auto"
         # will go through MIGraphX since onnx_files_504/backbone_tracker/tuned.mxr
@@ -113,6 +114,7 @@ class SAM3OnnxTracker:
         num_maskmem:  Memory bank size (default 7).
         backbone:     "auto" (default) — use MIGraphX if cache/onnx present, else PyTorch.
                       "migraphx"       — require MIGraphX backbone (88ms at 504px).
+                      "npu"            — require NPU backbone (flexmlrt, compiled artifacts in npu_dir).
                       "pytorch"        — require PyTorch ROCm backbone (139ms at 504px).
     """
 
@@ -123,6 +125,7 @@ class SAM3OnnxTracker:
         imgsz: int = 504,
         num_maskmem: int = 7,
         backbone: str = "auto",
+        npu_dir: str | None = None,
         shared: "SharedTrackerResources | None" = None,
     ):
         # Shared-resources fast path: skip all heavy module loads, just copy
@@ -167,11 +170,26 @@ class SAM3OnnxTracker:
         _mxr_cache  = backbone_dir / "tuned.mxr"
         _mxr_onnx   = backbone_dir / "single_simplified.onnx"
         _temporal_pe = modules_dir / "temporal_pe.npy"
-        _use_mxr    = (backbone == "migraphx") or (
+        _use_npu = backbone == "npu"
+        _use_mxr = not _use_npu and ((backbone == "migraphx") or (
             backbone == "auto" and (_mxr_cache.exists() or _mxr_onnx.exists())
-        )
+        ))
 
-        if _use_mxr:
+        if _use_npu:
+            # ---- Backbone: NPU via flexmlrt (Ryzen AI SDK) ----
+            from tracker.npu_backbone import NPUBackbone
+            if npu_dir is None:
+                npu_dir = Path(__file__).resolve().parent.parent / "npu_artifacts" / f"backbone_{imgsz}"
+            if not _temporal_pe.exists():
+                raise FileNotFoundError(
+                    f"{_temporal_pe} not found. Run export/tracker_modules/export_tracker_modules.py first."
+                )
+            temporal_pe = np.load(str(_temporal_pe))
+            self._mxr_backbone  = NPUBackbone(npu_dir)
+            self.vision_encoder = None
+            self.device         = None
+
+        elif _use_mxr:
             # MIGraphX backbone path: no torch dependency whatsoever.
             # temporal_pe is loaded from a pre-saved .npy file (generated once during export).
             if not _temporal_pe.exists():
@@ -282,42 +300,24 @@ class SAM3OnnxTracker:
         self.mem_enc  = _mig_direct(
             modules_dir / "memory_encoder.onnx", "mem_enc_fp32.mxr", "memory_encoder")
 
-        # memory_attention: ORT MIGraphX EP.
-        # NOTE: direct MIGraphX Python API produces numerically wrong cond output
-        # (max_diff~6.7 vs CPU ORT reference) for this model — root cause is a
-        # MIGraphX compiler difference for this specific attention architecture.
-        # ORT MIGraphX EP gives correct results. At 1008px with backbone in GPU
-        # memory, ORT EP may fall back to CPU (silent); acceptable since this
-        # module contributes <10% of total latency. FP16 via migraphx_fp16_enable.
-        mem_attn_fixed  = modules_dir / "memory_attention_fixed_N7.onnx"
-        if mem_attn_fixed.exists():
-            ort_opts = ort.SessionOptions()
-            ort_opts.intra_op_num_threads = 1
-            # Persist ORT-compiled .mxr to disk so subsequent runs skip the 5-min recompile.
-            # First run: ~5 min compilation → cache saved. Subsequent: ~1.3s load from cache.
-            _ort_cache_dir = modules_dir / "ort_mig_cache"
-            _ort_cache_dir.mkdir(parents=True, exist_ok=True)
-            _attn_prov_cached = []
-            for (pname, popts) in _attn_prov:
-                if pname == "MIGraphXExecutionProvider":
-                    popts = dict(popts, migraphx_model_cache_dir=str(_ort_cache_dir))
-                _attn_prov_cached.append((pname, popts))
-            try:
-                self.mem_attn = ort.InferenceSession(
-                    str(mem_attn_fixed), providers=_attn_prov_cached, sess_options=ort_opts)
-                # Check which provider actually ran
-                prov = self.mem_attn.get_providers()[0]
-                fp16_on = "FP16" if _attn_prov == MIG_FP16 else ""
-                print(f"  memory_attention (ORT {prov[:3]} {fp16_on}): loaded")
-            except Exception as e:
-                self.mem_attn = ort.InferenceSession(str(mem_attn_fixed), providers=CPU)
-                print(f"  memory_attention: CPU fallback ({str(e)[:50]})")
-            self._mem_attn_slots = num_maskmem
-        else:
-            self.mem_attn = ort.InferenceSession(
-                str(modules_dir / "memory_attention.onnx"), providers=CPU)
-            self._mem_attn_slots = 0
-            print("  memory_attention: CPU (dynamic) — export fixed_N7 for MIGraphX speedup")
+        # memory_attention: ORT MIGraphX EP (17ms when available) or CPU fallback (84ms 8-thread).
+        # MIG direct API is numerically wrong for this model — ORT MIG EP gives correct results.
+        mem_attn_fixed = modules_dir / "memory_attention_fixed_N7.onnx"
+        ort_opts = ort.SessionOptions()
+        ort_opts.intra_op_num_threads = 8
+        ort_opts.inter_op_num_threads = 8
+        _ort_cache_dir = modules_dir / "ort_mig_cache"
+        _ort_cache_dir.mkdir(parents=True, exist_ok=True)
+        _attn_prov_cached = []
+        for (pname, popts) in _attn_prov:
+            if pname == "MIGraphXExecutionProvider":
+                popts = dict(popts, migraphx_model_cache_dir=str(_ort_cache_dir))
+            _attn_prov_cached.append((pname, popts))
+        onnx_file = str(mem_attn_fixed) if mem_attn_fixed.exists() else str(modules_dir / "memory_attention.onnx")
+        self.mem_attn = ort.InferenceSession(onnx_file, providers=_attn_prov_cached, sess_options=ort_opts)
+        self._mem_attn_slots = num_maskmem if mem_attn_fixed.exists() else 0
+        prov = self.mem_attn.get_providers()[0]
+        print(f"  memory_attention (ORT {prov[:3].upper()} {'FP16' if _attn_prov == MIG_FP16 else ''}): loaded")
 
         self.memory_bank = MemoryBank(temporal_pe, max_slots=num_maskmem)
         self._frame_idx  = 0
