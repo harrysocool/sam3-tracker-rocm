@@ -317,6 +317,8 @@ def main():
         try: proc.kill()
         except Exception: pass
     npu_thread.join(timeout=6)
+    # Shutdown persistent NPU server
+    if hasattr(npu_enc, "shutdown"): npu_enc.shutdown()
 
     _os._exit(0)
 

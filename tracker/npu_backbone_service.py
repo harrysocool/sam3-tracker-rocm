@@ -63,8 +63,45 @@ class NPUIRONVisionEncoder(nn.Module):
         self.omp_threads = omp_threads
         self._npu_available = Path(npu_bin).exists()
         self._current_proc = None
+        self._server_proc = None
+        self._server_env = self._make_env(omp_threads)
         self._timing: dict[str, float] = {}
-        print(f"[NPUIRONVisionEncoder] npu_bin={npu_bin} available={self._npu_available}")
+        print(f"[NPUIRONVisionEncoder] npu_bin={npu_bin} available={self._npu_available} mode=server")
+
+    def _make_env(self, omp_threads):
+        env = os.environ.copy()
+        env['HSA_OVERRIDE_GFX_VERSION'] = '11.5.1'
+        env['LD_PRELOAD'] = _LD_PRELOAD
+        env['OMP_NUM_THREADS'] = str(omp_threads)
+        env['PATH'] = '/opt/xilinx/xrt/bin:' + env.get('PATH', '')
+        env['LD_LIBRARY_PATH'] = '/opt/xilinx/xrt/lib:' + env.get('LD_LIBRARY_PATH', '')
+        return env
+
+    def _start_server(self):
+        """Launch persistent NPU server and wait for READY magic."""
+        if self._server_proc is not None:
+            try: self._server_proc.kill()
+            except Exception: pass
+        proc = subprocess.Popen(
+            [self.npu_bin],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=None, env=self._server_env,
+        )
+        self._server_proc = proc
+        raw = proc.stdout.read(4)  # wait for READY magic
+        if len(raw) < 4 or int.from_bytes(raw, 'little') != 0x0000BF16:
+            raise RuntimeError("NPU server failed to start")
+        print("[NPUIRONVisionEncoder] server ready (weights resident)")
+
+    def shutdown(self):
+        if self._server_proc is not None:
+            try:
+                self._server_proc.stdin.close()
+                self._server_proc.wait(timeout=3)
+            except Exception:
+                try: self._server_proc.kill()
+                except Exception: pass
+            self._server_proc = None
 
     def forward(self, pixel_values: torch.Tensor, **kwargs) -> Sam3VisionEncoderOutput:
         device = pixel_values.device
@@ -84,59 +121,33 @@ class NPUIRONVisionEncoder(nn.Module):
         self._timing['embed_ms'] = (time.perf_counter() - t0) * 1000
 
         if not self._npu_available:
-            # Fallback: no C++ binary, use PyTorch for ViT too
             raise RuntimeError(f"NPU binary not found: {self.npu_bin}")
 
-        # 2. Write tokens to temp file
+        # 2. Start persistent server if needed (weights load only once)
         t1 = time.perf_counter()
-        tokens_np = tokens.detach().float().cpu().numpy()  # [1, 1296, 1024]
-        tokens_flat = tokens_np.reshape(-1).astype(np.float32)  # 1296*1024
+        if self._server_proc is None or self._server_proc.poll() is not None:
+            self._start_server()
 
-        with tempfile.NamedTemporaryFile(suffix='.bin', delete=False) as f_in:
-            input_path = f_in.name
-            f_in.write(tokens_flat.tobytes())
-
-        with tempfile.NamedTemporaryFile(suffix='.bin', delete=False) as f_out:
-            output_path = f_out.name
-
-        # 3. Run C++ NPU backbone (subprocess, no CUDA conflict)
-        env = os.environ.copy()
-        env['HSA_OVERRIDE_GFX_VERSION'] = '11.5.1'
-        env['LD_PRELOAD'] = _LD_PRELOAD
-        env['OMP_NUM_THREADS'] = str(self.omp_threads)
-        # Add XRT to path
-        env['PATH'] = '/opt/xilinx/xrt/bin:' + env.get('PATH', '')
-        env['LD_LIBRARY_PATH'] = '/opt/xilinx/xrt/lib:' + env.get('LD_LIBRARY_PATH', '')
-
-        cmd = [self.npu_bin, '--input', input_path, '--output', output_path, '--runs', '1']
+        # 3. Send tokens via stdin (binary: magic + float32[S*C])
+        MAGIC = b'\x16\xbf\x00\x00'  # 0x0000BF16 little-endian
+        tokens_flat = tokens.detach().float().cpu().numpy().reshape(-1).astype(np.float32)
         try:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                    text=True, env=env)
-            self._current_proc = proc   # expose for external kill on shutdown
-            stdout, stderr = proc.communicate(timeout=60)
-            self._current_proc = None
-            if proc.returncode != 0:
-                raise RuntimeError(f"NPU binary failed: {stderr[:200]}")
-            result_ns = type('R', (), {'returncode': proc.returncode,
-                                       'stdout': stdout, 'stderr': stderr})()
-        except subprocess.TimeoutExpired:
-            proc.kill(); proc.communicate()
-            self._current_proc = None
-            raise RuntimeError("NPU binary timed out")
-        finally:
-            os.unlink(input_path)
-        result = result_ns
+            self._server_proc.stdin.write(MAGIC + tokens_flat.tobytes())
+            self._server_proc.stdin.flush()
+        except BrokenPipeError:
+            self._start_server()
+            self._server_proc.stdin.write(MAGIC + tokens_flat.tobytes())
+            self._server_proc.stdin.flush()
+
+        # 4. Read features from stdout (magic + float32[S*C])
+        n_expected = self.height * self.width * 1024
+        _ = self._server_proc.stdout.read(4)    # skip echo magic
+        raw = self._server_proc.stdout.read(n_expected * 4)
+        if len(raw) < n_expected * 4:
+            raise RuntimeError(f"NPU server short read: {len(raw)}/{n_expected*4}")
+        features_np = np.frombuffer(raw, dtype=np.float32).copy().reshape(1, self.height * self.width, 1024)
 
         self._timing['npu_ms'] = (time.perf_counter() - t1) * 1000
-        self._timing['npu_stdout'] = result.stdout.strip()
-
-        # 4. Read output features
-        t2 = time.perf_counter()
-        features_bytes = open(output_path, 'rb').read()
-        os.unlink(output_path)
-        n_expected = self.height * self.width * 1024
-        features_np = np.frombuffer(features_bytes, dtype=np.float32)[:n_expected]
-        features_np = features_np.reshape(1, self.height * self.width, 1024)
 
         # 5. Apply neck (fast PyTorch on GPU)
         # C++ binary already processed through 32 ViT blocks (pre-normed input).
@@ -149,7 +160,7 @@ class NPUIRONVisionEncoder(nn.Module):
         with torch.no_grad():
             fpn_hidden_states, fpn_position_encoding = self.neck(hidden_spatial)
 
-        self._timing['neck_ms'] = (time.perf_counter() - t2) * 1000
+        self._timing['neck_ms'] = (time.perf_counter() - t0) * 1000
         self._timing['total_ms'] = (time.perf_counter() - t0) * 1000
 
         return Sam3VisionEncoderOutput(

@@ -236,7 +236,7 @@ int main(int argc,char**argv){
   hsm_w=loadx(A+"attn_mc/sm_batch_S576"); hsm_g=loadx(A+"attn_mc/sm_batch_S1344");
   hpv_w=loadx(A+"attn_mc/pv_bmm_w"); hpv_g=loadx(A+"attn_mc/pv_bmm_g");
   hf1=loadx(A+"ffn_mc/ffn1_half"); hgelu=loadx(A+"gelu_mc"); hf2=loadx(A+"ffn_mc/ffn2");
-  printf("xclbins loaded\n");
+  fprintf(stderr,"xclbins loaded\n");
   lin=mkbo(hln,3,(size_t)Sp_ln*C*2); lout=mkbo(hln,4,(size_t)Sp_ln*C*2);
   qkv_wA=mkbo(hqkv_w,3,(size_t)2304*C*2); qkv_wC=mkbo(hqkv_w,5,(size_t)2304*3072*4);
   qkv_gA=mkbo(hqkv_g,3,(size_t)1536*C*2); qkv_gC=mkbo(hqkv_g,5,(size_t)1536*3072*4);
@@ -249,7 +249,7 @@ int main(int argc,char**argv){
   pG=mkbo(hsm_g,4,(size_t)NBG*2); pbG=mkbo(hpv_g,4,(size_t)16*1344*d*2); pcG=mkbo(hpv_g,5,(size_t)16*1344*d*4);
   f1A=mkbo(hf1,3,(size_t)MFFN*C*2); f1C=mkbo(hf1,5,(size_t)MFFN*Nhalf*4);
   gin=mkbo(hgelu,3,(size_t)MFFN*Hpad*2); gsh=mkbo(hgelu,4,(size_t)MFFN*Hpad*2); f2C=mkbo(hf2,5,(size_t)MFFN*C*4);
-  printf("bos allocated\n");
+  fprintf(stderr,"bos allocated\n");
   // load weights resident
   for(int li=0;li<32;li++){ bool glob=isglob(li); char b[64];
     auto Wq=loadf(CBB+"L"+std::to_string(li)+"_Wqkv"); WB_qkv[li]=mkbo(glob?hqkv_g:hqkv_w,4,(size_t)C*3072*2); wbf_v(WB_qkv[li],Wq);
@@ -265,24 +265,53 @@ int main(int argc,char**argv){
   }
   ropeWc=loadf(CBB+"rope_win_cos"); ropeWs=loadf(CBB+"rope_win_sin");
   ropeGc=loadf(CBB+"rope_glob_cos"); ropeGs=loadf(CBB+"rope_glob_sin");
-  printf("weights resident\n");
-  // Load input: use --input if provided, else default /tmp/cbb/block0_in
+  fprintf(stderr,"weights resident\n");
+  // ── Persistent server mode (default) ────────────────────────────────
+  // Protocol (binary, fixed sizes):
+  //   Python → stdin:  int32 magic(0xBF16), float32[S*C] tokens
+  //   C++    → stdout: int32 magic(0xBF16), float32[S*C] features
+  // Stays alive until stdin closes (Python subprocess exits).
+  // Weight loading happens once at startup → each inference ~2.3s not ~8s.
+  if(input_file.empty()){
+    const int S=S_G, N=S*C;           // 1296 * 1024
+    const int MAGIC=0x0000BF16;
+    vector<float> x(N);
+
+    // Signal ready
+    fwrite(&MAGIC, 4, 1, stdout); fflush(stdout);
+
+    while(true){
+      // Read magic + tokens from stdin
+      int magic=0;
+      if(fread(&magic,4,1,stdin)!=1) break;   // EOF → Python exited
+      if(magic!=MAGIC){ fprintf(stderr,"bad magic %x\n",magic); break; }
+      if((int)fread(x.data(),4,N,stdin)!=N) break;
+
+      // Run inference
+      T_disp=0; double t0=now();
+      for(int li=0;li<32;li++) block(x,li);
+      double wall=now()-t0;
+      fprintf(stderr,"wall=%.0fms dispatch=%.0fms\n",wall,T_disp); fflush(stderr);
+
+      // Write magic + features to stdout
+      fwrite(&MAGIC,4,1,stdout);
+      fwrite(x.data(),4,N,stdout);
+      fflush(stdout);
+    }
+    return 0;
+  }
+
+  // ── One-shot mode (--input/--output for testing) ───────────────────
   vector<float> x0;
-  if(!input_file.empty()){
+  {
     std::ifstream fin(input_file,std::ios::binary|std::ios::ate);
     size_t n=fin.tellg()/4; fin.seekg(0); x0.resize(n); fin.read((char*)x0.data(),n*4);
-  } else { x0=loadf(CBB+"block0_in"); }
-  auto ref=loadf(CBB+"final_feat");
-  // correctness
-  vector<float> x=x0;
-  for(int li=0;li<32;li++){ block(x,li);
-    auto rb=loadf(CBB+"block"+std::to_string(li)+"_out");
-    double dd=0,aa=0,bb=0; for(size_t i=0;i<x.size();i++){dd+=x[i]*rb[i];aa+=x[i]*x[i];bb+=rb[i]*rb[i];}
-    printf("  block%d cos=%.5f\n",li,dd/(std::sqrt(aa)*std::sqrt(bb)+1e-9)); fflush(stdout);
   }
+  auto ref=loadf(CBB+"final_feat");
+  vector<float> x=x0;
+  for(int li=0;li<32;li++) block(x,li);
   double dot=0,na=0,nb=0; for(size_t i=0;i<x.size();i++){ dot+=x[i]*ref[i]; na+=x[i]*x[i]; nb+=ref[i]*ref[i]; }
-  printf("FINAL cos vs PyTorch = %.5f\n", dot/(std::sqrt(na)*std::sqrt(nb)+1e-9));
-  // timing
+  printf("cos vs PyTorch = %.5f\n", dot/(std::sqrt(na)*std::sqrt(nb)+1e-9));
   for(int r=0;r<n_runs;r++){ T_disp=0; double t0=now(); x=x0; for(int li=0;li<32;li++) block(x,li); double wall=now()-t0;
     printf("run%d: wall=%.0fms (%.2f FPS)  dispatch=%.0fms\n",r,wall,1000.0/wall,T_disp);
     if(r==0&&!output_file.empty()){
