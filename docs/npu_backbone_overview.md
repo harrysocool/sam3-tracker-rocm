@@ -9,14 +9,18 @@
 ## Overview
 
 We offload the SAM3 ViT-L backbone (32 transformer blocks, 1296 tokens @ 504px) to
-the XDNA2 NPU using custom MLIR-AIE IRON kernels compiled with INT8 quantization.
-The implementation uses a GPU+NPU hybrid: INT8 matrix operations run on NPU xclbins
-while dequant, per-token quantization, RoPE, GELU, and residuals run on GPU (RDNA4)
-via HIP kernels loaded as a shared library.
+the XDNA2 NPU using custom MLIR-AIE IRON kernels in **BF16 precision**.
+The implementation uses a GPU+NPU hybrid: BF16 matrix operations (QKV, O-proj, FFN)
+run on NPU xclbins while RoPE, GELU, residuals, and window partitioning run on
+GPU/CPU. No INT8 quantization — weights and activations stay in BF16 throughout.
+
+> Note: An INT8 variant exists (`bh_npu_backbone`, cos=0.932) but is not the
+> primary pipeline. BF16 gives cos=0.989 at similar latency and is the recommended path.
 
 **Bottom line**: ~36.5 W average for the NPU backbone subprocess alone (measured standalone).
 In the full streaming demo (NPU + concurrent GPU tracking), total system power is
-39–81 W depending on prompt count, vs 91 W on MIGraphX GPU at 25× the throughput. Used as a background async re-detector in a streaming
+39–81 W depending on prompt count, vs 91 W on MIGraphX GPU.
+Accuracy: **cos = 0.989** vs PyTorch float32 (BF16, no quantization error). Used as a background async re-detector in a streaming
 pipeline where GPU tracking runs at 8–10 FPS continuously.
 
 ---
@@ -30,13 +34,13 @@ Each of the 32 ViT blocks is split as follows.
 | Operation | Precision | Notes |
 |---|---|---|
 | LayerNorm 1 & 2 | BF16 | Single xclbin kernel, 64 dispatches/frame |
-| QKV linear projection | INT8×INT8→INT32 | Quantized weights + per-token activations |
+| QKV linear projection | BF16×BF16→BF16 | Full precision, no quantization |
 | QKᵀ (attention score) | BF16 | Window: 64 heads×576 tokens; Global: 16 heads×1344 |
 | Softmax | BF16 | Separate xclbin per sequence length |
 | PV (attention weighted sum) | BF16 | Output: float32 |
-| Output projection (O-proj) | INT8×INT8→INT32 | Same pattern as QKV |
-| FFN1 (two halves in parallel) | INT8×INT8→INT32 | Split across cores for parallelism |
-| FFN2 | INT8×INT8→INT32 | — |
+| Output projection (O-proj) | BF16×BF16→BF16 | — |
+| FFN1 (two halves in parallel) | BF16×BF16→BF16 | Split across cores for parallelism |
+| FFN2 | BF16×BF16→BF16 | — |
 
 **Total NPU dispatches**: 288 per frame (9 kernels × 32 blocks).  
 NPU wall time: ~990 ms (dispatch overhead dominates — ~3.4 ms per dispatch on XRT).
@@ -45,8 +49,6 @@ NPU wall time: ~990 ms (dispatch overhead dominates — ~3.4 ms per dispatch on 
 
 | Operation | Precision | Notes |
 |---|---|---|
-| Per-token activation quantization (`k_qpertoken`) | FP32→INT8 | Custom HIP kernel with cross-warp smem reduce |
-| Dequant (INT32→FP32) | INT32→FP32 | `fmaf(v*scale, weight_scale, bias)` |
 | Head reshape (window/global) | FP32 | `win_part` / `win_unpart` |
 | RoPE (rotary position embedding) | FP32 | Applied to Q and K before NPU attention |
 | FP32→BF16 conversion | — | At NPU boundary before D2H to XRT BO |
@@ -74,8 +76,12 @@ NPU wall time: ~990 ms (dispatch overhead dominates — ~3.4 ms per dispatch on 
 ```
 npu_iron/sam3_attn/
   layernorm/S1296/final.xclbin     # LN for windowed tokens (padded to 1344)
-  i8_mc/qkv_W/final.xclbin        # QKV INT8 matmul, window heads
-  i8_mc/qkv_G/final.xclbin        # QKV INT8 matmul, global heads
+  proj_mc/qkvproj_w/final.xclbin  # QKV BF16 matmul, window heads
+  proj_mc/qkvproj_g/final.xclbin  # QKV BF16 matmul, global heads
+  proj_mc/oproj_w/final.xclbin    # O-proj BF16, window
+  proj_mc/oproj_g/final.xclbin    # O-proj BF16, global
+  ffn_mc/ffn1_half/final.xclbin  # FFN1 BF16 multi-core
+  ffn_mc/ffn2/final.xclbin       # FFN2 BF16 multi-core
   qkt_S576/final.xclbin            # QKᵀ, window (S=576 per window)
   sm_S576/final.xclbin             # Softmax, window
   qkt_S1296/final.xclbin           # QKᵀ, global (S=1296, padded to 1344)
@@ -96,11 +102,11 @@ SAM3 ViT alternates between windowed attention (blocks 0–23, window size 6 →
 FFN1 is split into two halves processed in parallel across columns, giving ~30× speedup
 over single-core. FFN2 uses 30 cores similarly.
 
-### INT8 quantization scheme
+### Weight format
 
-Weights are statically quantized offline (per-tensor scale, symmetric). Activations use
-dynamic per-token quantization (`k_qpertoken`) computed on GPU right before each NPU call.
-Dequantization uses `fmaf(int32_val * act_scale, weight_scale, bias)` to minimize rounding.
+Weights are stored as FP32 raw binary in `/tmp/cbb/` (exported by `export_weights_bf16.py`
+from the SAM3 model checkpoint) and converted to BF16 at load time via AVX-512
+`_mm512_cvtneps_pbh`. No per-tensor or per-token quantization.
 
 ---
 
@@ -155,7 +161,7 @@ The CPU vector intermediary ensures the cache is populated correctly before sync
 | Stage | Time | % |
 |---|---|---|
 | NPU dispatch (288 total) | ~990 ms | 42% |
-| GPU kernels (qpertoken, dequant, reshape) | ~300 ms | 13% |
+| GPU kernels (BF16 conv, reshape, RoPE, GELU) | ~200 ms | 9% |
 | XRT BO write + sync | ~200 ms | 8% |
 | CPU host (win_part, residuals) | ~160 ms | 7% |
 | Python subprocess overhead | ~700 ms | 30% |
@@ -169,7 +175,7 @@ current XRT — not compute throughput.
 | Implementation | Latency | Avg Power | Peak Power | Energy/frame |
 |---|---|---|---|---|
 | MIGraphX FP16 (GPU only) | 70 ms | 91 W | 118 W | 6.4 J |
-| **GPU+NPU hybrid (this work)** | **2350 ms** | **36.5 W*** | **38 W** | **86 J** |
+| **BF16 GPU+NPU (this work)** | **2290 ms** | **36.5 W*** | **38 W** | **83 J** |
 
 Power sensor: `hwmon5/power1_input` (GFX die, covers both GPU and NPU).
 
@@ -178,11 +184,14 @@ clock frequency, high power) to NPU systolic array (lower frequency, highly para
 
 ### Accuracy
 
-Cosine similarity vs PyTorch float32 reference: **cos = 0.932**
+Cosine similarity vs PyTorch float32 reference: **cos = 0.989**
 
-The gap from 1.0 is from accumulated FP32 → INT8 → FP32 quantization error across
-32 blocks. The largest single improvement came from fixing a cross-warp reduction bug
-in `k_qpertoken` (GPU per-token scale computation was only reading from 1 of 4 warps).
+BF16 accumulated rounding error across 32 blocks is small (~0.5% loss). No
+quantization artifacts. Remaining gap from 1.0 is inherent BF16 precision (7 mantissa
+bits vs 23 for float32).
+
+> INT8 variant (future improvement): cos=0.932, 2.35s — available as
+> `bh_npu_backbone` binary but not the primary pipeline.
 
 ---
 
@@ -206,7 +215,7 @@ Frame N: check result queue ──────────► reinit trackers fr
 
 **GPU tracker throughput**: 8–10 FPS (thing-class), 4–7 FPS (multi-prompt stuff-class)  
 **NPU re-detection interval**: ~3.5 s (NPU backbone + MIG DETR)  
-**NPU power during re-detection**: ~36.5 W for backbone subprocess alone;
+**NPU power during re-detection**: ~36.5 W for backbone subprocess alone (BF16);
   full system (NPU + concurrent GPU tracking) measured at 39–81 W depending on prompts
 
 ---
