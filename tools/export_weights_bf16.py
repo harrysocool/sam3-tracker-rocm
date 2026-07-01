@@ -1,6 +1,6 @@
 """Export all backbone weights + ref as raw f32 binary for the C++ host."""
 import numpy as np, os
-D="/tmp/vit_full"; OUT="/tmp/cbb"; os.makedirs(OUT,exist_ok=True)
+D="/home/amd/project/npu_iron/weights/vit_full"; OUT="/home/amd/project/npu_iron/weights/cbb"; os.makedirs(OUT,exist_ok=True)
 C=1024; Hid=4736; Hpad=5120
 def L(n): return np.load(f"{D}/{n}.npy")
 def save(name,arr): arr.astype(np.float32).tofile(f"{OUT}/{name}.bin")

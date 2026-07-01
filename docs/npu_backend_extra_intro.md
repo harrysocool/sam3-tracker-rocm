@@ -1,12 +1,4 @@
-# NPU Backbone Development Walkthrough — Agenda
-
-**Audience**: Engineers with AIE/MLIR-AIE basics and PyTorch familiarity  
-**Duration**: ~90 min  
-**Machine**: amd@10.170.19.127 (all demos run there)
-
----
-
-## Part 1 — Why This Approach (15 min)
+## Part 1 — Why This Approach
 
 ### 1.1 Problem
 - SAM3 text-prompt pipeline bottleneck: ViT-L backbone, 32 transformer blocks, 1296 tokens @ 504px (14*14 pixels/token)
@@ -37,7 +29,6 @@
 
 Key number: **288 dispatches/frame** (9 kernels × 32 blocks), ~3.4 ms XRT overhead each.
 Dispatch overhead is the bottleneck — not compute throughput.
-
 
 The 3.4 ms overhead is **pure software cost** — AIE tile reconfiguration (new DMA buffer descriptors, new kernel arguments) + completion sync signal. It is independent of how much computation the kernel does; a LayerNorm and a large matmul cost the same to dispatch.
 
@@ -82,64 +73,21 @@ Persistent server mode (process stays alive across frames): keyframe latency 8 s
 
 ---
 
-## Part 3 — Code Walkthrough (20 min)
+## Part 3 — Code Walkthrough
 
-### 3.1 Python Entry Point: `tracker/npu_backbone_service.py` [git]
-- `NPUIRONVisionEncoder.__init__`: spawns subprocess, sets env (XRT setup, LD_PRELOAD)
-- `forward()`: `embeddings` → write stdin → read stdout → `neck`
-- Persistent server logic: why keeping the process alive matters
+Three files, all committed on `feat/npu-vit-backbone-bf16`:
 
-### 3.2 C++ Binary: `eval/benchmarks/npu_iron/backbone_host_bf16_20260617.cpp` [git]
-- `loadx(dir)`: loads xclbin, registers to device, returns kernel handle
-- Main loop over 32 blocks: LN → win_part → QKV → RoPE (CPU) → QKᵀ → SM → PV → O-proj → GELU → FFN1/2 → residual
-- Two hardcoded paths in source: `CBB="/tmp/cbb/"` and `A="/home/amd/project/npu_iron/sam3_attn/"`
-
-### 3.3 Demo Entry Point: `demo_npu_parallel.py` [git]
-- GPU thread: MIG backbone + ORT tracker, continuous propagate at 8–10 FPS
-- NPU thread: `NPUIRONVisionEncoder.forward()` background re-detection every ~3.5 s
-- Result queue: when NPU detects new boxes, tracker is reinitialized without interrupting the GPU thread
+| File | Role |
+|---|---|
+| `tracker/npu_backbone_service.py` | Python shim — spawns the C++ server, sends tokens via stdin, reads features from stdout, plugs into `Sam3VideoModel` as a drop-in vision encoder |
+| `eval/benchmarks/npu_iron/backbone_host_bf16_20260617.cpp` | C++ server — loads xclbins once, runs the 32-block ViT loop, persistent stdin/stdout binary protocol |
+| `demo_npu_parallel.py` | Demo — GPU tracker runs continuously; NPU re-detection runs in background thread every ~3.5 s |
 
 ---
 
-## Part 4 — Reproduce (20 min, live if possible)
+## Part 4 — Reproduce
 
-Full steps are in overview doc Section 8. Summary:
-
-**Step 0** — Verify `/tmp/vit_full/*.npy` exists (per-layer weight numpy dumps).  
-No committed script for this step; files already present on the dev machine.
-For a new machine: write a script to dump `model.vision_encoder.layers[i]` weights as `.npy`.
-
-**Step 1** — Pack weights:
-```bash
-python eval/benchmarks/npu_iron/export_weights_bf16.py
-# → /tmp/cbb/ (~200 .bin files)
-```
-
-**Step 2** — Compile:
-```bash
-source /opt/xilinx/xrt/setup.sh
-g++ -O3 -march=native -mavx512f -mavx512bf16 -ffast-math -funroll-loops \
-    -fopenmp -std=c++17 \
-    eval/benchmarks/npu_iron/backbone_host_bf16_20260617.cpp \
-    -o /tmp/bh_npu_backbone_bf16 \
-    -I/opt/xilinx/xrt/include -L/opt/xilinx/xrt/lib -lxrt_coreutil
-OMP_NUM_THREADS=16 /tmp/bh_npu_backbone_bf16   # smoke test: expect cos ~0.989
-```
-
-**Step 3** — Run demo:
-```bash
-python demo_npu_parallel.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
-    --video assets/blackswan.mp4 --text swan \
-    --output results/demo_npu_$(date +%Y%m%d_%H%M%S).mp4
-```
-
-### Known gaps (be upfront)
-- Weight dump script (checkpoint → `/tmp/vit_full/`) not committed — files already present
-  on this machine; for a new machine, manually dump `model.vision_encoder.layers[i]` weights
-- `demo_npu_parallel_bf16.py` and `tracker/npu_backbone.py` not committed — get from Harry
-- xclbins live outside the repo at `/home/amd/project/npu_iron/sam3_attn/` — must be
-  copied manually to any new machine (pre-built only; rebuilding requires the mlir-aie
-  toolchain and takes hours)
+See `docs/npu_backbone_overview.md` Section 8 for full steps.
 
 ---
 

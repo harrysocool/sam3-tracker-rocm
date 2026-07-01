@@ -22,7 +22,7 @@ static void f2b_bulk(bf16* d,const float* s,size_t n){ size_t i=0; for(;i+16<=n;
 
 static const int C=1024,d=64,nH=16,Hid=4736,Hpad=5120,Nhalf=2560,MFFN=1536,GRID=36,S_G=1296,Sp_ln=1344;
 static xrt::device DEV;
-const string CBB="/tmp/cbb/";
+const string CBB="/home/amd/project/npu_iron/weights/cbb/";
 
 vector<float> loadf(const string&p){ std::ifstream f(p+".bin",std::ios::binary|std::ios::ate); size_t n=f.tellg()/4; f.seekg(0); vector<float> v(n); f.read((char*)v.data(),n*4); return v; }
 
