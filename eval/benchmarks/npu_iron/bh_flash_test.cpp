@@ -217,14 +217,14 @@ void block(vector<float>&x,int li){
   vector<float> xn2; npu_ln(x,ln2w[li],ln2b[li],xn2);
   static vector<float> ffa; ffa.assign(MFFN*C,0.f); std::memcpy(ffa.data(),xn2.data(),1296*C*4);
   wbf_v(f1A,ffa);
-  RZv(hid,MFFN*Hpad);
   wbf_v(f1Av2,ffa);
   DISP(hf1v2.k(3,hf1v2.bi,hf1v2.nw,f1Av2,WB_w1full[li],f1Cfull));
-  f1Cfull.sync(XCL_BO_SYNC_BO_FROM_DEVICE); f1Cfull.read(hid.data());
+  f1Cfull.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+  const float*hid_=f1Cfull.map<float*>(); // zero-copy: direct BO pointer
   // +b1 + gelu -> gin bf16
   { // Tier3: bias+gelu+f2b fused on CPU — skips NPU gelu dispatch (~85ms → ~19ms)
     static vector<bf16> gb; if(gb.size()<(size_t)MFFN*Hpad)gb.resize((size_t)MFFN*Hpad); const float*br=b1[li].data();
-    _Pragma("omp parallel for schedule(static)") for(int r=0;r<MFFN;r++){ const float*hr=&hid[r*Hpad]; bf16*ob=&gb[r*Hpad];
+    _Pragma("omp parallel for schedule(static)") for(int r=0;r<MFFN;r++){ const float*hr=hid_+r*Hpad; bf16*ob=&gb[r*Hpad];
       for(int cc=0;cc<Hpad;cc++) ob[cc]=f2b(gelu1(hr[cc]+br[cc])); }
     gsh.write(gb.data(),(size_t)MFFN*Hpad*2,0); gsh.sync(XCL_BO_SYNC_BO_TO_DEVICE); }
   // hgelu dispatch skipped (CPU gelu faster)
