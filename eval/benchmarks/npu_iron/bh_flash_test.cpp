@@ -57,7 +57,7 @@ int GLOBAL[4]={7,15,23,31};
 bool isglob(int li){ for(int g:GLOBAL) if(li==g) return true; return false; }
 
 // global handles
-H hln,hqkv_w,hqkv_g,ho_w,ho_g,hqt_w,hqt_g,hsm_w,hsm_g,hpv_w,hpv_g,hf1,hgelu,hf2,hf1v2,hflashw;
+H hln,hqkv_w,hqkv_g,ho_w,ho_g,hqt_w,hsm_w,hpv_w,hgelu,hf2,hf1v2,hflashw,hflashg;
 // LN bos
 xrt::bo lin,lout;
 // proj scratch
@@ -65,7 +65,7 @@ xrt::bo qkv_wA,qkv_wC,qkv_gA,qkv_gC,o_wA,o_wC,o_gA,o_gC;
 // attn bos (win/glob): qA,qB,SC(shared sm-in),P(shared pv-in),pB,pC
 xrt::bo qaW,qbW,scW,pW,pbW,pcW; long NBW;
 xrt::bo qaF,qbF,pbF,OF;
-xrt::bo qaG,qbG,scG,pG,pbG,pcG; long NBG;
+xrt::bo qaG,qbG,scG,pG,pbG,pcG,OFg; long NBG;
 // ffn
 xrt::bo f1A,f1C,gin,gsh,f2C,f1Av2,f1Cfull;
 // resident weights per layer
@@ -116,34 +116,22 @@ void attn(vector<float>&q,vector<float>&k,vector<float>&v,bool glob,vector<float
     for(size_t i=0;i<(size_t)G*S*d;i++) O[i]=b2f(Ob_[i]);
     return;
   }
-  H&hqt=glob?hqt_g:hqt_w; H&hsm=glob?hsm_g:hsm_w; H&hpv=glob?hpv_g:hpv_w;
-  xrt::bo&qa=glob?qaG:qaW,&qb=glob?qbG:qbW,&sc=glob?scG:scW,&P=glob?pG:pW,&pb=glob?pbG:pbW,&pc=glob?pcG:pcW;
-  float scale=1.f/std::sqrt((float)d);
-  // pack q*scale,k,v into [G,Sp,d] bf16 (pad rows for glob)
+  // Global: flash_g (1 dispatch). Q unscaled; flash_g applies 1/sqrt(d) internally.
+  // Zero-padded rows/cols (s>=S_real) handle masking automatically (zero K/V → zero contribution).
   static vector<bf16> Q,K,V; Q.assign(G*Sp*d,0);K.assign(G*Sp*d,0);V.assign(G*Sp*d,0);
   #pragma omp parallel for collapse(2) schedule(static)
   for(int g=0;g<G;g++)for(int s=0;s<S;s++)for(int c=0;c<d;c++){
-    Q[(g*Sp+s)*d+c]=f2b(q[(g*S+s)*d+c]*scale);
+    Q[(g*Sp+s)*d+c]=f2b(q[(g*S+s)*d+c]);   // no scale — flash_g folds 1/sqrt(d)
     K[(g*Sp+s)*d+c]=f2b(k[(g*S+s)*d+c]);
     V[(g*Sp+s)*d+c]=f2b(v[(g*S+s)*d+c]); }
-  qa.write(Q.data()); qa.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-  qb.write(K.data()); qb.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-  pb.write(V.data()); pb.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-  DISP(hqt.k(3,hqt.bi,hqt.nw,qa,qb,sc));  // qkt -> sc (bf16)
-  if(glob){ // mask cols>=S to -1e4
-    vector<bf16> s(NB); sc.sync(XCL_BO_SYNC_BO_FROM_DEVICE); sc.read(s.data());
-    for(long g=0;g<G;g++)for(int r=0;r<Sp;r++)for(int cc=S;cc<Sp;cc++) s[(g*Sp+r)*Sp+cc]=f2b(-1e4f);
-    sc.write(s.data()); sc.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-  }
-  DISP(hsm.k(3,hsm.bi,hsm.nw,sc,P));  // softmax sc->P
-  if(glob){ vector<bf16> p(NB); P.sync(XCL_BO_SYNC_BO_FROM_DEVICE); P.read(p.data());
-    for(long g=0;g<G;g++){ for(int r=0;r<Sp;r++)for(int cc=S;cc<Sp;cc++) p[(g*Sp+r)*Sp+cc]=0; for(int r=S;r<Sp;r++)for(int cc=0;cc<Sp;cc++) p[(g*Sp+r)*Sp+cc]=0; }
-    P.write(p.data()); P.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-  }
-  DISP(hpv.k(3,hpv.bi,hpv.nw,P,pb,pc));  // pv -> pc (f32 [G,Sp,d])
-  RZv(Of,G*Sp*d); pc.sync(XCL_BO_SYNC_BO_FROM_DEVICE); pc.read(Of.data());
+  qaG.write(Q.data()); qaG.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+  qbG.write(K.data()); qbG.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+  pbG.write(V.data()); pbG.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+  DISP(hflashg.k(3,hflashg.bi,hflashg.nw,qaG,qbG,pbG,OFg));  // flash global → bf16
+  static vector<bf16> Ob_g; Ob_g.resize(G*Sp*d);
+  OFg.sync(XCL_BO_SYNC_BO_FROM_DEVICE); OFg.read(Ob_g.data());
   O.resize(G*S*d);
-  for(int g=0;g<G;g++)for(int s=0;s<S;s++)for(int c=0;c<d;c++) O[(g*S+s)*d+c]=Of[(g*Sp+s)*d+c];
+  for(int g=0;g<G;g++)for(int s=0;s<S;s++)for(int c=0;c<d;c++) O[(g*S+s)*d+c]=b2f(Ob_g[(g*Sp+s)*d+c]);
 }
 
 // one block: x [1296,C] -> [1296,C]
@@ -216,7 +204,6 @@ void block(vector<float>&x,int li){
   static vector<float> res2; res2=x;
   vector<float> xn2; npu_ln(x,ln2w[li],ln2b[li],xn2);
   static vector<float> ffa; ffa.assign(MFFN*C,0.f); std::memcpy(ffa.data(),xn2.data(),1296*C*4);
-  wbf_v(f1A,ffa);
   wbf_v(f1Av2,ffa);
   DISP(hf1v2.k(3,hf1v2.bi,hf1v2.nw,f1Av2,WB_w1full[li],f1Cfull));
   f1Cfull.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
@@ -253,10 +240,10 @@ int main(int argc,char**argv){
   hln=loadx(A+"layernorm/S1296");
   hqkv_w=loadx(A+"proj_mc_v2/qkvproj_w"); hqkv_g=loadx(A+"proj_mc_v2/qkvproj_g");
   ho_w=loadx(A+"proj_mc_v2/oproj_w"); ho_g=loadx(A+"proj_mc_v2/oproj_g");
-  hqt_w=loadx(A+"attn_mc/qkt_bmm_w_bf16"); hqt_g=loadx(A+"attn_mc/qkt_bmm_g_bf16"); hflashw=loadx(A+"attn_v2/flash_w");
-  hsm_w=loadx(A+"attn_mc/sm_batch_S576"); hsm_g=loadx(A+"attn_mc/sm_batch_S1344");
-  hpv_w=loadx(A+"attn_mc/pv_bmm_w"); hpv_g=loadx(A+"attn_mc/pv_bmm_g");
-  hf1=loadx(A+"ffn_mc/ffn1_half"); hgelu=loadx(A+"gelu_mc"); hf2=loadx(A+"ffn_mc_v2/ffn2"); hf1v2=loadx(A+"ffn_mc_v2/ffn1");
+  hqt_w=loadx(A+"attn_mc/qkt_bmm_w_bf16"); hflashw=loadx(A+"attn_v2/flash_w"); hflashg=loadx(A+"attn_v2/flash_g");
+  hsm_w=loadx(A+"attn_mc/sm_batch_S576");
+  hpv_w=loadx(A+"attn_mc/pv_bmm_w");
+  hgelu=loadx(A+"gelu_mc"); hf2=loadx(A+"ffn_mc_v2/ffn2"); hf1v2=loadx(A+"ffn_mc_v2/ffn1");
   fprintf(stderr,"xclbins loaded\n");
   lin=mkbo(hln,3,(size_t)Sp_ln*C*2); lout=mkbo(hln,4,(size_t)Sp_ln*C*2);
   qkv_wA=mkbo(hqkv_w,3,(size_t)2304*C*2); qkv_wC=mkbo(hqkv_w,5,(size_t)2304*3072*4);
@@ -267,9 +254,9 @@ int main(int argc,char**argv){
   qaW=mkbo(hqt_w,3,(size_t)64*576*d*2); qbW=mkbo(hqt_w,4,(size_t)64*576*d*2); scW=mkbo(hqt_w,5,(size_t)NBW*2);
   qaF=mkbo(hflashw,3,(size_t)64*576*d*2); qbF=mkbo(hflashw,4,(size_t)64*576*d*2); pbF=mkbo(hflashw,5,(size_t)64*576*d*2); OF=mkbo(hflashw,6,(size_t)64*576*d*2);
   pW=mkbo(hsm_w,4,(size_t)NBW*2); pbW=mkbo(hpv_w,4,(size_t)64*576*d*2); pcW=mkbo(hpv_w,5,(size_t)64*576*d*4);
-  qaG=mkbo(hqt_g,3,(size_t)16*1344*d*2); qbG=mkbo(hqt_g,4,(size_t)16*1344*d*2); scG=mkbo(hqt_g,5,(size_t)NBG*2);
-  pG=mkbo(hsm_g,4,(size_t)NBG*2); pbG=mkbo(hpv_g,4,(size_t)16*1344*d*2); pcG=mkbo(hpv_g,5,(size_t)16*1344*d*4);
-  f1A=mkbo(hf1,3,(size_t)MFFN*C*2); f1C=mkbo(hf1,5,(size_t)MFFN*Nhalf*4); f1Av2=mkbo(hf1v2,3,(size_t)MFFN*C*2); f1Cfull=mkbo(hf1v2,5,(size_t)MFFN*Hpad*4);
+  qaG=mkbo(hflashg,3,(size_t)16*1344*d*2); qbG=mkbo(hflashg,4,(size_t)16*1344*d*2);
+  pbG=mkbo(hflashg,5,(size_t)16*1344*d*2); OFg=mkbo(hflashg,6,(size_t)16*1344*d*2);
+  f1Av2=mkbo(hf1v2,3,(size_t)MFFN*C*2); f1Cfull=mkbo(hf1v2,5,(size_t)MFFN*Hpad*4);
   gin=mkbo(hgelu,3,(size_t)MFFN*Hpad*2); gsh=mkbo(hgelu,4,(size_t)MFFN*Hpad*2); f2C=mkbo(hf2,5,(size_t)MFFN*C*4);
   fprintf(stderr,"bos allocated\n");
   // load weights resident
@@ -277,8 +264,7 @@ int main(int argc,char**argv){
     auto Wq=loadf(CBB+"L"+std::to_string(li)+"_Wqkv"); WB_qkv[li]=mkbo(glob?hqkv_g:hqkv_w,4,(size_t)C*3072*2); wbf_v(WB_qkv[li],Wq);
     auto Wo=loadf(CBB+"L"+std::to_string(li)+"_Ow"); WB_o[li]=mkbo(glob?ho_g:ho_w,4,(size_t)C*C*2); wbf_v(WB_o[li],Wo);
     auto W1=loadf(CBB+"L"+std::to_string(li)+"_W1"); // [C,Hpad]
-    WB_w1a[li]=mkbo(hf1,4,(size_t)C*Nhalf*2); WB_w1b[li]=mkbo(hf1,4,(size_t)C*Nhalf*2); WB_w1full[li]=mkbo(hf1v2,4,(size_t)C*Hpad*2); wbf_v(WB_w1full[li],W1);
-    { vector<float> h0(C*Nhalf),h1(C*Nhalf); for(int r=0;r<C;r++){ std::memcpy(&h0[r*Nhalf],&W1[r*Hpad],Nhalf*4); std::memcpy(&h1[r*Nhalf],&W1[r*Hpad+Nhalf],Nhalf*4);} wbf_v(WB_w1a[li],h0); wbf_v(WB_w1b[li],h1); }
+    WB_w1full[li]=mkbo(hf1v2,4,(size_t)C*Hpad*2); wbf_v(WB_w1full[li],W1);
     auto W2=loadf(CBB+"L"+std::to_string(li)+"_W2"); WB_w2[li]=mkbo(hf2,4,(size_t)Hpad*C*2); wbf_v(WB_w2[li],W2);
     bqkv[li]=loadf(CBB+"L"+std::to_string(li)+"_bqkv"); Ob[li]=loadf(CBB+"L"+std::to_string(li)+"_Ob");
     ln1w[li]=loadf(CBB+"L"+std::to_string(li)+"_ln1w"); ln1b[li]=loadf(CBB+"L"+std::to_string(li)+"_ln1b");
