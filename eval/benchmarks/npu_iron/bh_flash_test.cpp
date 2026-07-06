@@ -95,18 +95,23 @@ static inline float gelu1(float x){ float a=x*0.7071067811865476f; float t=1.f/(
   float p=t*(0.254829592f+t*(-0.284496736f+t*(1.421413741f+t*(-1.453152027f+t*1.061405429f))));
   float e=(1.f-p*std::exp(-a*a))*(a<0?-1.f:1.f); return 0.5f*x*(1.f+e); }
 
-// attention: q,k,v [G,S,64] (q,k post-rope). win: Sp=S=576 nomask. glob: Sp=1344 S=1296 mask.
+// attention: q,k,v [G,S,64] (q,k pre-rope, rotation applied internally during BF16 packing).
 void attn(vector<float>&q,vector<float>&k,vector<float>&v,bool glob,vector<float>&O){
   int G=glob?16:64, S=glob?1296:576, Sp=glob?1344:576; long NB=glob?NBG:NBW;
   if(!glob){ // window flash attention: fused qkt+softmax+pv, 1 dispatch, Q unscaled (flash folds 1/sqrt(d))
     static vector<bf16> Qf,Kf,Vf,Ob_; Qf.assign(G*S*d,0);Kf.assign(G*S*d,0);Vf.assign(G*S*d,0);
-    { int total=G*S*d;
-      _Pragma("omp parallel for schedule(static)") for(int i=0;i<total;i+=16){
-        int n=std::min(16,total-i);
-        __m512 vq=_mm512_loadu_ps(q.data()+i),vk=_mm512_loadu_ps(k.data()+i),vv=_mm512_loadu_ps(v.data()+i);
-        _mm256_storeu_si256((__m256i*)(Qf.data()+i),(__m256i)_mm512_cvtneps_pbh(vq));
-        _mm256_storeu_si256((__m256i*)(Kf.data()+i),(__m256i)_mm512_cvtneps_pbh(vk));
-        _mm256_storeu_si256((__m256i*)(Vf.data()+i),(__m256i)_mm512_cvtneps_pbh(vv)); (void)n; } }
+    { // Pack Q/K/V as BF16, applying RoPE to Q and K inline (single pass over data)
+      const float*co=ropeWc.data(), *si=ropeWs.data();
+      _Pragma("omp parallel for collapse(2) schedule(static)") for(int g=0;g<G;g++) for(int s=0;s<S;s++){
+        const float*cos_s=co+s*d, *sin_s=si+s*d;
+        for(int i=0;i<d;i+=2){
+          float qi=q[(g*S+s)*d+i], qi1=q[(g*S+s)*d+i+1];
+          float ki=k[(g*S+s)*d+i], ki1=k[(g*S+s)*d+i+1];
+          Qf[(g*S+s)*d+i]  =f2b(qi*cos_s[i]  -qi1*sin_s[i]);
+          Qf[(g*S+s)*d+i+1]=f2b(qi1*cos_s[i+1]+qi*sin_s[i+1]);
+          Kf[(g*S+s)*d+i]  =f2b(ki*cos_s[i]  -ki1*sin_s[i]);
+          Kf[(g*S+s)*d+i+1]=f2b(ki1*cos_s[i+1]+ki*sin_s[i+1]); }
+        for(int c=0;c<d;c++) Vf[(g*S+s)*d+c]=f2b(v[(g*S+s)*d+c]); } }
     qaF.write(Qf.data()); qaF.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     qbF.write(Kf.data()); qbF.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     pbF.write(Vf.data()); pbF.sync(XCL_BO_SYNC_BO_TO_DEVICE);
@@ -116,14 +121,21 @@ void attn(vector<float>&q,vector<float>&k,vector<float>&v,bool glob,vector<float
     for(size_t i=0;i<(size_t)G*S*d;i++) O[i]=b2f(Ob_[i]);
     return;
   }
-  // Global: flash_g (1 dispatch). Q unscaled; flash_g applies 1/sqrt(d) internally.
-  // Zero-padded rows/cols (s>=S_real) handle masking automatically (zero K/V → zero contribution).
+  // Global: flash_g (1 dispatch). RoPE applied inline during BF16 packing.
+  // flash_g applies 1/sqrt(d) internally. Zero-padded rows handle masking.
   static vector<bf16> Q,K,V; Q.assign(G*Sp*d,0);K.assign(G*Sp*d,0);V.assign(G*Sp*d,0);
-  #pragma omp parallel for collapse(2) schedule(static)
-  for(int g=0;g<G;g++)for(int s=0;s<S;s++)for(int c=0;c<d;c++){
-    Q[(g*Sp+s)*d+c]=f2b(q[(g*S+s)*d+c]);   // no scale — flash_g folds 1/sqrt(d)
-    K[(g*Sp+s)*d+c]=f2b(k[(g*S+s)*d+c]);
-    V[(g*Sp+s)*d+c]=f2b(v[(g*S+s)*d+c]); }
+  { const float*co=ropeGc.data(), *si=ropeGs.data();
+    #pragma omp parallel for collapse(2) schedule(static)
+    for(int g=0;g<G;g++)for(int s=0;s<S;s++){
+      const float*cos_s=co+s*d, *sin_s=si+s*d;
+      for(int i=0;i<d;i+=2){
+        float qi=q[(g*S+s)*d+i], qi1=q[(g*S+s)*d+i+1];
+        float ki=k[(g*S+s)*d+i], ki1=k[(g*S+s)*d+i+1];
+        Q[(g*Sp+s)*d+i]  =f2b(qi*cos_s[i]  -qi1*sin_s[i]);
+        Q[(g*Sp+s)*d+i+1]=f2b(qi1*cos_s[i+1]+qi*sin_s[i+1]);
+        K[(g*Sp+s)*d+i]  =f2b(ki*cos_s[i]  -ki1*sin_s[i]);
+        K[(g*Sp+s)*d+i+1]=f2b(ki1*cos_s[i+1]+ki*sin_s[i+1]); }
+      for(int c=0;c<d;c++) V[(g*Sp+s)*d+c]=f2b(v[(g*S+s)*d+c]); } }
   qaG.write(Q.data()); qaG.sync(XCL_BO_SYNC_BO_TO_DEVICE);
   qbG.write(K.data()); qbG.sync(XCL_BO_SYNC_BO_TO_DEVICE);
   pbG.write(V.data()); pbG.sync(XCL_BO_SYNC_BO_TO_DEVICE);
@@ -175,8 +187,7 @@ void block(vector<float>&x,int li){
         int g=h; float qq=qrow[h*d+c]+bq[h*d+c]; float kk=qrow[C+h*d+c]+bq[C+h*d+c]; float vv=qrow[2*C+h*d+c]+bq[2*C+h*d+c];
         q[(g*1296+t)*d+c]=qq; k[(g*1296+t)*d+c]=kk; v[(g*1296+t)*d+c]=vv; } }
   }
-  rope(q,G,S,glob?ropeGc:ropeWc,glob?ropeGs:ropeWs);
-  rope(k,G,S,glob?ropeGc:ropeWc,glob?ropeGs:ropeWs);
+  // RoPE applied inside attn() during BF16 packing
   vector<float> O; attn(q,k,v,glob,O);  // [G,S,d]
   // O -> standard [Mp,C]
   RZv(Ostd,Mp*C);
