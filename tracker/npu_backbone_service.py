@@ -26,8 +26,9 @@ import torch.nn as nn
 
 from transformers.models.sam3.modeling_sam3 import Sam3VisionEncoderOutput
 
-_BIN_INT8    = "/home/amd/project/npu_iron/bh_npu_backbone"      # INT8 MLIR-AIE, cos=0.932, 2.35s  (future improvement)
-_BIN = _BIN_BF16 = "/home/amd/project/npu_iron/bh_npu_backbone_bf16"  # BF16 MLIR-AIE, cos=0.989, 2.29s (default)
+_BIN_INT8    = "/home/amd/project/npu_iron/bh_npu_backbone"           # INT8 MLIR-AIE, cos=0.932, 2.35s
+_BIN_BF16_V1 = "/home/amd/project/npu_iron/bh_npu_backbone_bf16"      # BF16 old,  cos=0.989, 2.29s
+_BIN = _BIN_BF16 = "/home/amd/project/npu_iron/bh_npu_backbone_flash" # BF16 flash_g, cos=0.993, 1.33s (current default)
 _XRT_SETUP = "source /opt/xilinx/xrt/setup.sh 2>/dev/null"
 _LD_PRELOAD = (
     "/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:"
