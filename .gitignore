@@ -34,6 +34,13 @@ results/**
 !results/archive/*.mp4
 !results/archive/*.json
 
+# analysis/ — working research notes; ignore new files, keep the 4 historically tracked docs
+analysis/**
+!analysis/backbone_optimization.md
+!analysis/backbone_optimization_research.md
+!analysis/migraphx_backbone_investigation.md
+!analysis/module_optimization.md
+
 # demo_out/ — ignore contents but keep subdir scaffolding for demo defaults
 demo_out/**
 !demo_out/.gitkeep
@@ -83,3 +90,4 @@ assets/two_person_dog_lawn.mp4
 
 # Steve customer rosbag (large, customer-supplied)
 data/
+npu_artifacts/
