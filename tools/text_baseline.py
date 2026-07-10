@@ -33,7 +33,6 @@ Output goes to demo_out/text/<input-stem>_text.{jpg,mp4} unless --output is give
 """
 from __future__ import annotations
 import os
-from tracker.rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
 
 import argparse
 import sys
@@ -48,6 +47,8 @@ from PIL import Image
 # This script lives under tools/; add the repo root to sys.path so the
 # top-level `tracker` package resolves regardless of the invocation cwd.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from tracker.rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
 
 from transformers import Sam3VideoModel, AutoProcessor
 import tracker  # noqa: F401,E402  -- applies ROCm patches (scipy fill_holes + PyTorch NMS)

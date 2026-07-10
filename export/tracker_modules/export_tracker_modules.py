@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import argparse
 import sys
-import os
 from pathlib import Path
+WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(WORKSPACE_ROOT))
+import os
 
 import numpy as np
 import torch
