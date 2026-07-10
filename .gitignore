@@ -91,3 +91,4 @@ assets/two_person_dog_lawn.mp4
 # Steve customer rosbag (large, customer-supplied)
 data/
 npu_artifacts/
+xrt.ini
