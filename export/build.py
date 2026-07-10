@@ -30,15 +30,17 @@ Each step skips if its output already exists. Safe to re-run after interruption.
 """
 from __future__ import annotations
 
+
 import argparse
 import os
-from tracker.rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
 import subprocess
 import sys
 import time
 from pathlib import Path
-
 WORKSPACE = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(WORKSPACE))
+from tracker.rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
+
 
 G  = "\033[32m"
 B  = "\033[1m"

@@ -19,11 +19,15 @@ binding loads. The wrapping setup.sh sets this; if running standalone:
 from __future__ import annotations
 import argparse
 import os
-from tracker.rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
+
 import sys
-import time
 from pathlib import Path
 
+WORKSPACE = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(WORKSPACE))
+
+from tracker.rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
+import time
 import numpy as np
 
 
