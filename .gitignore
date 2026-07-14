@@ -4,9 +4,7 @@ __pycache__/
 .eggs/
 
 # Model weights and ONNX artefacts (downloaded / generated separately)
-model/**/*.safetensors
-model/**/*.pt
-model/**/*.bin
+model/
 onnx_files_504/
 onnx_files_1008/
 

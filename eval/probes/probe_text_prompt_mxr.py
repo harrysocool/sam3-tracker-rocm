@@ -14,7 +14,6 @@ Outputs:
   - Per-detection IoU between the two paths (numerical equivalence check)
 
 Requires:
-    PYTHONPATH=/home/amd/project/sam3/repo/DART/.local_deps:<sam3-tracker-rocm>
     HSA_OVERRIDE_GFX_VERSION=11.5.1
 """
 from __future__ import annotations

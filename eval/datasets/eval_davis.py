@@ -8,7 +8,7 @@ For each val sequence:
 Reports: per-sequence J, overall J mean, FPS
 
 Usage:
-    PYTHONPATH=repo/DART/.local_deps MIGRAPHX_SKIP_BENCHMARKING=1 \\
+    MIGRAPHX_SKIP_BENCHMARKING=1 \\
         python scripts/onnx/analysis/eval_davis.py \\
         [--imgsz 1008] [--davis dataset/DAVIS]
 """

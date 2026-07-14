@@ -12,7 +12,6 @@ Verifies:
 3. Per-stage timing for an init frame
 
 Requires:
-    PYTHONPATH=/home/amd/project/sam3/repo/DART/.local_deps  (for Sam3VideoModel)
     HSA_OVERRIDE_GFX_VERSION=11.5.1
 """
 from __future__ import annotations

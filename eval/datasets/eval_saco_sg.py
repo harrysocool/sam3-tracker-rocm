@@ -2,7 +2,7 @@
 """SAM3 Tracker baseline eval on SG val subset (50 seqs, seed=42).
 
 Usage:
-    PYTHONPATH=repo/DART/.local_deps MIGRAPHX_SKIP_BENCHMARKING=1 \\
+    MIGRAPHX_SKIP_BENCHMARKING=1 \\
         python scripts/onnx/analysis/eval_tracker_baseline.py \\
         [--imgsz 504] [--n-seqs 50] [--seed 42]
         # onnx-dir and out auto-selected from imgsz

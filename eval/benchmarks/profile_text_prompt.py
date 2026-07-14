@@ -8,7 +8,6 @@ Hooks each top-level submodule of detector_model + tracker_model, runs
 N warmup + N timed iterations on a single image, and prints a breakdown.
 
 Requires:
-    PYTHONPATH=/home/amd/project/sam3/repo/DART/.local_deps:<sam3-tracker-rocm>
     HSA_OVERRIDE_GFX_VERSION=11.5.1
 """
 from __future__ import annotations
