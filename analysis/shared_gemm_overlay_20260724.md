@@ -179,3 +179,58 @@ After a controlled on-site power-cycle:
 6. compare cosine and per-stage times;
 7. only then run 5 frames; defer 30 frames until device health is reconfirmed;
 8. never run the previous tight five-design cycle on XRT 2.21.75.
+
+## Hardware validation results
+
+### Dynamic-K RTP synchronization
+
+The first RTP design loaded the parameter in the core entry block. It produced
+all-zero output because cores read the initial value before the runtime sequence
+wrote the RTP.
+
+Moving the load after the existing output-buffer acquire fixed a dedicated
+single-shape run: all 1,572,864 `o_g` outputs were exactly 1024. A `qkv_w`
+xclbin executing the `o_g` instruction stream also passed, proving cross-shape
+xclbin/insts interchange.
+
+However, when five K=1024 calls were followed by FFN2 K=5120 in the same
+context, one 64-row portion retained the previous K=4 value: those outputs were
+1024 instead of 5120. Adding a binary lock and explicitly rearming it did not
+remove this final race. The core iterates multiple launch tiles inside one host
+dispatch, while the host writes RTP once per dispatch; a correct full dynamic
+design needs a dispatch-boundary/launch-count barrier, not a barrier on every
+core tile iteration.
+
+The full dynamic-K backbone is therefore still WIP. Its binary was moved to the
+quarantine directory and its build script now requires an explicit
+`ALLOW_DYNAMIC_K_WIP=1` opt-in.
+
+### Validated K=1024 shared backbone
+
+The safer design shares QKV/O/FFN1 and keeps FFN2 on its existing xclbin. It
+passed accuracy and a 30-frame run without driver D-state.
+
+| Metric | Existing baseline | K=1024 shared | Change |
+|---|---:|---:|---:|
+| wall p50 | 1182.0 ms | 1127.5 ms | -54.5 ms |
+| wall p95 | 1422.2 ms | 1368.6 ms | -53.6 ms |
+| dispatch p50 | 816.5 ms | 763.0 ms | -53.5 ms |
+| dispatch p95 | 1056.6 ms | 1003.3 ms | -53.3 ms |
+| host-gap p50 | 363.0 ms | 361.0 ms | -2.0 ms |
+| stored-reference cosine | 0.99196 | 0.99196 | unchanged |
+
+Stable stage medians changed approximately as follows:
+
+```text
+QKV dispatch   162 → 183 ms  (common n64 tile regression)
+FFN1 dispatch  184 → 120 ms  (large improvement)
+O dispatch     109 → 108 ms
+```
+
+The net gain is real despite the QKV regression. Periodic 200+ ms dispatch
+stalls still occur because the frame still switches among shared GEMM, window
+flash, global flash, and FFN2 designs. Removing one transition per block lowers
+the stable latency but does not eliminate the driver/firmware stall mechanism.
+
+The validated K=1024 shared version is the new optimization base for host
+zero-copy and FFN device-chain work.
