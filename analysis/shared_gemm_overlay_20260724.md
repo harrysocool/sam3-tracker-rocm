@@ -322,3 +322,29 @@ This establishes:
 
 The backport is a temporary, unsigned, build/test module for this boot. It has
 not replaced the installed DKMS module.
+
+## Final PyTorch and FPN accuracy
+
+The accuracy probe was extended with `--npu-bin` and run against the final
+sub-1-second binary on the same 504px image as the PyTorch FP16 baseline.
+
+```text
+NPU timed backbone: 980 ms
+last_hidden_state:  0.993185
+per-token mean/min: 0.993426 / -0.379358
+FPN p2:             0.999479
+FPN p3:             0.998525
+FPN p4:             0.997761
+FPN p5:             0.997274
+```
+
+The final hidden-state cosine is lower than the earlier specialized result
+(`0.9956`), consistent with the common-tile BFP16 GEMM path. The detector-facing
+FPN outputs all remain above 0.997, preserving the project accuracy gate.
+
+Raw log:
+
+```text
+/home/amd/project/9_to_delete/git_cleanup_20260721/manifests/
+sub1s_iron_vs_pt_accuracy_20260724.log
+```
