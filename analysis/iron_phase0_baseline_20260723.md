@@ -111,8 +111,7 @@ The profiler compiles successfully and separates:
 - RoPE/flash packing;
 - LayerNorm, GELU, partition/unpartition, and residual work.
 
-It has not been executed because the device entered the driver hang described
-above.
+It was executed after the reboot; the results are recorded below.
 
 ## Resume checklist after reboot
 
@@ -124,3 +123,110 @@ above.
 6. Compare the rebuilt binary with the old production binary under identical
    conditions.
 7. Investigate periodic dispatch spikes before using p95 as a release claim.
+
+## Post-reboot results — 2026-07-24
+
+After reboot, `xrt-smi` returned normally, the old D-state processes were gone,
+and no ROS or benchmark process owned the NPU. The rebuilt binary completed the
+1-frame, 5-frame, and 30-frame gates. Contexts were released normally after
+each process.
+
+Clean 30-frame result:
+
+| Metric | min | mean | p50 | p90 | p95 | max | stddev |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| wall ms | 1162 | 1231.8 | 1182.0 | 1409.6 | 1422.2 | 1433 | 98.3 |
+| dispatch ms | 808 | 869.3 | 816.5 | 1055.1 | 1056.6 | 1073 | 98.5 |
+| wall-dispatch ms | 350 | 362.5 | 363.0 | 368.1 | 369.6 | 371 | 4.9 |
+
+The periodic spike remained after the complete ROS/Gazebo shutdown and reboot,
+so it is not caused by the showcase.
+
+## Per-stage profile
+
+The 30-frame profiler reproduced the baseline with negligible overhead:
+
+```text
+wall p50      1178.0 ms
+dispatch p50   813.5 ms
+host gap p50   359.0 ms
+```
+
+Stable-stage medians:
+
+| Stage | p50 ms |
+|---|---:|
+| QKV dispatch | 161.8 |
+| FlashAttention dispatch | 198.7 |
+| O-projection dispatch | 109.4 |
+| FFN1 dispatch | 183.6 |
+| FFN2 dispatch | 159.0 |
+| QKV output read | 42.9 |
+| QKV split/bias/layout | 28.7 |
+| QKV input pack | 26.1 |
+| Flash input pack + H2D | 44.0 |
+| O-projection input pack | 26.9 |
+| CPU GELU + pack | 57.7 |
+
+Slow calls appeared in different kernels and layers:
+
+```text
+frame 2   layer 29  flash_w  250.262 ms
+frame 7   layer 6   flash_w  221.635 ms
+frame 11  layer 15  oproj_g  252.127 ms
+frame 15  layer 23  ffn2     251.831 ms
+frame 20  layer 0   flash_w  219.846 ms
+frame 24  layer 8   oproj_w  255.725 ms
+frame 28  layer 16  flash_w  252.723 ms
+```
+
+Mapping these calls onto the global dispatch stream gives ordinals:
+
+```text
+466, 1151, 1837, 2519, 3201, 3882, 4561
+```
+
+Intervals are `685, 686, 682, 682, 681, 679` submissions. The spike is therefore
+not tied to a specific operator or shape; it is a global reconfiguration/submission
+phenomenon.
+
+## Transition microbenchmarks
+
+Commit `b768fbd` added same-design and five-design-cycle modes.
+
+### Same O-projection design
+
+Three thousand consecutive calls to the same O-projection xclbin were stable:
+
+```text
+p50  1.188 ms
+p95  1.202 ms
+max  4.327 ms
+```
+
+There were no 20+ ms calls and no driver hang. This proves the 200+ ms events
+are not inherent O-projection compute or unconditional periodic housekeeping.
+
+### Five-design cycle
+
+A tight sequence of QKV → Flash → O projection → FFN1 → FFN2 was run for a
+requested 600 cycles. It did not complete within the 120-second safety timeout.
+After the runner was terminated:
+
+- a new `amdxdna_js` kworker was in D-state;
+- `xrt-smi examine -r aie-partitions` timed out;
+- the device again required reboot/reset.
+
+The cycle log reached `xclbins loaded / bos allocated / weights resident` but
+the blocked dispatch never returned, so no per-call line could be emitted.
+
+## Updated conclusion
+
+Full-array design switching is both the dominant performance tax and a driver
+stability risk on the validated XRT 2.21.75 / kernel 6.14 stack. A shared GEMM
+overlay is no longer merely an optimization: it is required to reduce periodic
+stalls and avoid stressing the amdxdna reconfiguration path.
+
+The next hardware work should start only after reboot. Do not repeat the tight
+five-design stress test on this stack. Proceed with the shared-overlay prototype
+and retain the same-design microbenchmark as the stability control.
