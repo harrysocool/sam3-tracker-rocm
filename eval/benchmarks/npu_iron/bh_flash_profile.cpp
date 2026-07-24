@@ -12,6 +12,7 @@
 #include <string>
 #include <fstream>
 #include <chrono>
+#include <algorithm>
 #include <immintrin.h>
 #include <omp.h>
 using std::vector; using std::string;
@@ -278,14 +279,18 @@ void block(vector<float>&x,int li){
 
 static string input_file="";
 static string output_file="";
+static string microbench="";
 
 int main(int argc,char**argv){
   int n_runs=3;
+  int micro_iters=2000;
   for(int i=1;i<argc;i++){
     string a=argv[i];
     if(a=="--input"&&i+1<argc)  { input_file=argv[++i]; }
     else if(a=="--output"&&i+1<argc){ output_file=argv[++i]; }
     else if(a=="--runs"&&i+1<argc)  { n_runs=atoi(argv[++i]); }
+    else if(a=="--microbench"&&i+1<argc){ microbench=argv[++i]; }
+    else if(a=="--micro-iters"&&i+1<argc){ micro_iters=atoi(argv[++i]); }
   }
   DEV=xrt::device(0);
   const string A="/home/amd/project/npu_iron/sam3_attn/";
@@ -326,6 +331,34 @@ int main(int argc,char**argv){
   ropeWc=loadf(CBB+"rope_win_cos"); ropeWs=loadf(CBB+"rope_win_sin");
   ropeGc=loadf(CBB+"rope_glob_cos"); ropeGs=loadf(CBB+"rope_glob_sin");
   fprintf(stderr,"weights resident\n");
+
+  if(!microbench.empty()){
+    auto zero_bo=[](xrt::bo&bo,size_t n){ vector<bf16> z(n,0); bo.write(z.data(),n*2,0); bo.sync(XCL_BO_SYNC_BO_TO_DEVICE); };
+    zero_bo(qkv_wA,(size_t)2304*C); zero_bo(o_wA,(size_t)2304*C);
+    zero_bo(f1Av2,(size_t)MFFN*C); zero_bo(gsh,(size_t)MFFN*Hpad);
+    zero_bo(qaF,(size_t)64*576*d); zero_bo(qbF,(size_t)64*576*d); zero_bo(pbF,(size_t)64*576*d);
+    vector<double> times; times.reserve((size_t)micro_iters*5); long ordinal=0;
+    auto measure=[&](const char*name,auto launch){ double t=now(); launch().wait(); double dt=now()-t; times.push_back(dt); if(dt>20.0) printf("micro_slow ordinal=%ld stage=%s ms=%.3f\n",ordinal,name,dt); ordinal++; };
+    for(int i=0;i<micro_iters;i++){
+      if(microbench=="same-oproj"){
+        measure("oproj_w",[&](){ return ho_w.k(3,ho_w.bi,ho_w.nw,o_wA,WB_o[0],o_wC); });
+      } else if(microbench=="same-qkv"){
+        measure("qkv_w",[&](){ return hqkv_w.k(3,hqkv_w.bi,hqkv_w.nw,qkv_wA,WB_qkv[0],qkv_wC); });
+      } else if(microbench=="cycle"){
+        measure("qkv_w",[&](){ return hqkv_w.k(3,hqkv_w.bi,hqkv_w.nw,qkv_wA,WB_qkv[0],qkv_wC); });
+        measure("flash_w",[&](){ return hflashw.k(3,hflashw.bi,hflashw.nw,qaF,qbF,pbF,OF); });
+        measure("oproj_w",[&](){ return ho_w.k(3,ho_w.bi,ho_w.nw,o_wA,WB_o[0],o_wC); });
+        measure("ffn1",[&](){ return hf1v2.k(3,hf1v2.bi,hf1v2.nw,f1Av2,WB_w1full[0],f1Cfull); });
+        measure("ffn2",[&](){ return hf2.k(3,hf2.bi,hf2.nw,gsh,WB_w2[0],f2C); });
+      } else {
+        fprintf(stderr,"unknown microbench: %s\n",microbench.c_str()); return 2;
+      }
+    }
+    std::sort(times.begin(),times.end());
+    auto quant=[&](double q){ double x=(times.size()-1)*q; size_t lo=(size_t)x,hi=std::min(lo+1,times.size()-1); return times[lo]+(times[hi]-times[lo])*(x-lo); };
+    printf("micro_summary mode=%s calls=%zu p50=%.3f p95=%.3f max=%.3f\n",microbench.c_str(),times.size(),quant(.5),quant(.95),times.back());
+    return 0;
+  }
   // ── Persistent server mode (default) ────────────────────────────────
   // Protocol (binary, fixed sizes):
   //   Python → stdin:  int32 magic(0xBF16), float32[S*C] tokens
