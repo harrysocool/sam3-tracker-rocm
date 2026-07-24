@@ -117,3 +117,65 @@ After a controlled on-site power-cycle:
 5. run one frame of `bh_shared_k1024_20260724`;
 6. stop on any timeout; do not run transition stress;
 7. proceed to 5/30 frames only after correctness and device health pass.
+
+## Dynamic-K RTP implementation complete
+
+The lowered placed MLIR was patched automatically rather than attempting to
+make the AIR segment DMA loop dynamic. For each of the 32 compute tiles, the
+patcher:
+
+1. adds a one-element i32 RTP buffer;
+2. loads and index-casts the RTP inside the core;
+3. replaces only the outer K-tile loop comparison;
+4. writes the desired value at the start of the shape-specific runtime sequence.
+
+Values are:
+
+```text
+qkv_w/qkv_g/o_w/o_g/ffn1 → 4
+ffn2                      → 20
+```
+
+All six patched MLIR files pass `aie-opt` verification and compile through
+aiecc to xclbin plus instruction stream. Their generated device artifacts are
+byte-identical:
+
+```text
+packed ELF CDO  6d61c6e614f794a4da6d1073ac39cf140380ce7d4a4bb9b8a2286f5cad2b69ac
+CDO init        ce869aca0b42af248cf3790ca415647a61acc1a52419c4cc1432d1adc44f2246
+CDO enable      e3ec26491823b64d42214af6696d1528d8897cf492bea31268c95e172fa6daf0
+core ELF set    fc2f7bc91089bff1e68b8a3274cfc9308706d04871bdc86df47bf128747909c7
+```
+
+This completes the offline proof that one xclbin can serve all six production
+GEMM shapes, including FFN2 K=5120.
+
+Artifacts:
+
+```text
+/home/amd/project/npu_iron/sam3_attn/shared_gemm_dynamic_rtp_complete/
+```
+
+Commits:
+
+```text
+711893b feat(iron): build one dynamic-K GEMM xclbin
+e1ab769 perf(iron): share one xclbin across all GEMMs
+```
+
+The updated ABI probe executes all six instruction streams against the qkv_w
+xclbin. The end-to-end `bh_shared_dynamic_k` host loads only three active AIE
+designs per frame: shared GEMM, window flash, and global flash.
+
+## Updated safe validation sequence
+
+After a controlled on-site power-cycle:
+
+1. one `xrt-smi` health check;
+2. run `shared_gemm_dynamic_abi_test_20260724` once (six calls total);
+3. do not rerun if any call times out or mismatches;
+4. confirm context cleanup once;
+5. run one frame of `bh_shared_dynamic_k_20260724`;
+6. compare cosine and per-stage times;
+7. only then run 5 frames; defer 30 frames until device health is reconfirmed;
+8. never run the previous tight five-design cycle on XRT 2.21.75.
