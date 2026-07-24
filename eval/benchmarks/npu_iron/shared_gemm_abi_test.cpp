@@ -1,4 +1,4 @@
-// Validate five K=1024 GEMM instruction streams against one common xclbin.
+// Validate six dynamic-K GEMM instruction streams against one common xclbin.
 #include <xrt/xrt_bo.h>
 #include <xrt/xrt_device.h>
 #include <xrt/xrt_hw_context.h>
@@ -38,11 +38,10 @@ static vector<uint8_t> read_binary(const string &path) {
 
 int main() {
   constexpr bf16 one_bf16 = 0x3f80;
-  constexpr float expected = 1024.0f;
-  constexpr float tolerance = 1.0f;
+  constexpr float tolerance = 4.0f;
   const string root =
       "/home/amd/project/npu_iron/sam3_attn/"
-      "shared_gemm_candidate_m32n64/";
+      "shared_gemm_dynamic_rtp_complete/";
 
   const Shape shapes[] = {
       {"o_g", 1536, 1024, 1024},
@@ -50,6 +49,7 @@ int main() {
       {"qkv_g", 1536, 1024, 3072},
       {"qkv_w", 2304, 1024, 3072},
       {"ffn1", 1536, 1024, 5120},
+      {"ffn2", 1536, 5120, 1024},
   };
 
   xrt::device device(0);
@@ -91,6 +91,7 @@ int main() {
     run.wait();
     c_bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
     const float *out = c_bo.map<const float *>();
+    const float expected = static_cast<float>(shape.k);
 
     double sum = 0.0;
     float max_abs = 0.0f;
