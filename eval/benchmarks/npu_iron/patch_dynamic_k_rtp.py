@@ -90,6 +90,7 @@ def main() -> None:
             f"%rtp_k_{col}_{row}[%c0] : memref<1xi32>",
             f"{indent}%rtp_k_idx_{col}_{row} = arith.index_cast "
             f"%rtp_k_i32_{col}_{row} : i32 to index",
+            f"{indent}aie.use_lock(%rtp_lock_{col}_{row}, Release, 0)",
         ]
         lines[acquire_line + 1 : acquire_line + 1] = load_lines
         end += len(load_lines)
