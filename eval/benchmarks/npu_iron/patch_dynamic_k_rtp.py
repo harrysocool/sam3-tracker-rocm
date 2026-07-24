@@ -25,11 +25,16 @@ def main() -> None:
     if tile_anchor is None:
         raise RuntimeError("cannot find final compute-tile declaration")
 
-    buffer_lines = [
-        f'    %rtp_k_{col}_{row} = aie.buffer(%tile_{col}_{row}) '
-        f'{{sym_name = "rtp_k_{col}_{row}"}} : memref<1xi32>'
-        for col, row in compute_tiles
-    ]
+    buffer_lines = []
+    for col, row in compute_tiles:
+        buffer_lines.extend(
+            [
+                f'    %rtp_k_{col}_{row} = aie.buffer(%tile_{col}_{row}) '
+                f'{{sym_name = "rtp_k_{col}_{row}"}} : memref<1xi32>',
+                f"    %rtp_lock_{col}_{row} = aie.lock(%tile_{col}_{row}, 6) "
+                "{init = 0 : i32}",
+            ]
+        )
     lines[tile_anchor:tile_anchor] = buffer_lines
 
     core_starts = []
@@ -80,6 +85,7 @@ def main() -> None:
             raise RuntimeError(f"cannot find entry acquire in core {col},{row}")
         indent = re.match(r"(\s*)", lines[acquire_line]).group(1)
         load_lines = [
+            f"{indent}aie.use_lock(%rtp_lock_{col}_{row}, Acquire, 1)",
             f"{indent}%rtp_k_i32_{col}_{row} = memref.load "
             f"%rtp_k_{col}_{row}[%c0] : memref<1xi32>",
             f"{indent}%rtp_k_idx_{col}_{row} = arith.index_cast "
@@ -118,7 +124,11 @@ def main() -> None:
         f"{runtime_indent}aiex.npu.rtp_write(@rtp_k_{col}_{row}, 0, {args.k_tiles})"
         for col, row in compute_tiles
     ]
-    lines[runtime_start + 1 : runtime_start + 1] = writes
+    releases = [
+        f"{runtime_indent}aiex.set_lock(%rtp_lock_{col}_{row}, 1)"
+        for col, row in compute_tiles
+    ]
+    lines[runtime_start + 1 : runtime_start + 1] = writes + releases
 
     if modified != 32:
         raise RuntimeError(f"expected 32 modified cores, got {modified}")
@@ -126,7 +136,8 @@ def main() -> None:
     args.output.write_text(output)
     print(
         f"patched {args.input} -> {args.output}: "
-        f"cores={modified}, rtp_writes={len(writes)}, k_tiles={args.k_tiles}"
+        f"cores={modified}, rtp_writes={len(writes)}, "
+        f"barriers={len(releases)}, k_tiles={args.k_tiles}"
     )
 
 
