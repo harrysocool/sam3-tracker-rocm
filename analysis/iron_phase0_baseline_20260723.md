@@ -230,3 +230,27 @@ stalls and avoid stressing the amdxdna reconfiguration path.
 The next hardware work should start only after reboot. Do not repeat the tight
 five-design stress test on this stack. Proceed with the shared-overlay prototype
 and retain the same-design microbenchmark as the stability control.
+
+## Offline shared-GEMM candidate
+
+A common `m32 × n64 × k64`, `k_l2=256`, 8×4 design was generated for all six
+production GEMM shapes:
+
+```text
+qkv_w  2304×1024×3072
+qkv_g  1536×1024×3072
+o_w    2304×1024×1024
+o_g    1536×1024×1024
+ffn1   1536×1024×5120
+ffn2   1536×5120×1024
+```
+
+The first build exposed a reproducibility bug: the MLIR-AIR
+`compile-and-xclbin` path did not forward `target_device=npu2`, so an AIE2P
+request was lowered as npu1 and failed placement at column 4. Local mlir-air
+commit `bafedc7` fixes target selection for compile-and-run and
+compile-and-xclbin. After the fix, all six candidates compiled successfully.
+
+Tracker commit `2982dd6` preserves the candidate generator. Hardware ABI
+interchange testing—one common xclbin with the six instruction streams—must
+wait for the next reboot. The tight five-design stress mode must not be reused.
