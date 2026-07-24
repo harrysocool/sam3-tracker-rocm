@@ -1,0 +1,117 @@
+// Validate five K=1024 GEMM instruction streams against one common xclbin.
+#include <xrt/xrt_bo.h>
+#include <xrt/xrt_device.h>
+#include <xrt/xrt_hw_context.h>
+#include <xrt/xrt_kernel.h>
+#include <xrt/experimental/xrt_xclbin.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <fstream>
+#include <string>
+#include <stdexcept>
+#include <vector>
+
+using std::string;
+using std::vector;
+using bf16 = uint16_t;
+
+struct Shape {
+  const char *name;
+  int m;
+  int k;
+  int n;
+};
+
+static vector<uint8_t> read_binary(const string &path) {
+  std::ifstream f(path, std::ios::binary | std::ios::ate);
+  if (!f)
+    throw std::runtime_error("cannot open " + path);
+  const size_t size = static_cast<size_t>(f.tellg());
+  f.seekg(0);
+  vector<uint8_t> data(size);
+  f.read(reinterpret_cast<char *>(data.data()), size);
+  return data;
+}
+
+int main() {
+  constexpr bf16 one_bf16 = 0x3f80;
+  constexpr float expected = 1024.0f;
+  constexpr float tolerance = 1.0f;
+  const string root =
+      "/home/amd/project/npu_iron/sam3_attn/"
+      "shared_gemm_candidate_m32n64/";
+
+  const Shape shapes[] = {
+      {"o_g", 1536, 1024, 1024},
+      {"o_w", 2304, 1024, 1024},
+      {"qkv_g", 1536, 1024, 3072},
+      {"qkv_w", 2304, 1024, 3072},
+      {"ffn1", 1536, 1024, 5120},
+  };
+
+  xrt::device device(0);
+  xrt::xclbin xclbin(root + "qkv_w/final.xclbin");
+  const auto uuid = device.register_xclbin(xclbin);
+  xrt::hw_context context(device, uuid);
+  xrt::kernel kernel(context, "MLIR_AIE");
+
+  for (const auto &shape : shapes) {
+    std::printf("shared_abi start shape=%s M=%d K=%d N=%d\n", shape.name,
+                shape.m, shape.k, shape.n);
+    std::fflush(stdout);
+
+    const auto inst = read_binary(root + shape.name + "/insts.bin");
+    xrt::bo inst_bo(device, inst.size(), xrt::bo::flags::cacheable,
+                    kernel.group_id(1));
+    inst_bo.write(inst.data());
+    inst_bo.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+    const size_t a_elems = static_cast<size_t>(shape.m) * shape.k;
+    const size_t b_elems = static_cast<size_t>(shape.k) * shape.n;
+    const size_t c_elems = static_cast<size_t>(shape.m) * shape.n;
+    xrt::bo a_bo(device, a_elems * sizeof(bf16), xrt::bo::flags::host_only,
+                 kernel.group_id(3));
+    xrt::bo b_bo(device, b_elems * sizeof(bf16), xrt::bo::flags::host_only,
+                 kernel.group_id(4));
+    xrt::bo c_bo(device, c_elems * sizeof(float), xrt::bo::flags::host_only,
+                 kernel.group_id(5));
+
+    vector<bf16> a(a_elems, one_bf16);
+    vector<bf16> b(b_elems, one_bf16);
+    a_bo.write(a.data());
+    b_bo.write(b.data());
+    a_bo.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    b_bo.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+    auto run = kernel(3, inst_bo, static_cast<uint32_t>(inst.size() / 4),
+                      a_bo, b_bo, c_bo);
+    run.wait();
+    c_bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    const float *out = c_bo.map<const float *>();
+
+    double sum = 0.0;
+    float max_abs = 0.0f;
+    size_t bad = 0;
+    for (size_t i = 0; i < c_elems; ++i) {
+      const float value = out[i];
+      const float error = std::fabs(value - expected);
+      sum += value;
+      max_abs = std::max(max_abs, error);
+      if (!std::isfinite(value) || error > tolerance)
+        ++bad;
+    }
+    const double mean = sum / static_cast<double>(c_elems);
+    std::printf(
+        "shared_abi result shape=%s mean=%.6f max_abs=%.6f bad=%zu/%zu\n",
+        shape.name, mean, max_abs, bad, c_elems);
+    std::fflush(stdout);
+    if (bad != 0)
+      return 1;
+  }
+
+  std::puts("SHARED_GEMM_ABI_PASS");
+  return 0;
+}
