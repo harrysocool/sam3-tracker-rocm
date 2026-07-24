@@ -55,7 +55,8 @@ struct Profile {
   double gelu_pack=0,ffn2_disp=0,ffn2_sync_res=0;
 };
 Profile P;
-#define DISP_ACC(call,acc) do{ double _t=now(); (call).wait(); double _dt=now()-_t; T_disp+=_dt; (acc)+=_dt; }while(0)
+int CUR_LAYER=-1;
+#define DISP_ACC(call,acc,name) do{ double _t=now(); (call).wait(); double _dt=now()-_t; T_disp+=_dt; (acc)+=_dt; if(_dt>20.0) fprintf(stderr,"slow_dispatch layer=%d stage=%s ms=%.3f\n",CUR_LAYER,name,_dt); }while(0)
 void print_profile(FILE*fp){
   fprintf(fp,"profile res_copy=%.3f ln1=%.3f partition=%.3f qkv_pack=%.3f qkv_disp=%.3f qkv_read=%.3f qkv_split=%.3f "
     "attn_pack=%.3f attn_h2d=%.3f flash_disp=%.3f attn_d2h=%.3f attn_unpack=%.3f attn_layout=%.3f "
@@ -136,7 +137,7 @@ void attn(vector<float>&q,vector<float>&k,vector<float>&v,bool glob,vector<float
     qbF.write(Kf.data()); qbF.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     pbF.write(Vf.data()); pbF.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     P.attn_h2d+=now()-tp;
-    DISP_ACC(hflashw.k(3,hflashw.bi,hflashw.nw,qaF,qbF,pbF,OF),P.flash_disp);
+    DISP_ACC(hflashw.k(3,hflashw.bi,hflashw.nw,qaF,qbF,pbF,OF),P.flash_disp,"flash_w");
     tp=now();
     Ob_.assign(G*S*d,0); OF.sync(XCL_BO_SYNC_BO_FROM_DEVICE); OF.read(Ob_.data());
     P.attn_d2h+=now()-tp; tp=now();
@@ -166,7 +167,7 @@ void attn(vector<float>&q,vector<float>&k,vector<float>&v,bool glob,vector<float
   qbG.write(K.data()); qbG.sync(XCL_BO_SYNC_BO_TO_DEVICE);
   pbG.write(V.data()); pbG.sync(XCL_BO_SYNC_BO_TO_DEVICE);
   P.attn_h2d+=now()-tp;
-  DISP_ACC(hflashg.k(3,hflashg.bi,hflashg.nw,qaG,qbG,pbG,OFg),P.flash_disp);  // flash global → bf16
+  DISP_ACC(hflashg.k(3,hflashg.bi,hflashg.nw,qaG,qbG,pbG,OFg),P.flash_disp,"flash_g");  // flash global → bf16
   tp=now();
   static vector<bf16> Ob_g; Ob_g.resize(G*Sp*d);
   OFg.sync(XCL_BO_SYNC_BO_FROM_DEVICE); OFg.read(Ob_g.data());
@@ -178,6 +179,7 @@ void attn(vector<float>&q,vector<float>&k,vector<float>&v,bool glob,vector<float
 
 // one block: x [1296,C] -> [1296,C]
 void block(vector<float>&x,int li){
+  CUR_LAYER=li;
   bool glob=isglob(li);
   double tp=now(); static vector<float> res; res=x; P.res_copy+=now()-tp;
   tp=now(); vector<float> xn; npu_ln(x,ln1w[li],ln1b[li],xn); P.ln1+=now()-tp;  // [1296,C]
@@ -199,7 +201,7 @@ void block(vector<float>&x,int li){
   tp=now(); static vector<float> xin; xin.assign(Mpad*C,0.f); std::memcpy(xin.data(),xflat.data(),Mp*C*4);
   wbf_v(qA,xin);
   P.qkv_pack+=now()-tp;
-  DISP_ACC(hq.k(3,hq.bi,hq.nw,qA,WB_qkv[li],qCo),P.qkv_disp);
+  DISP_ACC(hq.k(3,hq.bi,hq.nw,qA,WB_qkv[li],qCo),P.qkv_disp,glob?"qkv_g":"qkv_w");
   tp=now(); RZv(qkv,Mpad*3072); qCo.sync(XCL_BO_SYNC_BO_FROM_DEVICE); qCo.read(qkv.data()); P.qkv_read+=now()-tp;
   // split + bias + head reshape
   int G=glob?16:64, S=glob?1296:576;
@@ -232,7 +234,7 @@ void block(vector<float>&x,int li){
   tp=now(); static vector<float> oin; oin.assign(Mpad*C,0.f); std::memcpy(oin.data(),Ostd.data(),Mp*C*4);
   wbf_v(oA,oin);
   P.opack+=now()-tp;
-  DISP_ACC(ho.k(3,ho.bi,ho.nw,oA,WB_o[li],oCo),P.odisp);
+  DISP_ACC(ho.k(3,ho.bi,ho.nw,oA,WB_o[li],oCo),P.odisp,glob?"oproj_g":"oproj_w");
   tp=now(); RZv(ao,Mpad*C); oCo.sync(XCL_BO_SYNC_BO_FROM_DEVICE); oCo.read(ao.data()); P.oread+=now()-tp;
   // +Ob
   const vector<float>&ob=Ob[li];
@@ -253,7 +255,7 @@ void block(vector<float>&x,int li){
   tp=now(); static vector<float> ffa; ffa.assign(MFFN*C,0.f); std::memcpy(ffa.data(),xn2.data(),1296*C*4);
   wbf_v(f1Av2,ffa);
   P.ffn1_pack+=now()-tp;
-  DISP_ACC(hf1v2.k(3,hf1v2.bi,hf1v2.nw,f1Av2,WB_w1full[li],f1Cfull),P.ffn1_disp);
+  DISP_ACC(hf1v2.k(3,hf1v2.bi,hf1v2.nw,f1Av2,WB_w1full[li],f1Cfull),P.ffn1_disp,"ffn1");
   tp=now(); f1Cfull.sync(XCL_BO_SYNC_BO_FROM_DEVICE); P.ffn1_sync+=now()-tp;
   const float*hid_=f1Cfull.map<float*>(); // zero-copy: direct BO pointer
   // +b1 + gelu -> gin bf16
@@ -264,7 +266,7 @@ void block(vector<float>&x,int li){
     gsh.write(gb.data(),(size_t)MFFN*Hpad*2,0); gsh.sync(XCL_BO_SYNC_BO_TO_DEVICE); }
   P.gelu_pack+=now()-tp;
   // hgelu dispatch skipped (CPU gelu faster)
-  DISP_ACC(hf2.k(3,hf2.bi,hf2.nw,gsh,WB_w2[li],f2C),P.ffn2_disp);
+  DISP_ACC(hf2.k(3,hf2.bi,hf2.nw,gsh,WB_w2[li],f2C),P.ffn2_disp,"ffn2");
   tp=now(); f2C.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
   const float*fo_=reinterpret_cast<const float*>(f2C.map<float*>());
   const vector<float>&f2b_=fc2b[li];
