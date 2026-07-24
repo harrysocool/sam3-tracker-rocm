@@ -36,9 +36,22 @@ static vector<uint8_t> read_binary(const string &path) {
   return data;
 }
 
-int main() {
+int main(int argc, char **argv) {
   constexpr bf16 one_bf16 = 0x3f80;
   constexpr float tolerance = 4.0f;
+  string xclbin_shape = "qkv_w";
+  string only_shape;
+  for (int i = 1; i < argc; ++i) {
+    const string arg = argv[i];
+    if (arg == "--xclbin-shape" && i + 1 < argc)
+      xclbin_shape = argv[++i];
+    else if (arg == "--only-shape" && i + 1 < argc)
+      only_shape = argv[++i];
+    else {
+      std::fprintf(stderr, "unknown or incomplete argument: %s\n", argv[i]);
+      return 2;
+    }
+  }
   const string root =
       "/home/amd/project/npu_iron/sam3_attn/"
       "shared_gemm_dynamic_rtp_complete/";
@@ -53,12 +66,16 @@ int main() {
   };
 
   xrt::device device(0);
-  xrt::xclbin xclbin(root + "qkv_w/final.xclbin");
+  xrt::xclbin xclbin(root + xclbin_shape + "/final.xclbin");
   const auto uuid = device.register_xclbin(xclbin);
   xrt::hw_context context(device, uuid);
   xrt::kernel kernel(context, "MLIR_AIE");
 
+  size_t executed = 0;
   for (const auto &shape : shapes) {
+    if (!only_shape.empty() && only_shape != shape.name)
+      continue;
+    ++executed;
     std::printf("shared_abi start shape=%s M=%d K=%d N=%d\n", shape.name,
                 shape.m, shape.k, shape.n);
     std::fflush(stdout);
@@ -113,6 +130,10 @@ int main() {
       return 1;
   }
 
+  if (executed == 0) {
+    std::fprintf(stderr, "no matching shape selected\n");
+    return 2;
+  }
   std::puts("SHARED_GEMM_ABI_PASS");
   return 0;
 }
