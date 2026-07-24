@@ -234,3 +234,54 @@ the stable latency but does not eliminate the driver/firmware stall mechanism.
 
 The validated K=1024 shared version is the new optimization base for host
 zero-copy and FFN device-chain work.
+
+## Host zero-copy results
+
+Three independent, accuracy-neutral changes were applied on top of the
+validated K=1024 shared version:
+
+1. map QKV projection output instead of copying it through `bo.read`;
+2. map FlashAttention BF16 output and write the token-major O-projection BF16
+   input directly, removing BF16→FP32→BF16 conversion;
+3. split QKV, add bias, apply RoPE, and write mapped flash Q/K/V BOs in one
+   pass; map O-projection FP32 output directly.
+
+The stored-reference cosine remained `0.99196` throughout.
+
+Representative stable progression:
+
+| Version | Stable wall | Relevant host-stage change |
+|---|---:|---|
+| K=1024 shared | ~1127 ms | baseline for zero-copy |
+| + mapped QKV output | ~1080 ms | `qkv_read` ~43→8–9 ms |
+| + direct Flash→O input | ~1043 ms | unpack/layout/repack ~56→10 ms |
+| + direct QKV→Flash + mapped O output | 970–997 ms | split removed; H2D ~24→6 ms; O read ~18→2.6 ms |
+
+The final variant completed a 5-frame gate with normal frames:
+
+```text
+977, 972, 978, 1190(stall), 970 ms
+```
+
+Thus the normal single-frame path is demonstrably below one second, with
+unchanged stored-reference cosine.
+
+## 30-frame stability blocker
+
+A subsequent 30-frame run produced correct 970/997/976 ms frames, then blocked
+inside NPU wait before frame 3 completed. The safety timeout terminated the
+userspace runner; an `amdxdna_js` worker was in D-state. No additional XRT
+diagnostic process was started.
+
+This means:
+
+- sub-1-second normal-frame latency is achieved;
+- a 30-frame p50/p95 release result is not yet available for the final version;
+- current February 2026 amdxdna without merged TDR remains the release blocker;
+- further long-run validation should wait for the TDR backport or a matched
+  newer driver/plugin/firmware stack.
+
+Do not attribute the D-state specifically to the latest zero-copy change: the
+same driver was already shown to wedge under full-array switching stress, and
+an `amdxdna_js` D-state worker had accumulated during this boot. The functional
+outputs before the hang were correct.
