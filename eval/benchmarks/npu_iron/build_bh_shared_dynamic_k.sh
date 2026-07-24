@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${ALLOW_DYNAMIC_K_WIP:-0}" != "1" ]]; then
+  echo "Refusing to build unvalidated dynamic-K backbone." >&2
+  echo "Set ALLOW_DYNAMIC_K_WIP=1 only for controlled development." >&2
+  exit 2
+fi
+
 source /opt/xilinx/xrt/setup.sh
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

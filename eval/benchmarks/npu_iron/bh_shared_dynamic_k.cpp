@@ -1,3 +1,5 @@
+// WIP: full dynamic-K sharing still needs a dispatch-boundary RTP barrier.
+// Do not run this host until the multi-launch synchronization issue is closed.
 // SAM3 ViT backbone C++ host (504px). All element-wise on CPU; matmul/softmax/gelu/LN on NPU via XRT.
 #include <xrt/xrt_device.h>
 #include <xrt/xrt_kernel.h>
@@ -301,7 +303,7 @@ int main(int argc,char**argv){
   }
   DEV=xrt::device(0);
   const string A="/home/amd/project/npu_iron/sam3_attn/";
-  const string S=A+"shared_gemm_dynamic_rtp_complete/";
+  const string S=A+"shared_gemm_dynamic_rtp_v4/";
   hqkv_w=loadx(S+"qkv_w");
   hqkv_g=loadi(hqkv_w,S+"qkv_g");
   ho_w=loadi(hqkv_w,S+"o_w");
