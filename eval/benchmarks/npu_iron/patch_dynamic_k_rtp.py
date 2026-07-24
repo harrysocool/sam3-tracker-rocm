@@ -66,20 +66,32 @@ def main() -> None:
         )
         if c0_line is None:
             raise RuntimeError(f"cannot find constants in core {col},{row}")
-        indent = re.match(r"(\s*)", lines[c0_line]).group(1)
+        acquire_line = next(
+            (
+                i
+                for i in range(c0_line + 1, end)
+                if re.match(
+                    r"\s*aie\.use_lock\(.*AcquireGreaterEqual, 1\)", lines[i]
+                )
+            ),
+            None,
+        )
+        if acquire_line is None:
+            raise RuntimeError(f"cannot find entry acquire in core {col},{row}")
+        indent = re.match(r"(\s*)", lines[acquire_line]).group(1)
         load_lines = [
             f"{indent}%rtp_k_i32_{col}_{row} = memref.load "
             f"%rtp_k_{col}_{row}[%c0] : memref<1xi32>",
             f"{indent}%rtp_k_idx_{col}_{row} = arith.index_cast "
             f"%rtp_k_i32_{col}_{row} : i32 to index",
         ]
-        lines[c0_line + 1 : c0_line + 1] = load_lines
+        lines[acquire_line + 1 : acquire_line + 1] = load_lines
         end += len(load_lines)
 
         compare = next(
             (
                 i
-                for i in range(c0_line + 1 + len(load_lines), end)
+                for i in range(acquire_line + 1 + len(load_lines), end)
                 if re.match(r"\s*%10 = arith\.cmpi slt, %9, %c(?:4|20) : index", lines[i])
             ),
             None,

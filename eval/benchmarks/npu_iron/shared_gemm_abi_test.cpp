@@ -54,7 +54,7 @@ int main(int argc, char **argv) {
   }
   const string root =
       "/home/amd/project/npu_iron/sam3_attn/"
-      "shared_gemm_dynamic_rtp_complete/";
+      "shared_gemm_dynamic_rtp_v2/";
 
   const Shape shapes[] = {
       {"o_g", 1536, 1024, 1024},
