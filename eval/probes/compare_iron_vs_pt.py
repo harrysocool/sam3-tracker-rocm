@@ -24,6 +24,8 @@ def parse_args():
     p.add_argument('--checkpoint', default='model/sam3')
     p.add_argument('--image',      default='assets/truck.jpg')
     p.add_argument('--imgsz',      type=int, default=504)
+    p.add_argument('--npu-bin', default=None,
+                   help='optional IRON backbone binary override')
     return p.parse_args()
 
 def main():
@@ -53,7 +55,8 @@ def main():
 
     # ── Patch in IRON NPU backbone ───────────────────────────────────────────
     print("\n[NPU] Patching model with IRON NPU backbone ...")
-    npu_enc = patch_sam3_with_npu_backbone(model)
+    patch_kwargs = {'npu_bin': args.npu_bin} if args.npu_bin else {}
+    npu_enc = patch_sam3_with_npu_backbone(model, **patch_kwargs)
 
     print("[NPU] Warmup run ...")
     with torch.no_grad():
