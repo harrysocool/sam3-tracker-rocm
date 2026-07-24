@@ -113,19 +113,32 @@ int main(int argc, char **argv) {
     double sum = 0.0;
     float max_abs = 0.0f;
     size_t bad = 0;
+    size_t first_bad = c_elems;
+    size_t last_bad = 0;
     for (size_t i = 0; i < c_elems; ++i) {
       const float value = out[i];
       const float error = std::fabs(value - expected);
       sum += value;
       max_abs = std::max(max_abs, error);
-      if (!std::isfinite(value) || error > tolerance)
+      if (!std::isfinite(value) || error > tolerance) {
+        first_bad = std::min(first_bad, i);
+        last_bad = i;
         ++bad;
+      }
     }
     const double mean = sum / static_cast<double>(c_elems);
     std::printf(
         "shared_abi result shape=%s mean=%.6f max_abs=%.6f bad=%zu/%zu\n",
         shape.name, mean, max_abs, bad, c_elems);
     std::fflush(stdout);
+    if (bad != 0) {
+      std::printf(
+          "shared_abi bad_range shape=%s first_index=%zu first_row=%zu "
+          "last_index=%zu last_row=%zu first_value=%.6f\n",
+          shape.name, first_bad, first_bad / shape.n, last_bad,
+          last_bad / shape.n, out[first_bad]);
+      std::fflush(stdout);
+    }
     if (bad != 0)
       return 1;
   }
