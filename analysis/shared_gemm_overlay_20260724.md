@@ -285,3 +285,40 @@ Do not attribute the D-state specifically to the latest zero-copy change: the
 same driver was already shown to wedge under full-array switching stress, and
 an `amdxdna_js` D-state worker had accumulated during this boot. The functional
 outputs before the hang were correct.
+
+## Final 30-frame result with scheduler-TDR backport
+
+A kernel-6.14 backport using the existing DRM scheduler `timedout_job` callback
+was loaded with `tdr_timeout_ms=2000` and recovery enabled. Normal 1-frame and
+5-frame gates produced no false TDR. The final 30-frame run completed fully:
+
+| Metric | min | mean | p50 | p90 | p95 | max |
+|---|---:|---:|---:|---:|---:|---:|
+| wall ms | 964 | 1023.7 | **975.5** | 1215.1 | 1217.1 | 1220 |
+| dispatch ms | 752 | 805.3 | 757.0 | 992.4 | 996.5 | 999 |
+| host-gap ms | 212 | 218.4 | 216.5 | 226.0 | 227.1 | 230 |
+
+Twenty-four of thirty frames were below 1.1 seconds. Six periodic stalls
+occurred at frames 3, 8, 13, 19, 24, and 29. They remained approximately
+240 ms and therefore did not cross the two-second TDR threshold.
+
+Post-run verification showed:
+
+```text
+TDR-related kernel messages: none
+D-state amdxdna tasks:       none
+```
+
+The stored-reference cosine remained `0.99196`.
+
+This establishes:
+
+- normal-path single-frame p50 below one second;
+- successful 30-frame completion on the TDR test module;
+- no TDR false positives during normal operation;
+- p95 still above one second because the periodic sub-two-second stall remains;
+- the recovery callback is compiled and armed but was not exercised by this
+  run because no job exceeded two seconds.
+
+The backport is a temporary, unsigned, build/test module for this boot. It has
+not replaced the installed DKMS module.
