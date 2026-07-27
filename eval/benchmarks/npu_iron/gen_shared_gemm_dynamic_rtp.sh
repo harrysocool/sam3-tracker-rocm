@@ -10,10 +10,11 @@ TRACKER=/home/amd/project/sam3-tracker-rocm
 PATCHER=$TRACKER/eval/benchmarks/npu_iron/patch_dynamic_k_rtp.py
 CANDIDATE=$ROOT/sam3_attn/shared_gemm_candidate_m32n64
 OUT="${1:-$ROOT/sam3_attn/shared_gemm_dynamic_rtp_complete}"
-LOG=/home/amd/project/9_to_delete/git_cleanup_20260721/manifests/shared_gemm_dynamic_rtp_build
+TAG=$(basename "$OUT")
+LOG=/home/amd/project/9_to_delete/git_cleanup_20260721/manifests/${TAG}_build
 
-if [ -e "$OUT" ]; then
-  echo "Refusing to overwrite existing output: $OUT" >&2
+if [ -e "$OUT" ] || [ -e "$LOG" ]; then
+  echo "Refusing to overwrite existing output/log: $OUT / $LOG" >&2
   exit 2
 fi
 mkdir -p "$OUT" "$LOG"
