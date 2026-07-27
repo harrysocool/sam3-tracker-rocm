@@ -132,3 +132,84 @@ backbone frame. Neither gate has been executed.
   exactly.
 - Do not run any NPU command, XRT diagnostic, reset, unload, or remote reboot on
   the current boot.
+
+## Compact FFN shape study
+
+Six static FFN candidates were compiled for three configurations:
+
+| Configuration | Arithmetic vs baseline | FFN1 launches | FFN2 launches | Cores |
+|---|---:|---:|---:|---:|
+| M1536/H5120 baseline | 100% | 120 | 24 | 32 |
+| M1536/H4864 | 95.0% | 114 | 24 | 32 |
+| M1408/H4864, tile_m16 | 87.1% | 209 | 44 | 32 |
+| M1344/H4864, herd6x4 | 83.1% | 133 | 28 | 24 |
+
+M1408 nearly doubles launch count, while M1344 gives up eight cores. The
+M1536/H4864 candidate is therefore the only low-risk option: it preserves the
+full 8x4 array and reduces FFN1 launch count plus hidden arithmetic by 5%.
+
+Dynamic-K v5 variants were built for compact FFN1 K=4 and FFN2 K=19. Compact
+FFN1 has packed core/init/enable CDOs identical to the common overlay. Compact
+FFN2 has identical packed core and enable CDOs but a different init CDO because
+K=4864 changes the static DMA/BD initialization. Using compact FFN2 would break
+the one-xclbin overlay for a small compute saving, so it was rejected.
+
+The guarded Phase 2 backbone uses:
+
+```text
+QKV/O             dynamic-K v5 common overlay
+FFN1 M1536/H4864  compact instruction stream on the common overlay
+FFN2 M1536/H5120  dynamic-K v5 common overlay
+Flash window/global remain separate
+```
+
+It refuses to run unless `ALLOW_DYNAMIC_K_V5_WIP=1` is explicitly set, and the
+build script has the same guard.
+
+```text
+source commit: c2abc62
+binary: /home/amd/project/npu_iron/bh_phase2_dynamic_v5_wip
+SHA256: 924c782d56ab52353496849afbc9bb70f33e023f6e7962640e45cd14c92a713b
+```
+
+The v5 ABI gate now includes compact FFN1 through the common qkv xclbin. Probe
+SHA256 is `296210a2226ad1378a4e75cf8b977a42e254ab6db72886be03622703e5268d2c`.
+
+## Driver real-wedge candidate
+
+Upstream history identified two fixes absent from the February driver and the
+minimal scheduler-TDR backport:
+
+- `2be0d73`: move `pm_runtime_resume_and_get()` out of scheduler `run_job()`
+  and into command submission, releasing the PM reference only during final
+  job cleanup. Upstream explicitly describes a deadlock when runtime suspend
+  drains the job workqueue while a running job tries to resume the device.
+- `0220d14`: guard a NULL mailbox callback handle while flushing a timed-out or
+  firmware-wedged channel during teardown.
+
+Both were backported on top of the production TDR source without changing the
+UAPI:
+
+```text
+workspace: /home/amd/project/amdxdna_tdr_pmfix_20260726
+branch: fix/tdr-pm-deadlock
+41da564 fix(driver): avoid runtime-PM scheduler deadlock
+8308f1d fix(driver): guard mailbox teardown callback
+7815ff9 test(driver): stage PM-fix candidate loader
+module SHA256: a302f61ed45f3bf6a053c967055d5b9d591d0ec96273caf208137a15d8a61124
+checkpatch: 0 errors, 0 warnings
+```
+
+This candidate is more relevant to the observed real wedge than another
+scheduler timeout tweak, but it is still unvalidated and was not loaded.
+
+## Recovery bundles
+
+Verified bundles were created under the existing quarantine manifest tree:
+
+```text
+tracker_phase2_20260726.bundle
+  SHA256 32191e364adbf8d7ab3cee1e56b6a08863d80675fbf24cac9891912e17a3164b
+amdxdna_tdr_pmfix_20260726.bundle
+  SHA256 1d33a74d5460bec16a6f36cf9ab7e99a92197c999ee867a97a73f7320399476f
+```
