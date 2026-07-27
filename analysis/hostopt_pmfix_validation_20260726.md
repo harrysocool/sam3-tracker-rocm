@@ -93,13 +93,16 @@ Post-run state:
 ```text
 amdxdna use count: 0
 D-state tasks: none
+TDR-related kernel messages: none
 ```
 
 This is strong first evidence that moving the runtime-PM get before scheduler
 queueing prevents the real deadlock mode seen on the previous boot. It is not
 proof of causality or production stability; repeated long runs and TDR log
-inspection are still required. The periodic ~220-270 ms stall is unchanged and
-continues to keep p95 above one second.
+inspection were still required. The privileged post-run check subsequently
+confirmed `tdr_timeout_ms=2000`, recovery mode enabled, no TDR messages, and no
+D-state. The periodic ~220-270 ms stall is unchanged and continues to keep p95
+above one second.
 
 ## Decision
 
