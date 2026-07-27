@@ -98,14 +98,20 @@ def main() -> None:
             (
                 i
                 for i in range(acquire_line + 1 + len(load_lines), end)
-                if re.match(r"\s*%10 = arith\.cmpi slt, %9, %c(?:4|20) : index", lines[i])
+                if re.match(r"\s*%10 = arith\.cmpi slt, %9, %c\d+ : index", lines[i])
             ),
             None,
         )
         if compare is None:
             raise RuntimeError(f"cannot find K-loop compare in core {col},{row}")
+        static_k_match = re.search(r"%9, %c(\d+)", lines[compare])
+        if static_k_match is None or int(static_k_match.group(1)) != args.k_tiles:
+            raise RuntimeError(
+                f"unexpected static K-loop bound in core {col},{row}: "
+                f"{lines[compare].strip()} (expected {args.k_tiles})"
+            )
         lines[compare] = re.sub(
-            r"%9, %c(?:4|20)", f"%9, %rtp_k_idx_{col}_{row}", lines[compare]
+            r"%9, %c\d+", f"%9, %rtp_k_idx_{col}_{row}", lines[compare]
         )
 
         # Keep the dispatch barrier held for the complete core iteration.  The
