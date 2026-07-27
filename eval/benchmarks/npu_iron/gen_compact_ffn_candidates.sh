@@ -7,6 +7,8 @@ source /opt/xilinx/xrt/setup.sh >/dev/null 2>&1
 
 ROOT=/home/amd/project/npu_iron
 SRC=$ROOT/mlir-air/programming_examples/matrix_multiplication/bf16
+MLIR_AIE=/home/amd/miniforge3/envs/mlir-air-build/lib/python3.12/site-packages/mlir_aie
+AIR=$ROOT/mlir-air/install
 OUT=$ROOT/sam3_attn/compact_ffn_candidates_20260726
 LOG=/home/amd/project/9_to_delete/git_cleanup_20260721/manifests/compact_ffn_candidates_20260726_build
 QUAR=/home/amd/project/9_to_delete/compact_ffn_generator_stale_20260726
@@ -18,7 +20,10 @@ fi
 mkdir -p "$OUT" "$LOG" "$QUAR"
 
 export PEANO_INSTALL_DIR=/home/amd/miniforge3/envs/mlir-air-build/lib/python3.12/site-packages/llvm-aie
-export PATH=/home/amd/miniforge3/envs/mlir-air-build/lib/python3.12/site-packages/mlir_aie/bin:$PATH
+export PYTHONPATH=$AIR/python:$MLIR_AIE/python:/opt/xilinx/xrt/python:${PYTHONPATH:-}
+export PATH=$AIR/bin:$MLIR_AIE/bin:$PATH
+export LD_LIBRARY_PATH=$MLIR_AIE/lib:$AIR/lib:/opt/xilinx/xrt/lib:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}
+export LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:${LIBRARY_PATH:-}
 
 cd "$SRC"
 
