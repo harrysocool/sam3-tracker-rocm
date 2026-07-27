@@ -20,6 +20,8 @@ def parse_args():
     p.add_argument('--imgsz', type=int, default=504)
     p.add_argument('--runs', type=int, default=20)
     p.add_argument('--warmup', type=int, default=3)
+    p.add_argument('--npu-bin', default=None,
+                   help='optional IRON backbone binary override')
     return p.parse_args()
 
 
@@ -34,7 +36,8 @@ def main():
     print(f"Loading model {args.checkpoint} @ {args.imgsz}px ...")
     live = SAM3Live(checkpoint=args.checkpoint, prompts=['x'],
                     imgsz=args.imgsz, mig=False, redetect_every=1)
-    npu_enc = patch_sam3_with_npu_backbone(live.model)
+    patch_kwargs = {'npu_bin': args.npu_bin} if args.npu_bin else {}
+    npu_enc = patch_sam3_with_npu_backbone(live.model, **patch_kwargs)
 
     # Preprocess the single image the same way the streaming path does.
     print(f"Preprocessing {args.image} ...")
