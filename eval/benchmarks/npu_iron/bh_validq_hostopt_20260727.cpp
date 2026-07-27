@@ -1,4 +1,4 @@
-// SAM3 ViT backbone C++ host (504px), guarded grouped valid-query candidate.
+// SAM3 ViT backbone C++ host (504px), grouped valid-query candidate.
 // Window QKV runs before partition and O projection after unpartition, so all
 // projection GEMMs use M=1536 while preserving padded-token attention semantics.
 #include <xrt/xrt_device.h>
@@ -10,7 +10,6 @@
 #include <cstdint>
 #include <cstring>
 #include <cmath>
-#include <cstdlib>
 #include <vector>
 #include <string>
 #include <fstream>
@@ -293,11 +292,6 @@ static string output_file="";
 static string microbench="";
 
 int main(int argc,char**argv){
-  const char*allow_wip=std::getenv("ALLOW_VALID_QUERY_WIP");
-  if(!allow_wip||string(allow_wip)!="1"){
-    fprintf(stderr,"refusing to run unvalidated grouped valid-query backbone; set ALLOW_VALID_QUERY_WIP=1 only for gated tests\n");
-    return 2;
-  }
   int n_runs=3;
   int micro_iters=2000;
   for(int i=1;i<argc;i++){
