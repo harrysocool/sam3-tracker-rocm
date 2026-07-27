@@ -4,6 +4,29 @@
 
 **Status:** deployed and boot-persistence verified
 
+## Canonical project ownership
+
+The recovery stack is maintained independently from SAM3 at:
+
+```text
+/home/amd/project/amdxdna-recovery
+branch: main
+tag: v0.1.0
+```
+
+This tracker report records workload-specific validation only. Driver source,
+installation/rollback tools, watchdog configuration, monitor policy, generic
+validation, and the operations runbook belong to `amdxdna-recovery`.
+
+Local delivery artifacts:
+
+```text
+dist/amdxdna-pmfix-validated.ko
+  SHA256 a302f61ed45f3bf6a053c967055d5b9d591d0ec96273caf208137a15d8a61124
+dist/amdxdna-recovery-v0.1.0.bundle
+  SHA256 ea6961a9d980d223f00519a9b84633fd97e59a73b068d931aa0f9118d5645cfb
+```
+
 ## Problem
 
 The February amdxdna driver could leave `amdxdna_js` in uninterruptible
