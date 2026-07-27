@@ -11,7 +11,7 @@ The recovery stack is maintained independently from SAM3 at:
 ```text
 /home/amd/project/amdxdna-recovery
 branch: main
-tag: v0.1.0
+tag: v0.2.0
 ```
 
 This tracker report records workload-specific validation only. Driver source,
@@ -23,9 +23,13 @@ Local delivery artifacts:
 ```text
 dist/amdxdna-pmfix-validated.ko
   SHA256 a302f61ed45f3bf6a053c967055d5b9d591d0ec96273caf208137a15d8a61124
-dist/amdxdna-recovery-v0.1.0.bundle
-  SHA256 ea6961a9d980d223f00519a9b84633fd97e59a73b068d931aa0f9118d5645cfb
+dist/amdxdna-recovery-v0.2.0.bundle
+  SHA256 53366ed9d14f8c3e2eb57b383c9e1531292ebf2f88f0597b705c845c814da9e1
 ```
+
+Version v0.2.0 moves the complete kernel source into `driver/`, isolates Kbuild
+output under ignored `build/`, and keeps the project root limited to project-
+level documentation, configuration, scripts, manifests, and system units.
 
 ## Problem
 
