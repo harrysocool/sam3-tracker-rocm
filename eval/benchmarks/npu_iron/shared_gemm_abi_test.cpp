@@ -20,9 +20,11 @@ using bf16 = uint16_t;
 
 struct Shape {
   const char *name;
+  const char *artifact;
   int m;
   int k;
   int n;
+  bool compact;
 };
 
 static vector<uint8_t> read_binary(const string &path) {
@@ -44,6 +46,9 @@ int main(int argc, char **argv) {
   string root =
       "/home/amd/project/npu_iron/sam3_attn/"
       "shared_gemm_dynamic_rtp_v5/";
+  string compact_root =
+      "/home/amd/project/npu_iron/sam3_attn/"
+      "compact_ffn_dynamic_rtp_v5/";
   for (int i = 1; i < argc; ++i) {
     const string arg = argv[i];
     if (arg == "--xclbin-shape" && i + 1 < argc)
@@ -52,6 +57,8 @@ int main(int argc, char **argv) {
       only_shape = argv[++i];
     else if (arg == "--artifact-root" && i + 1 < argc)
       root = argv[++i];
+    else if (arg == "--compact-root" && i + 1 < argc)
+      compact_root = argv[++i];
     else {
       std::fprintf(stderr, "unknown or incomplete argument: %s\n", argv[i]);
       return 2;
@@ -59,18 +66,21 @@ int main(int argc, char **argv) {
   }
   if (root.empty() || root.back() != '/')
     root.push_back('/');
+  if (compact_root.empty() || compact_root.back() != '/')
+    compact_root.push_back('/');
 
   const Shape shapes[] = {
-      {"o_g", 1536, 1024, 1024},
-      {"o_w", 2304, 1024, 1024},
-      {"qkv_g", 1536, 1024, 3072},
-      {"qkv_w", 2304, 1024, 3072},
-      {"ffn1", 1536, 1024, 5120},
-      {"ffn2", 1536, 5120, 1024},
+      {"o_g", "o_g", 1536, 1024, 1024, false},
+      {"o_w", "o_w", 2304, 1024, 1024, false},
+      {"qkv_g", "qkv_g", 1536, 1024, 3072, false},
+      {"qkv_w", "qkv_w", 2304, 1024, 3072, false},
+      {"ffn1", "ffn1", 1536, 1024, 5120, false},
+      {"ffn2", "ffn2", 1536, 5120, 1024, false},
       // Exercise both K=4 -> K=20 and K=20 -> K=4 boundaries, then repeat
-      // K=20. The v3/v4 race appeared only after a cross-dispatch K switch.
-      {"o_g", 1536, 1024, 1024},
-      {"ffn2", 1536, 5120, 1024},
+      // K=20. Also execute compact FFN1 N=4864 through the common xclbin.
+      {"o_g_repeat", "o_g", 1536, 1024, 1024, false},
+      {"ffn1_compact", "ffn1", 1536, 1024, 4864, true},
+      {"ffn2_repeat", "ffn2", 1536, 5120, 1024, false},
   };
 
   xrt::device device(0);
@@ -88,7 +98,8 @@ int main(int argc, char **argv) {
                 shape.m, shape.k, shape.n);
     std::fflush(stdout);
 
-    const auto inst = read_binary(root + shape.name + "/insts.bin");
+    const string &shape_root = shape.compact ? compact_root : root;
+    const auto inst = read_binary(shape_root + shape.artifact + "/insts.bin");
     xrt::bo inst_bo(device, inst.size(), xrt::bo::flags::cacheable,
                     kernel.group_id(1));
     inst_bo.write(inst.data());

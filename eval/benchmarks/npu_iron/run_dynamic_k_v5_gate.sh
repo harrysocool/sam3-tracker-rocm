@@ -3,8 +3,9 @@ set -uo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 ARTIFACT_ROOT=/home/amd/project/npu_iron/sam3_attn/shared_gemm_dynamic_rtp_v5
+COMPACT_ROOT=/home/amd/project/npu_iron/sam3_attn/compact_ffn_dynamic_rtp_v5
 BINARY=/home/amd/project/npu_iron/shared_gemm_abi_test_v5
-EXPECTED_SHA=ce271237cfb577fc33e1ae8f80f6281b34390e1c50b244e76eeabbae247e1b3b
+EXPECTED_SHA=296210a2226ad1378a4e75cf8b977a42e254ab6db72886be03622703e5268d2c
 VERIFY=/home/amd/project/amdxdna_tdr_flat_20260724/scripts/verify_recovery.sh
 LOG=/home/amd/project/9_to_delete/git_cleanup_20260721/manifests/dynamic_k_v5_gate.log
 
@@ -37,7 +38,8 @@ fi
 
 set +e
 timeout --signal=TERM --kill-after=5s 120s "$BINARY" \
-  --artifact-root "$ARTIFACT_ROOT" 2>&1 | tee "$LOG"
+  --artifact-root "$ARTIFACT_ROOT" --compact-root "$COMPACT_ROOT" \
+  2>&1 | tee "$LOG"
 probe_rc=${PIPESTATUS[0]}
 set -e
 echo "probe_rc=$probe_rc"
