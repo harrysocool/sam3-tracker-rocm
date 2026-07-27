@@ -2,11 +2,11 @@
 set -uo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-BINARY=/home/amd/project/npu_iron/bh_projcompact_20260726
-EXPECTED_SHA=4d57c89b57faddd62c57a0467d5ac6b0a06b93989f105ed305e1eb839198d1f1
+BINARY=${PROJCOMPACT_BINARY:-/home/amd/project/npu_iron/bh_projcompact_20260726}
+EXPECTED_SHA=${PROJCOMPACT_EXPECTED_SHA:-4d57c89b57faddd62c57a0467d5ac6b0a06b93989f105ed305e1eb839198d1f1}
 PROBE=/home/amd/project/amdxdna_tdr_flat_20260724/scripts/run_tdr_fault_probe.py
 VERIFY=/home/amd/project/amdxdna_tdr_flat_20260724/scripts/verify_recovery.sh
-LOG=/home/amd/project/9_to_delete/git_cleanup_20260721/manifests/projcompact_1f_20260726.log
+LOG=${PROJCOMPACT_LOG:-/home/amd/project/9_to_delete/git_cleanup_20260721/manifests/projcompact_1f_20260726.log}
 
 die() {
   echo "PROJCOMPACT_GATE=FAIL: $*" >&2
