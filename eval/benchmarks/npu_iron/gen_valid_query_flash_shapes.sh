@@ -27,9 +27,9 @@ export LD_LIBRARY_PATH=$MLIR_AIE/lib:$AIR/lib:/opt/xilinx/xrt/lib:/usr/lib/x86_6
 
 cd "$SRC"
 make -f Makefile compile-kernel \
-  LK=576 LQ=576 LKP=64 LQP=144 DK=64 DV=64 \
+  LK=576 LQ=576 LKP=64 LQP=96 DK=64 DV=64 \
   NUM_Q_TILES=3 PEANO_INSTALL_DIR="$PEANO_INSTALL_DIR" \
-  >"$LOG/compile_kernel_q48.log" 2>&1
+  >"$LOG/compile_kernel_q32.log" 2>&1
 
 quarantine_stale() {
   local tag=$1 path target
@@ -51,7 +51,7 @@ generate() {
   (
     cd "$BUILD"
     python3 "$SRC/attn_npu2.py" \
-      --lk 576 --lkp 64 --lq "$lq" --lqp 144 --dk 64 --dv 64 \
+      --lk 576 --lkp 64 --lq "$lq" --lqp 96 --dk 64 --dv 64 \
       --num-heads 16 --num-kv-heads 16 \
       --num-q-tiles 3 --num-cascade-stages 3 \
       --compile-mode compile-only --output-format xclbin \
@@ -65,12 +65,12 @@ generate() {
   mv "$BUILD/air.insts.bin" "$target/insts.bin"
   mv "$BUILD/air_project" "$target/air_project"
   if [[ -e "$BUILD/air.elf" ]]; then mv "$BUILD/air.elf" "$target/final.elf"; fi
-  printf 'LQ=%s LK=576 LQP=144 tile_q=48 heads=16\n' "$lq" >"$target/config.txt"
+  printf 'LQ=%s LK=576 LQP=96 tile_q=32 heads=16\n' "$lq" >"$target/config.txt"
   sha256sum "$target/final.xclbin" "$target/insts.bin"
 }
 
 generate q576 576
 generate q288 288
-generate q144 144
+generate q192_for_q144 192
 
 echo VALID_QUERY_FLASH_SHAPES_DONE
