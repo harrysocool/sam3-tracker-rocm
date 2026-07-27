@@ -11,7 +11,7 @@ The recovery stack is maintained independently from SAM3 at:
 ```text
 /home/amd/project/amdxdna-recovery
 branch: main
-tag: v0.2.0
+tag: v0.2.1
 ```
 
 This tracker report records workload-specific validation only. Driver source,
@@ -23,13 +23,21 @@ Local delivery artifacts:
 ```text
 dist/amdxdna-pmfix-validated.ko
   SHA256 a302f61ed45f3bf6a053c967055d5b9d591d0ec96273caf208137a15d8a61124
-dist/amdxdna-recovery-v0.2.0.bundle
-  SHA256 53366ed9d14f8c3e2eb57b383c9e1531292ebf2f88f0597b705c845c814da9e1
+dist/amdxdna-recovery-v0.2.1-complete.bundle
+  SHA256 262488d6333eda239d558c789ea338201d908d072de7317114cb8dcbb5bddd33
 ```
 
 Version v0.2.0 moves the complete kernel source into `driver/`, isolates Kbuild
 output under ignored `build/`, and keeps the project root limited to project-
 level documentation, configuration, scripts, manifests, and system units.
+
+Version v0.2.1 imports the unique controlled fault-injection history as
+`archive/tdr-fault-injection`, migrates active tracker probes to canonical
+tools, and moves all dated TDR development directories to:
+
+```text
+/home/amd/project/9_to_delete/tdr-legacy-20260727/
+```
 
 ## Problem
 
