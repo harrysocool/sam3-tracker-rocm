@@ -90,7 +90,6 @@ def main() -> None:
             f"%rtp_k_{col}_{row}[%c0] : memref<1xi32>",
             f"{indent}%rtp_k_idx_{col}_{row} = arith.index_cast "
             f"%rtp_k_i32_{col}_{row} : i32 to index",
-            f"{indent}aie.use_lock(%rtp_lock_{col}_{row}, Release, 0)",
         ]
         lines[acquire_line + 1 : acquire_line + 1] = load_lines
         end += len(load_lines)
@@ -108,6 +107,31 @@ def main() -> None:
         lines[compare] = re.sub(
             r"%9, %c(?:4|20)", f"%9, %rtp_k_idx_{col}_{row}", lines[compare]
         )
+
+        # Keep the dispatch barrier held for the complete core iteration.  The
+        # final output release makes the output-DMA completion a reliable
+        # boundary: a following runtime sequence cannot release this core with
+        # a new RTP value until the previous iteration has returned the lock
+        # to zero.
+        final_output_release = next(
+            (
+                i
+                for i in range(end - 1, compare, -1)
+                if re.match(
+                    rf"\s*aie\.use_lock\(%lock_{col}_{row}(?:_\d+)?, Release, 1\)",
+                    lines[i],
+                )
+            ),
+            None,
+        )
+        if final_output_release is None:
+            raise RuntimeError(
+                f"cannot find final output release in core {col},{row}"
+            )
+        final_indent = re.match(r"(\s*)", lines[final_output_release]).group(1)
+        lines[final_output_release:final_output_release] = [
+            f"{final_indent}aie.use_lock(%rtp_lock_{col}_{row}, Release, 0)"
+        ]
         modified += 1
 
     runtime_start = next(
