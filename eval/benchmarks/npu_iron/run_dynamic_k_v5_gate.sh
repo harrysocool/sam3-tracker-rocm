@@ -6,7 +6,7 @@ ARTIFACT_ROOT=/home/amd/project/npu_iron/sam3_attn/shared_gemm_dynamic_rtp_v5
 COMPACT_ROOT=/home/amd/project/npu_iron/sam3_attn/compact_ffn_dynamic_rtp_v5
 BINARY=/home/amd/project/npu_iron/shared_gemm_abi_test_v5
 EXPECTED_SHA=296210a2226ad1378a4e75cf8b977a42e254ab6db72886be03622703e5268d2c
-VERIFY=/home/amd/project/amdxdna_tdr_flat_20260724/scripts/verify_recovery.sh
+VERIFY=/home/amd/project/amdxdna-recovery/scripts/verify_recovery.sh
 LOG=/home/amd/project/9_to_delete/git_cleanup_20260721/manifests/dynamic_k_v5_gate.log
 
 die() {
