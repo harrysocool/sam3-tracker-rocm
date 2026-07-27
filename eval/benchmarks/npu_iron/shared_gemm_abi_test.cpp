@@ -41,20 +41,24 @@ int main(int argc, char **argv) {
   constexpr float tolerance = 4.0f;
   string xclbin_shape = "qkv_w";
   string only_shape;
+  string root =
+      "/home/amd/project/npu_iron/sam3_attn/"
+      "shared_gemm_dynamic_rtp_v5/";
   for (int i = 1; i < argc; ++i) {
     const string arg = argv[i];
     if (arg == "--xclbin-shape" && i + 1 < argc)
       xclbin_shape = argv[++i];
     else if (arg == "--only-shape" && i + 1 < argc)
       only_shape = argv[++i];
+    else if (arg == "--artifact-root" && i + 1 < argc)
+      root = argv[++i];
     else {
       std::fprintf(stderr, "unknown or incomplete argument: %s\n", argv[i]);
       return 2;
     }
   }
-  const string root =
-      "/home/amd/project/npu_iron/sam3_attn/"
-      "shared_gemm_dynamic_rtp_v4/";
+  if (root.empty() || root.back() != '/')
+    root.push_back('/');
 
   const Shape shapes[] = {
       {"o_g", 1536, 1024, 1024},
@@ -62,6 +66,10 @@ int main(int argc, char **argv) {
       {"qkv_g", 1536, 1024, 3072},
       {"qkv_w", 2304, 1024, 3072},
       {"ffn1", 1536, 1024, 5120},
+      {"ffn2", 1536, 5120, 1024},
+      // Exercise both K=4 -> K=20 and K=20 -> K=4 boundaries, then repeat
+      // K=20. The v3/v4 race appeared only after a cross-dispatch K switch.
+      {"o_g", 1536, 1024, 1024},
       {"ffn2", 1536, 5120, 1024},
   };
 
