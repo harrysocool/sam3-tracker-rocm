@@ -3,8 +3,8 @@ set -euo pipefail
 
 POWER_CONTROL=/sys/bus/pci/devices/0000:c6:00.1/power/control
 REPO=/home/amd/project/sam3-tracker-rocm
-BINARY=/home/amd/project/npu_iron/bh_validq_stallprof_20260727
-LOG=/home/amd/project/9_to_delete/git_cleanup_20260721/manifests/validq_stallprof_power_on_30f_20260727.log
+BINARY=${NPU_BENCH_BINARY:-/home/amd/project/npu_iron/bh_validq_stallprof_20260727}
+LOG=${NPU_BENCH_LOG:-/home/amd/project/9_to_delete/git_cleanup_20260721/manifests/validq_stallprof_power_on_30f_20260727.log}
 
 die() {
   echo "STALL_PM_COMPARISON=FAIL: $*" >&2
