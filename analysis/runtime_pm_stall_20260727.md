@@ -79,6 +79,16 @@ lifetime of a latency-sensitive NPU service, then restore `auto` when the
 service exits. Do not globally disable runtime PM without measuring idle-power
 impact.
 
+The standalone recovery project provides a static/inactive systemd oneshot:
+
+```text
+amdxdna-performance-mode.service
+start -> power/control=on
+stop  -> power/control=auto
+```
+
+Its on->auto lifecycle test passed. It is not enabled at boot.
+
 ## Decision
 
 - Runtime autosuspend is the confirmed p95 stall source.
