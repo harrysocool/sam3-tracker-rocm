@@ -1,0 +1,9 @@
+Derived validation asset; the MP4 itself is not tracked by Git.
+
+Source: local ROS2 MCAP recording, color topic
+        /sensors/camera_0/color/image
+Export: timestamp-sampled at 30 FPS, first 1330 frames
+Output: H.264, 640x480, 44.333333 seconds
+SHA256: f20b9b9f9fccee476e65e66935c89644476b16ba96d18b9853fd8abb58f4c245
+
+Regenerate with scripts/export_mcap_color_video.py and the local source MCAP.

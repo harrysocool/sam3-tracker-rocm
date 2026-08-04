@@ -64,14 +64,26 @@ run_one 04 assets/sideway_lawn.mp4 sideway_lawn 'sidewalk|lawn'
 run_one 05 assets/two_person_dog_lawn.mp4 two_person_dog_lawn 'people|dog|lawn'
 run_one 06 assets/pexels_baseball_field_drone.mp4 pexels_baseball_field_drone 'lawn'
 run_one 07 assets/gettyimages-2171845186-640_adpp.mp4 gettyimages_dog 'dog'
+run_one 08 assets/office_hallway_two_way.mp4 office_hallway_two_way 'floor|wall'
 
 printf '%s\n' \
-  'assets/office_hallway_two_way.mp4 | prompts=floor,wall | source video unavailable; existing copies already contain old masks/HUD' \
   'assets/indoor_to_outdoor.mp4 | prompts=floor,wall,sidewalk,lawn | source video unavailable; existing copies already contain old masks/HUD' \
   >"$out/missing_inputs.txt"
 
 cd "$out"
 find . -maxdepth 1 -type f -name '*.mp4' -print0 | sort -z | xargs -0 sha256sum >VIDEOS.sha256
+cd "$repo"
+sha256sum \
+  assets/blackswan.mp4 \
+  assets/parkour.mp4 \
+  assets/sidewalk_running_man.mp4 \
+  assets/sideway_lawn.mp4 \
+  assets/two_person_dog_lawn.mp4 \
+  assets/pexels_baseball_field_drone.mp4 \
+  assets/gettyimages-2171845186-640_adpp.mp4 \
+  assets/office_hallway_two_way.mp4 \
+  >"$out/INPUTS.sha256"
+cd "$out"
 check_dstate
 echo "output_dir=$out"
 echo "video_passes=$(awk -F '\t' 'NR>1&&$4=="PASS"{n++} END{print n+0}' status.tsv)"
