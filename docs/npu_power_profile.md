@@ -57,6 +57,22 @@ The lower-latency fallback uses two host threads:
 SAM3_NPU_OMP_THREADS=2 scripts/run_npu_power_profile.sh COMMAND [ARGS...]
 ```
 
+## Validation videos
+
+Run all available canonical validation videos under one scoped
+performance-mode session:
+
+```bash
+scripts/run_npu_power_profile.sh scripts/run_npu_validation_videos.sh
+```
+
+Mask-overlay MP4 files, per-video logs, status, missing-input notes and video
+SHA256 checksums are written to:
+
+```text
+results/validation_p14_power_v1_20260804/
+```
+
 The wrapper checks for an existing amdxdna D-state task before starting and
 after the command completes. It does not reboot the machine.
 
