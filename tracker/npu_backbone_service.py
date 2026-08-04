@@ -177,7 +177,11 @@ class NPUIRONVisionEncoder(nn.Module):
         return self._timing
 
 
-def patch_sam3_with_npu_backbone(model, npu_bin: str = _BIN, omp_threads: int = 8):
+def patch_sam3_with_npu_backbone(
+    model,
+    npu_bin: str | None = None,
+    omp_threads: int | None = None,
+):
     """Replace Sam3VideoModel's vision_encoder with NPUIRONVisionEncoder.
 
     Works with both plain Sam3VisionModel and MIGVisionEncoder (mig=True).
@@ -186,12 +190,19 @@ def patch_sam3_with_npu_backbone(model, npu_bin: str = _BIN, omp_threads: int = 
 
     Args:
         model: Sam3VideoModel instance (with or without prior mig=True patching)
-        npu_bin: Path to compiled bh_npu_backbone binary
-        omp_threads: OMP_NUM_THREADS for C++ binary
+        npu_bin: Path to compiled backbone binary. When omitted, read
+            ``SAM3_NPU_BIN`` and then fall back to the legacy default.
+        omp_threads: OMP_NUM_THREADS for the C++ binary. When omitted, read
+            ``SAM3_NPU_OMP_THREADS`` and then fall back to 8.
 
     Returns:
         The NPUIRONVisionEncoder instance (for timing access)
     """
+    if npu_bin is None:
+        npu_bin = os.environ.get("SAM3_NPU_BIN", _BIN)
+    if omp_threads is None:
+        omp_threads = int(os.environ.get("SAM3_NPU_OMP_THREADS", "8"))
+
     enc = model.detector_model.vision_encoder
 
     # If MIG already replaced vision_encoder, extract backbone/neck from MIG's stored reference.
