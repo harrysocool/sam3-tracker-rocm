@@ -63,7 +63,7 @@ Run all available canonical validation videos under one scoped
 performance-mode session:
 
 ```bash
-scripts/run_npu_power_profile.sh scripts/run_npu_validation_videos.sh
+scripts/run_npu_power_profile.sh bash scripts/run_npu_validation_videos.sh
 ```
 
 Mask-overlay MP4 files, per-video logs, status, missing-input notes and video

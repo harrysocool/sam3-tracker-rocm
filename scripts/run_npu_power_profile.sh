@@ -43,3 +43,18 @@ export SAM3_NPU_OMP_THREADS=${SAM3_NPU_OMP_THREADS:-1}
 echo "npu_bin=$SAM3_NPU_BIN"
 echo "omp_threads=$SAM3_NPU_OMP_THREADS"
 echo "power_control=$(cat "$power_control")"
+printf 'executing='
+printf ' %q' "$@"
+printf '\n'
+
+set +e
+"$@"
+rc=$?
+set -e
+if (( rc != 0 )); then
+  echo "NPU_POWER_PROFILE=FAIL rc=$rc" >&2
+  exit "$rc"
+fi
+
+check_dstate
+echo "NPU_POWER_PROFILE=PASS"
