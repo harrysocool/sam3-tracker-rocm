@@ -8,7 +8,7 @@ fi
 
 service=amdxdna-performance-mode.service
 power_control=/sys/bus/pci/devices/0000:c6:00.1/power/control
-default_bin=/home/amd/project/npu_iron/atb_eval_20260727/atb_common_p14_m1536_affine/bh_validq_atb_common_p14_m1536_affine_20260731
+default_bin=/home/amd/project/npu_iron/releases/sam3-vit-p14-m1536-power-v1/bin/sam3-vit-p14-m1536
 
 check_dstate() {
   local found

@@ -7,7 +7,9 @@ backbone on the current XDNA2 development system.
 
 ```text
 Backbone: P14 M1536 common-ATB + affine
-Binary SHA256: 4b2e69ef82cc3f7758ba4e5c77227a27d71ba5abb1324ca411614a5d3f71a998
+Release: /home/amd/project/npu_iron/releases/sam3-vit-p14-m1536-power-v1
+Release binary SHA256:
+  a53b5b83f77f6c87beadbd33bf52b669729e9d002ba9f361910aa8d13bc98f1a
 Host OpenMP threads: 1
 NPU runtime power: scoped performance mode while inference is active
 Target cadence: 1 FPS
@@ -29,6 +31,12 @@ power-constrained operation. It is not a replacement for MIGraphX when high
 throughput is required.
 
 ## Running a command under the profile
+
+Verify the frozen release and external weights first:
+
+```bash
+bash /home/amd/project/npu_iron/releases/sam3-vit-p14-m1536-power-v1/scripts/verify_release.sh
+```
 
 The wrapper starts the installed scoped performance-mode service, exports the
 validated NPU binary and thread count, runs the requested command, and restores
