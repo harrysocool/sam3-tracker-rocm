@@ -88,14 +88,41 @@ FPN cosine:
 ```
 
 Machine-readable result:
-`results/npu_vit_benchmark/iron_20260806_v2.json`.
+`eval/benchmarks/npu_vit/reference_results/iron_20260806.json`.
 
 Pre-run and post-run `xrt-smi` checks passed, with no D-state task.
 
-## flexml runtime-profile boundary
+## Common benchmark result: flexml
 
-The historical flexml/VitisAI validation produced approximately 2.49-2.55 s
-backbone latency, FPN cosine around 0.997, and correct masks.
+Protocol: one pre-GPU NPU warm-up, three measured runs, canonical detector
+ONNX/RAI, `assets/truck.jpg`, PyTorch FP16 reference, attended 10000 ms TDR
+profile.
+
+```text
+latency min / mean / p50 / p95 / max:
+  2487.722 / 2552.703 / 2489.509 / 2661.741 / 2680.878 ms
+
+last-hidden cosine:
+  0.951607
+
+FPN cosine:
+  p2 0.994255
+  p3 0.980527
+  p4 0.962097
+  p5 0.970781
+```
+
+Machine-readable result:
+`eval/benchmarks/npu_vit/reference_results/flexml_20260806.json`.
+
+The earlier project ledger quoted aggregate flexml FPN cosine around 0.997,
+but no per-level source log was retained and that number may refer to the
+tracker-backbone cache or an older reference stack. The canonical detector
+ONNX result above uses output names rather than positional assumptions and is
+the authoritative closeout measurement. Its last-hidden value is consistent
+with the earlier overall cosine around 0.961.
+
+## flexml runtime-profile boundary
 
 The currently installed IRON recovery profile enables scheduler TDR at 2000
 ms. The complete flexml backbone is submitted as one NPU job longer than two
@@ -110,9 +137,10 @@ device recovered; no D-state; xrt-smi healthy afterward
 
 This is a runtime-policy incompatibility, not an invalid ONNX or `.rai`.
 `run_benchmark.sh` now detects a TDR timeout below 5000 ms and refuses to launch
-flexml. A final common-schema flexml JSON run requires an attended, privileged
-switch to the approved profile with `tdr_timeout_ms >= 5000`, followed by
-restoring the normal 2000 ms IRON recovery profile.
+flexml. The final run used the guarded attended helper to load a 10000 ms
+profile, completed without a scheduler timeout, and restored the normal 2000
+ms profile. Post-run checks confirmed use count zero, no D-state, no hardware
+context, inactive performance mode, and a healthy `xrt-smi` response.
 
 ## Definition-of-done status
 
@@ -124,8 +152,8 @@ restoring the normal 2000 ms IRON recovery profile.
 | common artifact verifier | complete |
 | common benchmark/accuracy JSON harness | complete |
 | current IRON compile + run + accuracy gate | complete |
-| current flexml common-schema rerun | pending privileged TDR-profile switch |
-| final comparison and reproduction documentation | complete, pending insertion of the final flexml JSON numbers |
+| current flexml common-schema rerun | complete; 10000 ms attended profile restored to 2000 ms |
+| final comparison and reproduction documentation | complete |
 
 ## Scope boundary
 

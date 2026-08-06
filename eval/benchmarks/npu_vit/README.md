@@ -32,7 +32,20 @@ a 2000 ms scheduler timeout and will terminate this flexml job before it
 completes. `run_benchmark.sh` detects that profile and refuses to run flexml
 instead of generating a misleading TDR failure. Changing the module profile
 requires the privileged, attended driver-reload procedure documented in the
-`amdxdna-recovery` runbook; this benchmark does not automate it.
+`amdxdna-recovery` runbook; the normal runner does not change it.
+
+When an operator is physically present and can enter sudo credentials, use the
+guarded helper below. It verifies the validated module SHA, switches to a 10
+second timeout, runs one warm-up plus three measurements, checks for scheduler
+timeouts, and restores the normal 2 second profile through an EXIT/INT/TERM
+trap:
+
+```bash
+bash eval/benchmarks/npu_vit/run_flexml_attended_tdr.sh
+```
+
+Do not launch this helper unattended. If a D-state task appears, it refuses to
+unload the module and preserves the machine for attended recovery.
 
 Validated artifacts:
 
@@ -88,11 +101,11 @@ Run from the tracker repository:
 ```bash
 bash eval/benchmarks/npu_vit/verify_benchmark_artifacts.sh
 
-bash eval/benchmarks/npu_vit/run_benchmark.sh flexml \
-  --warmup 1 --runs 5
-
 bash eval/benchmarks/npu_vit/run_benchmark.sh iron \
   --warmup 1 --runs 5 --omp-threads 8
+
+# Attended only; prompts for sudo and restores the 2000 ms profile.
+bash eval/benchmarks/npu_vit/run_flexml_attended_tdr.sh
 ```
 
 Each run writes JSON under `results/npu_vit_benchmark/` with:
@@ -102,6 +115,13 @@ Each run writes JSON under `results/npu_vit_benchmark/` with:
 - min, mean, p50, p95, and max latency;
 - last-hidden, per-token, and FPN cosine metrics;
 - route metadata, kernel version, and tracker Git revision.
+
+Canonical result records are checked in under `reference_results/`:
+
+| Route | p50 / p95 | last-hidden cosine | minimum FPN cosine |
+|---|---:|---:|---:|
+| IRON P14 M1536 | 701.449 / 703.845 ms | 0.992889 | 0.996359 |
+| flexml/VitisAI EP | 2489.509 / 2661.741 ms | 0.951607 | 0.962097 |
 
 For stable IRON tail latency, run the command inside the installed scoped
 performance-mode wrapper.  Automatic runtime-PM may add a periodic outlier;

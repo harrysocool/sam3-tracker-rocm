@@ -1,0 +1,74 @@
+{
+  "accuracy": {
+    "fpn_cos": {
+      "p2": 0.9942549467086792,
+      "p3": 0.9805271029472351,
+      "p4": 0.9620965123176575,
+      "p5": 0.9707812070846558
+    },
+    "fpn_cos_min": 0.9620965123176575,
+    "last_hidden_cos": 0.9516065120697021,
+    "per_token_cos_mean": 0.9397801756858826,
+    "per_token_cos_min": -0.40320533514022827
+  },
+  "artifacts": {
+    "cache_artifact": "/home/amd/project/sam3-tracker-rocm/npu_artifacts/voe_cache_504/backbone_detector_504_v1/backbone_detector_504_v1.rai",
+    "cache_sha256": "0272945ed2254ac9b6196a1348600024a26023e5d4d340490ede42aea1f9b5b5",
+    "onnx_path": "/home/amd/project/sam3-tracker-rocm/onnx_files_504/backbone_detector/single_simplified.onnx",
+    "onnx_sha256": "f0e5f73d254d83b20421e4d40f16c9f1727a02126c99d1fd465d3caf67721003",
+    "vaip_config": "/home/amd/miniforge3/envs/rocm7p13-sam3/lib/python3.12/site-packages/voe-4.0-linux_x86_64/vaip_config.json"
+  },
+  "components": {},
+  "environment": {
+    "amdxdna_module": "/lib/modules/6.14.0-1020-oem/updates/dkms/amdxdna.ko.zst",
+    "kernel": "6.14.0-1020-oem",
+    "python": "3.12.13",
+    "pytorch": "2.12.0a0+rocm7.13.0a20260411",
+    "tdr_timeout_ms": 10000,
+    "tracker_git_head": "76d30f8fdf0c4ead110ac9afbf6be6420c2de3b1",
+    "transformers": "5.8.1",
+    "xrt_smi_version": "Version              : 2.21.75\n  Branch               : HEAD\n  Hash                 : 4eb1f4392a012b4e6eca759762389c612537f7c7\n  Hash Date            : 2026-03-09 20:30:37\n  virtio-pci Version   : 6.14.0-1020-oem\n  amdxdna Version      : 6.14.0-1020-oem\n  NPU Firmware Version : 1.1.2.65"
+  },
+  "latency": {
+    "max_ms": 2680.8776569960173,
+    "mean_ms": 2552.7026496711187,
+    "min_ms": 2487.7217870089225,
+    "p50_ms": 2489.5085050084163,
+    "p95_ms": 2661.740741797257,
+    "runs": 3
+  },
+  "protocol": {
+    "runs": 3,
+    "warmup": 1
+  },
+  "reference": {
+    "framework": "PyTorch FP16",
+    "latency_ms": 651.2093320197891
+  },
+  "route": "flexml",
+  "route_metadata": {
+    "onnxruntime_version": "1.27.0.dev20260709",
+    "pre_gpu_warmup_ms": [
+      2502.693051006645
+    ],
+    "session_create_ms": 8484.85239801812,
+    "variant": "vitisai_ep_backbone_detector_504_v1"
+  },
+  "schema_version": 1,
+  "timestamp": "2026-08-06T08:43:15.988661+00:00",
+  "workload": {
+    "hidden_size": 1024,
+    "image": "/home/amd/project/sam3-tracker-rocm/assets/truck.jpg",
+    "image_sha256": "941715e721c8864324a1425b445ea4dde0498b995c45ddce0141a58971c6ff99",
+    "image_size": 504,
+    "input_shape": [
+      1,
+      3,
+      504,
+      504
+    ],
+    "layers": 32,
+    "model": "SAM3 ViT detector backbone",
+    "tokens": 1296
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "accuracy": {
+    "fpn_cos": {
+      "p2": 0.9994428157806396,
+      "p3": 0.9978528618812561,
+      "p4": 0.9969868063926697,
+      "p5": 0.9963592290878296
+    },
+    "fpn_cos_min": 0.9963592290878296,
+    "last_hidden_cos": 0.9928892850875854,
+    "per_token_cos_mean": 0.9920786023139954,
+    "per_token_cos_min": -0.2959691286087036
+  },
+  "artifacts": {
+    "npu_binary": "/tmp/sam3-vit-p14-m1536-benchmark-20260806",
+    "npu_binary_sha256": "a53b5b83f77f6c87beadbd33bf52b669729e9d002ba9f361910aa8d13bc98f1a"
+  },
+  "components": {
+    "embed_ms": {
+      "max_ms": 0.34015500568784773,
+      "mean_ms": 0.3289983336192866,
+      "min_ms": 0.3119850007351488,
+      "p50_ms": 0.33485499443486333,
+      "p95_ms": 0.3396250045625493,
+      "runs": 3
+    },
+    "neck_ms": {
+      "max_ms": 8.957003999967128,
+      "mean_ms": 7.775206332250188,
+      "min_ms": 7.094456028426066,
+      "p50_ms": 7.274158968357369,
+      "p95_ms": 8.788719496806152,
+      "runs": 3
+    },
+    "npu_ms": {
+      "max_ms": 696.4351890201215,
+      "mean_ms": 692.8888426724976,
+      "min_ms": 690.1665449840948,
+      "p50_ms": 692.0647940132767,
+      "p95_ms": 695.998149519437,
+      "runs": 3
+    }
+  },
+  "environment": {
+    "amdxdna_module": "/lib/modules/6.14.0-1020-oem/updates/dkms/amdxdna.ko.zst",
+    "kernel": "6.14.0-1020-oem",
+    "python": "3.12.13",
+    "pytorch": "2.12.0a0+rocm7.13.0a20260411",
+    "tdr_timeout_ms": 2000,
+    "tracker_git_head": "cd2a2a879abd7cdb1222c356a474482a7be50f71",
+    "transformers": "5.8.1",
+    "xrt_smi_version": "Version              : 2.21.75\n  Branch               : HEAD\n  Hash                 : 4eb1f4392a012b4e6eca759762389c612537f7c7\n  Hash Date            : 2026-03-09 20:30:37\n  virtio-pci Version   : 6.14.0-1020-oem\n  amdxdna Version      : 6.14.0-1020-oem\n  NPU Firmware Version : 1.1.2.65"
+  },
+  "latency": {
+    "max_ms": 704.1113839950413,
+    "mean_ms": 701.0873020044528,
+    "min_ms": 697.7013180148788,
+    "p50_ms": 701.4492040034384,
+    "p95_ms": 703.845165995881,
+    "runs": 3
+  },
+  "protocol": {
+    "runs": 3,
+    "warmup": 1
+  },
+  "reference": {
+    "framework": "PyTorch FP16",
+    "latency_ms": 680.1502750022337
+  },
+  "route": "iron",
+  "route_metadata": {
+    "omp_threads": 8,
+    "variant": "p14_m1536_common_atb_affine"
+  },
+  "schema_version": 1,
+  "timestamp": "2026-08-06T03:57:41.147390+00:00",
+  "workload": {
+    "hidden_size": 1024,
+    "image": "/home/amd/project/sam3-tracker-rocm/assets/truck.jpg",
+    "image_sha256": "941715e721c8864324a1425b445ea4dde0498b995c45ddce0141a58971c6ff99",
+    "image_size": 504,
+    "input_shape": [
+      1,
+      3,
+      504,
+      504
+    ],
+    "layers": 32,
+    "model": "SAM3 ViT detector backbone",
+    "tokens": 1296
+  }
+}
