@@ -1,0 +1,41 @@
+{
+  "candidate_detection_ms": 2655.158592009684,
+  "comparison": {
+    "box_linf_max": 1.0,
+    "candidate_objects": 1,
+    "mask_iou_mean": 0.9990556775044871,
+    "mask_iou_min": 0.9990556775044871,
+    "matched_objects": 1,
+    "matches": [
+      {
+        "box_linf": 1.0,
+        "candidate_id": 1,
+        "mask_iou": 0.9990556775044871,
+        "reference_id": 0,
+        "score_abs": 0.00146484375
+      }
+    ],
+    "prompt": "truck",
+    "reference_objects": 1,
+    "score_abs_max": 0.00146484375
+  },
+  "image": "/home/amd/project/sam3-tracker-rocm/assets/truck.jpg",
+  "image_sha256": "941715e721c8864324a1425b445ea4dde0498b995c45ddce0141a58971c6ff99",
+  "passed": true,
+  "prompt": "truck",
+  "route": "iron",
+  "schema_version": 1,
+  "thresholds": {
+    "min_mask_iou": 0.95
+  },
+  "timestamp": "2026-08-06T09:02:37.529070+00:00",
+  "variant": "p14_m1536_common_atb_affine",
+  "visuals": {
+    "candidate": "/home/amd/project/sam3-tracker-rocm/results/npu_vit_benchmark/masks/iron_20260806/candidate.png",
+    "candidate_sha256": "282729da66cda30a1e1be8cd6e00d529d332040332ea26330c3b54a23dfd9ee1",
+    "difference": "/home/amd/project/sam3-tracker-rocm/results/npu_vit_benchmark/masks/iron_20260806/difference.png",
+    "difference_sha256": "324b1323cabe43e2898f463a450b03eaac02f1b881f51f2f2b57de0fa6372a68",
+    "reference": "/home/amd/project/sam3-tracker-rocm/results/npu_vit_benchmark/masks/iron_20260806/reference.png",
+    "reference_sha256": "0972cc5983b2bd240862499cc59634f7a7dd892bb3394326cff17aafcb6f8bd1"
+  }
+}

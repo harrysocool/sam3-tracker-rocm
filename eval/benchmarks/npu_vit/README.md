@@ -118,10 +118,27 @@ Each run writes JSON under `results/npu_vit_benchmark/` with:
 
 Canonical result records are checked in under `reference_results/`:
 
-| Route | p50 / p95 | last-hidden cosine | minimum FPN cosine |
-|---|---:|---:|---:|
-| IRON P14 M1536 | 701.449 / 703.845 ms | 0.992889 | 0.996359 |
-| flexml/VitisAI EP | 2489.509 / 2661.741 ms | 0.951607 | 0.962097 |
+| Route | p50 / p95 | hidden cosine | minimum FPN cosine | complete mask IoU |
+|---|---:|---:|---:|---:|
+| IRON P14 M1536 | 701.449 / 703.845 ms | 0.992889 | 0.996359 | 0.999056 |
+| flexml/VitisAI EP | 2489.509 / 2661.741 ms | 0.951607 | 0.962097 | 0.997852 |
+
+The mask gate runs the complete SAM3 detector twice on `truck.jpg` with prompt
+`truck`: once with the PyTorch vision encoder and once with the selected NPU
+route. Objects are paired by maximum mask IoU. The hard gate requires the same
+nonzero object count, all objects matched, and minimum IoU at least 0.95:
+
+```bash
+bash eval/benchmarks/npu_vit/run_mask_validation.sh iron \
+  --prompt truck \
+  --output results/npu_vit_benchmark/iron_mask.json \
+  --visual-dir results/npu_vit_benchmark/masks/iron
+```
+
+The flexml mask gate is included in the attended TDR helper. Set
+`FLEXML_MASK_ONLY=1` to skip the already-recorded latency benchmark. Both mask
+JSON records and their difference visualizations are retained under
+`reference_results/`.
 
 For stable IRON tail latency, run the command inside the installed scoped
 performance-mode wrapper.  Automatic runtime-PM may add a periodic outlier;

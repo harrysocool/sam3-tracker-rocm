@@ -1,0 +1,41 @@
+{
+  "candidate_detection_ms": 2596.4135639951564,
+  "comparison": {
+    "box_linf_max": 1.0,
+    "candidate_objects": 1,
+    "mask_iou_mean": 0.997852233676976,
+    "mask_iou_min": 0.997852233676976,
+    "matched_objects": 1,
+    "matches": [
+      {
+        "box_linf": 1.0,
+        "candidate_id": 1,
+        "mask_iou": 0.997852233676976,
+        "reference_id": 0,
+        "score_abs": 0.00146484375
+      }
+    ],
+    "prompt": "truck",
+    "reference_objects": 1,
+    "score_abs_max": 0.00146484375
+  },
+  "image": "/home/amd/project/sam3-tracker-rocm/assets/truck.jpg",
+  "image_sha256": "941715e721c8864324a1425b445ea4dde0498b995c45ddce0141a58971c6ff99",
+  "passed": true,
+  "prompt": "truck",
+  "route": "flexml",
+  "schema_version": 1,
+  "thresholds": {
+    "min_mask_iou": 0.95
+  },
+  "timestamp": "2026-08-06T09:03:54.711504+00:00",
+  "variant": "vitisai_ep_backbone_detector_504_v1",
+  "visuals": {
+    "candidate": "/home/amd/project/sam3-tracker-rocm/results/npu_vit_benchmark/masks/flexml_20260806/candidate.png",
+    "candidate_sha256": "c3bd4c4ba329d54589ace4900f13fcf085fd262a92a3c9d10a41d9b9fb80dc25",
+    "difference": "/home/amd/project/sam3-tracker-rocm/results/npu_vit_benchmark/masks/flexml_20260806/difference.png",
+    "difference_sha256": "902b183a2607d2bdb503e58b7b67962495a6b47ed9fbd3a1339d609dc4b5553c",
+    "reference": "/home/amd/project/sam3-tracker-rocm/results/npu_vit_benchmark/masks/flexml_20260806/reference.png",
+    "reference_sha256": "0972cc5983b2bd240862499cc59634f7a7dd892bb3394326cff17aafcb6f8bd1"
+  }
+}

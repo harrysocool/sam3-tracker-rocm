@@ -142,6 +142,30 @@ profile, completed without a scheduler timeout, and restored the normal 2000
 ms profile. Post-run checks confirmed use count zero, no D-state, no hardware
 context, inactive performance mode, and a healthy `xrt-smi` response.
 
+## Complete detector mask validation
+
+Backbone cosine is an intermediate signal, so both routes were additionally
+run through the complete SAM3 detector on `assets/truck.jpg` with prompt
+`truck`. The same PyTorch model run was used as the mask reference. Objects
+were paired by maximum mask IoU, with a hard gate of equal nonzero object
+count, all objects matched, and minimum IoU at least 0.95.
+
+| Route | Reference / candidate / matched | Mask IoU | Box max error | Score max error |
+|---|---:|---:|---:|---:|
+| IRON P14 M1536 | 1 / 1 / 1 | 0.999056 | 1 px | 0.001465 |
+| flexml/VitisAI EP | 1 / 1 / 1 | 0.997852 | 1 px | 0.001465 |
+
+Both routes passed. Reference, candidate, and difference visualizations were
+generated and visually inspected. The flexml difference is confined to a very
+small number of boundary pixels, consistent with the measured IoU. Canonical
+JSON records and difference images are retained under
+`eval/benchmarks/npu_vit/reference_results/`.
+
+The flexml mask run used the guarded 10000 ms profile and completed without a
+scheduler timeout. The helper then restored 2000 ms; independent post-run
+checks found no D-state, use count zero, no hardware context, inactive
+performance mode, and healthy `xrt-smi` output.
+
 ## Definition-of-done status
 
 | Requirement | Status |
@@ -153,6 +177,7 @@ context, inactive performance mode, and a healthy `xrt-smi` response.
 | common benchmark/accuracy JSON harness | complete |
 | current IRON compile + run + accuracy gate | complete |
 | current flexml common-schema rerun | complete; 10000 ms attended profile restored to 2000 ms |
+| complete detector mask gate for both routes | complete; IoU 0.999056 / 0.997852 |
 | final comparison and reproduction documentation | complete |
 
 ## Scope boundary

@@ -9,6 +9,8 @@ target_tdr_ms=${FLEXML_TDR_TIMEOUT_MS:-10000}
 normal_tdr_ms=2000
 result=${FLEXML_BENCH_RESULT:-results/npu_vit_benchmark/flexml_20260806.json}
 log=${FLEXML_BENCH_LOG:-results/npu_vit_benchmark/flexml_attended_20260806.log}
+mask_result=${FLEXML_MASK_RESULT:-results/npu_vit_benchmark/flexml_mask_20260806.json}
+mask_visuals=${FLEXML_MASK_VISUALS:-results/npu_vit_benchmark/masks/flexml_20260806}
 
 die(){ echo "FLEXML_ATTENDED_BENCH=FAIL: $*" >&2; exit 1; }
 
@@ -116,8 +118,14 @@ start_epoch=$(date +%s)
 load_profile "$target_tdr_ms"
 
 set -o pipefail
-bash eval/benchmarks/npu_vit/run_benchmark.sh flexml \
-  --warmup 1 --runs 3 --output "$result" 2>&1 | tee "$log"
+if [[ ${FLEXML_MASK_ONLY:-0} != 1 ]]; then
+  bash eval/benchmarks/npu_vit/run_benchmark.sh flexml \
+    --warmup 1 --runs 3 --output "$result" 2>&1 | tee "$log"
+fi
+
+bash eval/benchmarks/npu_vit/run_mask_validation.sh flexml \
+  --prompt truck --output "$mask_result" --visual-dir "$mask_visuals" \
+  2>&1 | tee -a "$log"
 
 if journalctl -k -b --since "@$start_epoch" --no-pager 2>/dev/null | \
   grep -qE 'DRM scheduler timeout|aie2_sched_job_timedout'; then
@@ -126,4 +134,4 @@ fi
 
 require_idle
 xrt_check >/dev/null
-echo "FLEXML_ATTENDED_BENCH=PASS result=$repo/$result log=$repo/$log"
+echo "FLEXML_ATTENDED_BENCH=PASS result=$repo/$result mask=$repo/$mask_result log=$repo/$log"
