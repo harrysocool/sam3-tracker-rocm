@@ -157,3 +157,21 @@ This benchmark validates compilation, execution, correctness, and performance.
 It does not claim real-time robotics suitability.  Asynchronous video keyframe
 integration, a 500 ms target, and further kernel exploration are outside the
 closeout acceptance criteria.
+
+## Frozen milestone
+
+The canonical milestone is `sam3-vit-xdna2-benchmark-v1`. Its scope, results,
+compile-reproducibility boundary, runtime state, and resume policy are in
+`STATUS.md`.
+
+Verify all retained source, model, NPU, driver, and result artifacts without
+running an NPU workload:
+
+```bash
+bash eval/benchmarks/npu_vit/verify_frozen_state.sh
+```
+
+`FROZEN_ARTIFACTS.sha256` is the machine-readable manifest;
+`FROZEN_ARTIFACTS.tsv` records the corresponding byte sizes. Multi-gigabyte
+ONNX, RAI, and model-weight files remain in their canonical locations and are
+referenced by hash rather than duplicated into the closeout archive.
