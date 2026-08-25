@@ -14,8 +14,8 @@ from tracker.mig_vision_encoder import patch_sam3_video_model_with_mig
 from tracker.mig_detr_encoder import patch_sam3_video_model_detr_encoder
 
 device, dtype = torch.device("cuda"), torch.float16
-proc = AutoProcessor.from_pretrained("/home/amd/project/sam3/model/sam3")
-model = Sam3VideoModel.from_pretrained("/home/amd/project/sam3/model/sam3").to(device).to(dtype).eval()
+proc = AutoProcessor.from_pretrained("model/sam3")
+model = Sam3VideoModel.from_pretrained("model/sam3").to(device).to(dtype).eval()
 mxr_bb = MIGraphXBackbone(Path("onnx_files_1008/backbone_detector/single_simplified.onnx"),
                            Path("onnx_files_1008/backbone_detector/tuned.mxr"))
 mxr_bb.warmup(2)

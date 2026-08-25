@@ -38,7 +38,7 @@ def parse_args():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("--checkpoint", type=Path, default=Path("/home/amd/project/sam3/model/sam3"))
+    p.add_argument("--checkpoint", type=Path, default=Path("model/sam3"))
     p.add_argument("--onnx-dir", type=Path, default=None,
                    help="Resolution root (e.g. onnx_files_1008). Outputs go to "
                         "<onnx-dir>/detector_modules/. Defaults from --imgsz.")
