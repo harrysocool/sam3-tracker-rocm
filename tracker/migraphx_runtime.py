@@ -128,7 +128,12 @@ class MIGraphXBackbone:
     3-output backbone .mxr — the box-prompt tracker doesn't read it either way.
     """
 
-    def __init__(self, onnx_path: str | Path, cache_path: str | Path) -> None:
+    def __init__(
+        self,
+        onnx_path: str | Path,
+        cache_path: str | Path,
+        gpu_io_cache_path: str | Path | None = None,
+    ) -> None:
         import sys
         # Prefer the ROCm lib dir where the Python binding lives; fall back to build dir.
         import glob as _g2, os as _o2
@@ -151,13 +156,23 @@ class MIGraphXBackbone:
         self._mxr = _mxr
 
         cache_path = Path(cache_path)
-        onnx_path  = Path(onnx_path)
+        onnx_path = Path(onnx_path)
+        gpu_io_cache_path = (
+            Path(gpu_io_cache_path) if gpu_io_cache_path is not None else None
+        )
+        load_path = (
+            gpu_io_cache_path
+            if gpu_io_cache_path is not None and gpu_io_cache_path.exists()
+            else cache_path
+        )
+        self.gpu_io = load_path == gpu_io_cache_path
 
-        if cache_path.exists():
-            print(f"  MIGraphX backbone: loading {cache_path.name} ...")
+        if load_path.exists():
+            mode = " GPU-I/O" if self.gpu_io else ""
+            print(f"  MIGraphX backbone{mode}: loading {load_path.name} ...")
             t0 = time.perf_counter()
-            self._prog = _mxr.load(str(cache_path))
-            print(f"  MIGraphX backbone: ready in {time.perf_counter()-t0:.1f}s")
+            self._prog = _mxr.load(str(load_path))
+            print(f"  MIGraphX backbone{mode}: ready in {time.perf_counter()-t0:.1f}s")
         elif onnx_path.exists():
             print(f"  MIGraphX backbone: compiling {onnx_path.name} with autotuning (~3 min) ...")
             t0 = time.perf_counter()
@@ -178,7 +193,30 @@ class MIGraphXBackbone:
                 f"or {onnx_path} (to compile from scratch); neither found."
             )
 
+        self._gpu_output_names = sorted(
+            (
+                name for name in self._prog.get_parameter_names()
+                if "#output_" in name
+            ),
+            key=lambda name: int(name.rsplit("_", 1)[1]),
+        )
+        if self.gpu_io and not self._gpu_output_names:
+            raise RuntimeError(
+                f"{load_path} has no GPU output parameters; rebuild it with "
+                "compile_backbone_mxr.py --gpu-io"
+            )
+
     def warmup(self, n: int = 3) -> None:
+        if self.gpu_io:
+            import torch
+
+            shape = list(self._prog.get_parameter_shapes()["pixel_values"].lens())
+            data = torch.randn(*shape, device="cuda", dtype=torch.float32)
+            for _ in range(n):
+                self.run_torch(data)
+            torch.cuda.synchronize()
+            return
+
         # Use random normal (not zeros) and keep array reference alive across all runs.
         # MIGraphX may access input pointer asynchronously; a pre-allocated persistent
         # array prevents dangling-pointer reads if a temporary were GC'd mid-run.
@@ -201,6 +239,12 @@ class MIGraphXBackbone:
         need last_hidden_state should index `outputs[4]` directly and check
         for None.
         """
+        if self.gpu_io:
+            raise RuntimeError(
+                "This backbone uses GPU-resident I/O; call run_torch() with a "
+                "Torch CUDA/HIP tensor."
+            )
+
         # Keep explicit references to prevent GC of data/argument before GPU finishes.
         img_cont = np.ascontiguousarray(img_np)
         arg      = self._mxr.argument(img_cont)
@@ -218,6 +262,65 @@ class MIGraphXBackbone:
         while len(out_arrs) < 4:
             out_arrs.append(None)
         return tuple(out_arrs)
+
+    def run_torch(self, pixel_values):
+        """Run a GPU-I/O program directly on Torch CUDA/HIP allocations."""
+        if not self.gpu_io:
+            raise RuntimeError("run_torch() requires a tuned_gpuio.mxr program")
+
+        import torch
+
+        if pixel_values.device.type != "cuda":
+            raise ValueError(
+                f"GPU-resident backbone requires a CUDA/HIP tensor, got "
+                f"{pixel_values.device}"
+            )
+        input_tensor = pixel_values.detach().to(dtype=torch.float32).contiguous()
+
+        mgx_to_torch = {
+            "bool_type": torch.bool,
+            "uint8_type": torch.uint8,
+            "int8_type": torch.int8,
+            "int16_type": torch.int16,
+            "int32_type": torch.int32,
+            "int64_type": torch.int64,
+            "half_type": torch.float16,
+            "float_type": torch.float32,
+            "double_type": torch.float64,
+        }
+        torch_to_mgx = {value: key for key, value in mgx_to_torch.items()}
+
+        def to_argument(tensor):
+            shape = self._mxr.shape(
+                type=torch_to_mgx[tensor.dtype],
+                lens=list(tensor.shape),
+                strides=list(tensor.stride()),
+            )
+            return self._mxr.argument_from_pointer(shape, tensor.data_ptr())
+
+        args = {"pixel_values": to_argument(input_tensor)}
+        outputs = []
+        parameter_shapes = self._prog.get_parameter_shapes()
+        for name in self._gpu_output_names:
+            shape = parameter_shapes[name]
+            tensor = torch.empty_strided(
+                list(shape.lens()),
+                list(shape.strides()),
+                dtype=mgx_to_torch[shape.type_string()],
+                device=pixel_values.device,
+            )
+            outputs.append(tensor)
+            args[name] = to_argument(tensor)
+
+        stream = torch.cuda.current_stream(device=pixel_values.device)
+        self._prog.run_async(args, stream.cuda_stream, "ihipStream_t")
+        # MIGraphX only retains raw pointers. Synchronize before the temporary
+        # FP32 input and argument wrappers leave scope, otherwise Torch's
+        # caching allocator may reuse the input storage while the HIP work is
+        # still in flight. The following model stages consume these outputs
+        # immediately, so this is already a required dependency boundary.
+        torch.cuda.synchronize(device=pixel_values.device)
+        return tuple(outputs)
 
 
 # ---------------------------------------------------------------------------

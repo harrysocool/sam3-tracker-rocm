@@ -79,6 +79,7 @@ def patch_mig(model, onnx_dir: Path):
     mxr = MIGraphXBackbone(
         onnx_path=det_dir / "single_simplified.onnx",
         cache_path=det_dir / "tuned.mxr",
+        gpu_io_cache_path=det_dir / "tuned_gpuio.mxr",
     )
     patch_sam3_video_model_with_mig(model, mxr)
     detr_onnx = onnx_dir / "detector_modules" / "detr_encoder_simplified.onnx"

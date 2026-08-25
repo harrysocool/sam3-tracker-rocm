@@ -126,7 +126,7 @@ After `setup.sh`, activate the environment and build artefacts for the pipeline(
 ```bash
 conda activate sam3-tracker
 
-# Text-prompt MIG — demo_live.py / tools/text_baseline.py --mig  (~18 min @504px)
+# Text-prompt MIG — demo_live.py / tools/text_baseline.py --mig  (~21 min @504px)
 python export/build.py --pipeline text --imgsz 504
 
 # Box-prompt only — demo_box.py  (~10 min @504px)
@@ -138,6 +138,10 @@ python export/build.py --pipeline all --imgsz 504
 
 Each step skips if output already exists — safe to re-run after interruption.
 Use `--force` to rebuild from scratch.
+
+The text build retains `backbone_detector/tuned.mxr` as the host-I/O fallback
+and additionally creates `backbone_detector/tuned_gpuio.mxr`. Text inference
+prefers the GPU-I/O artifact automatically when it is present.
 
 <details>
 <summary><b>1008px (higher mask quality, 3-10× slower)</b></summary>
@@ -204,7 +208,7 @@ Three entry points — pick the one matching your use case:
 | Demo | Prompt | Pipeline | Steady-state FPS @504 | Use for |
 |---|---|---|---|---|
 | **`demo_live.py`** | text(s) | **Streaming hybrid** — SAM3 keyframe + tracker propagate | **~5 FPS multi-prompt** | production / ROS / live sensor |
-| `tools/text_baseline.py --mig` | text | Offline HF Sam3VideoModel, SAM3 every frame | 5.5 (1 obj) / 4.4 (4 obj) | debugging / regression baseline |
+| `tools/text_baseline.py --mig` | text | Offline HF Sam3VideoModel, SAM3 every frame | **6.58** (1 obj) | debugging / regression baseline |
 | `demo_box.py` | bounding box | Tracking only (no detection) | **12.2** (single-object) | specialized: annotation / max-perf |
 
 All commands below assume you have activated the conda env (`conda activate sam3-tracker`)
@@ -353,7 +357,7 @@ section.*
 | Path | Pipeline | Steady-state FPS |
 |---|---|---|
 | **`demo_live.py` (hybrid)** | SAM3 every 1000ms keyframe + tracker propagate between | **~5 FPS multi-prompt** |
-| `tools/text_baseline.py --mig` | SAM3 every frame (offline batch) | 5.5 (1 obj) / 4.4 (4 obj) |
+| `tools/text_baseline.py --mig` | SAM3 every frame (offline batch) | **6.58** (1 obj) |
 | `tools/text_baseline.py` (no MIG) | Pure PyTorch baseline | ~2.6 |
 
 Mask quality: PT vs MIG mean IoU = **0.994** @504px (verified frame-by-frame on 20-30 frames).
@@ -363,9 +367,9 @@ Multi-object scaling @504 MIG (backbone shared across all objects):
 
 | Objects tracked | tools/text_baseline.py prop FPS |
 |---|---|
-| 1 | 5.5 |
-| 4 | ~4.4 |
-| 8 (estimated) | ~2.9 |
+| 1 | **6.58** |
+| 4 | ~4.4 (pre-GPU-I/O baseline; re-benchmark pending) |
+| 8 (estimated) | ~2.9 (pre-GPU-I/O estimate) |
 
 ### Box-prompt (`demo_box.py`) — specialized, fastest
 
@@ -396,16 +400,18 @@ Mask quality (text-prompt): PT vs MIG mean IoU = 0.999 @1008px.
 
 ### Per-module latency breakdown (504px, MIGraphX backbone)
 
-**Text-prompt propagation** (169 ms/frame → 5.9 FPS per-module sum; ~5.5 measured end-to-end, see table above) — MLIR attention backbone:
+**Text-prompt propagation** (137 ms/frame in the 30-frame module profile;
+6.58 FPS measured end-to-end over 47 propagation frames) — GPU-resident MLIR
+attention backbone plus ORT GPU I/O binding:
 
 | Stage | Latency | Backend |
 |---|---:|---|
-| backbone (vision encoder) | ~97 ms | MIGraphX .mxr + MLIR attention ops (FP16) |
-| memory_attention | ~20 ms | ORT MIGraphX EP FP16 ¹ |
-| detr_encoder | ~11 ms | ORT MIGraphX EP FP16 |
+| backbone (vision encoder) | ~67 ms | MIGraphX `tuned_gpuio.mxr` + MLIR attention ops |
+| memory_attention | ~20 ms average ² | ORT MIGraphX EP FP16 + GPU I/O binding ¹ |
+| detr_encoder | ~7 ms | ORT MIGraphX EP FP16 + GPU I/O binding |
 | detr_decoder | ~11 ms | PyTorch |
 | tracker_neck + mask_decoder + memory_encoder | ~8 ms | PyTorch |
-| **Total propagation frame** | **~169 ms → 5.9 FPS** | |
+| **Total propagation frame** | **~137 ms → 7.3 FPS profile / 6.58 FPS E2E** | |
 
 **Box-prompt propagation** (~82 ms/frame → 12.21 FPS, with MLIR attention backbone):
 
@@ -421,6 +427,10 @@ Mask quality (text-prompt): PT vs MIG mean IoU = 0.999 @1008px.
 a precompiled `.mxr` because the direct MIGraphX FP16 attention kernel produces NaN outputs
 (analogous to [ROCm/AMDMIGraphX#3596](https://github.com/ROCm/AMDMIGraphX/issues/3596)).
 The ORT EP path uses a different FP16 quantization path that produces correct results.
+
+² Early frames use the PyTorch memory-attention fallback until the seven-slot
+spatial bank is full. The fixed-shape GPU-I/O-bound ORT call is ~8.4 ms in
+steady-state microbenchmarks.
 
 ### Backbone speed comparison (504px)
 
@@ -509,7 +519,7 @@ sam3-tracker-rocm/
 | Limitation | Detail / workaround |
 |---|---|
 | **Backbone cold-start** | First `.mxr` compile takes ~3 min (504px) / ~9 min (1008px) with autotuning; then loads in ~3s. Pre-build once: `python export/build.py --pipeline box --imgsz 504`. |
-| **Text-prompt: vision_encoder dominates** | 65% of prop time @504px (57% @1008px). Each frame does a GPU→CPU→GPU round-trip through the MIG bridge (~37 ms @1008px). GPU-resident MIG (HIP IPC) is the main remaining optimization target. |
+| **Text-prompt: vision_encoder dominates** | About 49% of the 504px profile after switching to GPU-resident MIGraphX I/O. The 1008px GPU-I/O artifact has not yet been benchmarked and falls back to `tuned.mxr` until built. |
 | **Small modules don't gain from ORT MIG EP** | Under ~30 ms the CPU↔GPU round-trip ≥ PT runtime. `detr_decoder` (~11–25 ms) confirmed net-neutral; `mask_decoder` (~5 ms) / `memory_encoder` (~6 ms) too small to MIG-ize. |
 | **MIG attention must use ORT MIG EP** | Direct `parse_onnx + quantize_fp16` on `memory_attention` / `detr_encoder` yields NaN ([AMDMIGraphX#3596](https://github.com/ROCm/AMDMIGraphX/issues/3596)); even FP32 has ~0.05 max-diff that breaks detection thresholds. ORT EP with `migraphx_fp16_enable=1` is correct. |
 | **memory_attention K=64 cliff** | MIGraphX picks a 14× slower kernel at `num_object_pointer_tokens=64` (791 ms vs 55 ms at K≤32). Shim caps K=32 and truncates oldest pointers — invisible for continuous tracking; re-ID across long disappearances may degrade slightly. |

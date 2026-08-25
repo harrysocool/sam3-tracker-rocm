@@ -72,20 +72,27 @@ class MIGVisionEncoder(nn.Module):
         device = pixel_values.device
         dtype = pixel_values.dtype
 
-        # MIGraphX wants float32 numpy on CPU
-        np_in = pixel_values.detach().float().cpu().numpy().astype(np.float32, copy=False)
-        outs = self.mxr(np_in)  # (fpn_0, fpn_1, fpn_2, fpn_3, last_hidden_state)
+        if self.mxr.gpu_io:
+            outs = self.mxr.run_torch(pixel_values)
+        else:
+            # Host-I/O fallback for existing tuned.mxr artifacts.
+            np_in = pixel_values.detach().float().cpu().numpy().astype(np.float32, copy=False)
+            outs = self.mxr(np_in)
         if len(outs) < 5 or outs[4] is None:
             raise RuntimeError(
                 "MIGVisionEncoder requires a 5-output backbone (4 FPN + last_hidden_state). "
                 "Re-export with: python export/backbone/export_backbone_single.py "
                 "--backbone-source detector --output-name backbone_detector_lhs_fp32.onnx"
             )
-        f0, f1, f2, f3, lhs_np = outs
+        f0, f1, f2, f3, lhs = outs
 
-        fpn = [_to_torch_output(t, device, dtype) for t in (f0, f1, f2, f3)]
+        if self.mxr.gpu_io:
+            fpn = [tensor.to(dtype=dtype) for tensor in (f0, f1, f2, f3)]
+            last_hidden_state = lhs.to(dtype=dtype)
+        else:
+            fpn = [_to_torch_output(t, device, dtype) for t in (f0, f1, f2, f3)]
+            last_hidden_state = _to_torch_output(lhs, device, dtype)
         pe = [self.position_encoding(t.shape, t.device, t.dtype) for t in fpn]
-        last_hidden_state = _to_torch_output(lhs_np, device, dtype)
 
         return Sam3VisionEncoderOutput(
             last_hidden_state=last_hidden_state,

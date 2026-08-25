@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Build all MIG artefacts needed for `tools/text_baseline.py --mig` in one command.
 
-Runs the full 5-step export pipeline for the text-prompt MIG path:
+Runs the full 6-step export pipeline for the text-prompt MIG path:
   1. export_backbone_single   — ViT backbone ONNX (FP32, 4 FPN + last_hidden_state)
   2. simplify_backbone        — onnxsim graph simplification
-  3. compile_backbone_mxr     — MIGraphX kernel autotune → tuned.mxr  (~12 min @1008)
-  4. export_detr_encoder      — DETR encoder ONNX + onnxsim
-  5. export_memory_attention_padded — padded memory_attention ONNX (ORT MIG EP)
+  3. compile_backbone_mxr     — host-I/O fallback → tuned.mxr
+  4. compile_backbone_mxr     — Torch GPU-I/O path → tuned_gpuio.mxr
+  5. export_detr_encoder      — DETR encoder ONNX + onnxsim
+  6. export_memory_attention_padded — padded memory_attention ONNX (ORT MIG EP)
 
 Each step skips if its output file already exists (use --force to rebuild).
 
@@ -101,7 +102,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "--imgsz", str(imgsz),
                 "--backbone-source", "detector",
                 "--checkpoint", str(args.checkpoint),
-            ], f"[1/5] Export backbone ONNX @{imgsz}px")
+            ], f"[1/6] Export backbone ONNX @{imgsz}px")
 
         # ── Step 2: simplify backbone ─────────────────────────────────────
         out = det_dir / "single_simplified.onnx"
@@ -112,7 +113,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "--onnx-dir", str(onnx_dir),
                 "--imgsz", str(imgsz),
                 "--backbone-source", "detector",
-            ], f"[2/5] Simplify backbone @{imgsz}px")
+            ], f"[2/6] Simplify backbone @{imgsz}px")
 
         # ── Step 3: compile .mxr ─────────────────────────────────────────
         out = det_dir / "tuned.mxr"
@@ -124,7 +125,22 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "--imgsz", str(imgsz),
                 "--backbone-source", "detector",
                 "--skip-verify",
-            ], f"[3/5] Compile backbone .mxr @{imgsz}px  (~12 min at 1008px)")
+            ], f"[3/6] Compile backbone .mxr @{imgsz}px  (~12 min at 1008px)")
+
+        # Keep the established host-I/O artifact as a portable fallback and
+        # compile a distinct GPU-resident artifact for the Torch text path.
+        # Never overwrite tuned.mxr: box/debug consumers still use NumPy I/O.
+        gpu_io_out = det_dir / "tuned_gpuio.mxr"
+        if not exists(gpu_io_out, "tuned_gpuio.mxr", args.force):
+            ok = ok and run([
+                sys.executable,
+                "export/backbone/compile_backbone_mxr.py",
+                "--onnx-dir", str(onnx_dir),
+                "--imgsz", str(imgsz),
+                "--backbone-source", "detector",
+                "--gpu-io",
+                "--skip-verify",
+            ], f"[4/6] Compile GPU-I/O backbone .mxr @{imgsz}px")
 
     # ── Step 4: export DETR encoder ───────────────────────────────────────
     if run_all or "detr_encoder" in steps:
@@ -135,7 +151,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "export/detector/export_detr_encoder.py",
                 "--imgsz", str(imgsz),
                 "--checkpoint", str(args.checkpoint),
-            ], f"[4/5] Export DETR encoder @{imgsz}px")
+            ], f"[5/6] Export DETR encoder @{imgsz}px")
 
     # ── Step 5: export memory_attention ──────────────────────────────────
     if run_all or "memory_attention" in steps:
@@ -150,7 +166,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "--imgsz", str(imgsz),
                 "--ptr-tokens", str(ptr_tokens),
                 "--checkpoint", str(args.checkpoint),
-            ], f"[5/5] Export memory_attention (S7_P{ptr_tokens}) @{imgsz}px")
+            ], f"[6/6] Export memory_attention (S7_P{ptr_tokens}) @{imgsz}px")
 
     return ok
 

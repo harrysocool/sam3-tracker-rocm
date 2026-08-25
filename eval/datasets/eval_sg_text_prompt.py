@@ -96,7 +96,11 @@ def main():
         from tracker.mig_detr_encoder import patch_sam3_video_model_detr_encoder
         from tracker.mig_memory_attention import patch_sam3_video_model_memory_attention
         det_dir = args.onnx_dir / "backbone_detector"
-        mxr = MIGraphXBackbone(det_dir / "single_simplified.onnx", det_dir / "tuned.mxr")
+        mxr = MIGraphXBackbone(
+            det_dir / "single_simplified.onnx",
+            det_dir / "tuned.mxr",
+            gpu_io_cache_path=det_dir / "tuned_gpuio.mxr",
+        )
         patch_sam3_video_model_with_mig(model, mxr)
         detr_onnx = args.onnx_dir / "detector_modules" / "detr_encoder_simplified.onnx"
         if detr_onnx.exists():

@@ -54,6 +54,7 @@ def main():
         mxr = MIGraphXBackbone(
             onnx_path=det_dir / "single_simplified.onnx",
             cache_path=det_dir / "tuned.mxr",
+            gpu_io_cache_path=det_dir / "tuned_gpuio.mxr",
         )
         mxr.warmup(n=2)
         patch_sam3_video_model_with_mig(model, mxr)

@@ -6,8 +6,11 @@
 | Pipeline | 504px FPS | 1008px FPS |
 |---|---|---|
 | Box-prompt (`demo_box.py`) | **12.21** | **3.22** |
-| Text-prompt MIG (`tools/text_baseline.py --mig`) | **5.5** | **~1.5** |
+| Text-prompt MIG (`tools/text_baseline.py --mig`) | **6.58** | **~1.5** ¹ |
 | Text-prompt PyTorch | 2.6 | 0.52 |
+
+¹ 1008px has not yet been rebuilt with the GPU-I/O artifact and retains the
+host-I/O baseline.
 
 ---
 
@@ -45,14 +48,14 @@ Input frame
 
 ```
 Input frame
-  → backbone_detector/tuned.mxr  [MIGraphX 2.15+patches, MLIR attn, FP16]   ~97ms / ~378ms
+  → backbone_detector/tuned_gpuio.mxr [MIGraphX, MLIR attn, GPU I/O]        ~67ms / unmeasured
   → tracker_neck                 [PyTorch]                                      ~4ms /  ~23ms
-  → detr_encoder                 [ORT MIGraphX EP, FP16] ¹                    ~12ms /  ~64ms
+  → detr_encoder                 [ORT MIGraphX EP, FP16, GPU I/O] ¹             ~7ms /  ~64ms
   → detr_decoder                 [PyTorch]                                     ~11ms /  ~25ms
-  → memory_attention             [ORT MIGraphX EP, FP16, padded S7×P32] ¹     ~19ms / ~139ms
+  → memory_attention             [ORT MIGraphX EP, FP16, GPU I/O] ¹            ~20ms / ~139ms
   → mask_decoder + memory_encoder [PyTorch]                                     ~4ms /  ~10ms
   ─────────────────────────────────────────────────────────────────────────────────
-  Total:  504px → ~169ms → 5.9 FPS   |   1008px → ~722ms → ~1.4 FPS
+  Total:  504px → ~137ms profile / 6.58 FPS E2E   |   1008px → ~722ms → ~1.4 FPS
 ```
 
 ¹ Attention modules route through ORT MIGraphX EP (not direct API) due to FP16
@@ -93,6 +96,7 @@ fallbacks in `tracker/rocm_patches.py`, applied automatically at import).
 | B.4 | MIG memory_attention (padded S7×P32, ORT MIG EP) | **1.53** | — |
 | C | 504px config-based init (image_size setter cascade) | 1.53 | **5.12** |
 | D | MLIR attention backbone (`MIGRAPHX_MLIR_USE_SPECIFIC_OPS=attention`) | ~1.5 | **5.5** |
+| E | GPU-resident backbone + ORT GPU I/O binding | — | **6.58** |
 
 ---
 
@@ -129,7 +133,7 @@ The gap reflects prompt quality difference, not tracker propagation quality.
 |---|---|---|---|
 | NVIDIA H200 | 1008px | ~5–6 | PyTorch, single object |
 | NVIDIA RTX 5090 | 1008px | 30+ | TensorRT + ByteTrack |
-| **AMD Ryzen AI Max+ 395 (APU)** | **504px** | **12.21** (box) / **5.5** (text) | MIGraphX + MLIR |
+| **AMD Ryzen AI Max+ 395 (APU)** | **504px** | **12.21** (box) / **6.58** (text) | MIGraphX + MLIR |
 | **AMD Ryzen AI Max+ 395 (APU)** | **1008px** | **3.22** (box) / **~1.5** (text) | MIGraphX + MLIR |
 
 The Ryzen AI Max+ 395 is memory-bandwidth-limited (APU, unified memory).
@@ -187,8 +191,9 @@ BIOS UMA=64GB maximizes the fast non-coherent GPU pool (see Finding #7).
     2× slower backbone (ROCm issue #5643, silent fallback to hipBLAS without tensor cores).
     Do not use.
 
-14. **GPU-resident backbone not worth pursuing**: numpy round-trip overhead only 1.5ms
-    (1.6% of 97ms backbone). Kernel execution is the bottleneck; data movement is negligible.
+14. **GPU-resident backbone is material for the text path**: the five FP32
+    outputs total 33.5 MB. Avoiding their NumPy-to-Torch round-trip reduces the
+    detector vision encoder from ~102ms to ~67ms with matching mask quality.
 
 15. **cv_utils kernel (NMS, fill_holes) CUDA-only**: `kernels-community/cv-utils` has no
     ROCm build. Fixed via `tracker/rocm_patches.py`: scipy.ndimage.label for connected
