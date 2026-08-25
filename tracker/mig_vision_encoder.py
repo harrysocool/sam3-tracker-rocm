@@ -28,6 +28,25 @@ from transformers.models.sam3.modeling_sam3 import Sam3VisionEncoderOutput
 from .migraphx_runtime import MIGraphXBackbone
 
 
+def _to_torch_output(
+    array: np.ndarray,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    """Move a MIGraphX host output without a GPU-side FP32-to-FP16 cast.
+
+    The compiled backbone exposes FP32 outputs. For the production FP16 path,
+    casting on the host halves the transfer volume and is bit-identical to
+    copying FP32 to the GPU and casting there. Keep the original conversion
+    for other Torch dtypes, including bfloat16 which NumPy cannot represent.
+    """
+    if dtype == torch.float16:
+        host = np.ascontiguousarray(array, dtype=np.float16)
+        return torch.from_numpy(host).to(device=device)
+    host = np.ascontiguousarray(array)
+    return torch.from_numpy(host).to(device=device, dtype=dtype)
+
+
 class MIGVisionEncoder(nn.Module):
     """Shim that mimics Sam3VisionModel.forward via a MIGraphX backbone.
 
@@ -64,12 +83,9 @@ class MIGVisionEncoder(nn.Module):
             )
         f0, f1, f2, f3, lhs_np = outs
 
-        fpn = [
-            torch.from_numpy(np.ascontiguousarray(t)).to(device=device, dtype=dtype)
-            for t in (f0, f1, f2, f3)
-        ]
+        fpn = [_to_torch_output(t, device, dtype) for t in (f0, f1, f2, f3)]
         pe = [self.position_encoding(t.shape, t.device, t.dtype) for t in fpn]
-        last_hidden_state = torch.from_numpy(np.ascontiguousarray(lhs_np)).to(device=device, dtype=dtype)
+        last_hidden_state = _to_torch_output(lhs_np, device, dtype)
 
         return Sam3VisionEncoderOutput(
             last_hidden_state=last_hidden_state,
