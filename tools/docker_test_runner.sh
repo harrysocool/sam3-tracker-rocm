@@ -30,10 +30,13 @@
 
 set -euo pipefail
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
+
 # ── Configuration ─────────────────────────────────────────────────────────────
 REPO_URL="${SAM3_REPO_URL:-https://github.com/harrysocool/sam3-tracker-rocm.git}"
 REPO_BRANCH="${SAM3_BRANCH:-dev}"
-MODEL_CACHE_DIR="${SAM3_MODEL_CACHE:-/home/amd/project/sam3/model}"
+MODEL_CACHE_DIR="${SAM3_MODEL_CACHE:-$REPO_ROOT/model}"
 CONTAINER_NAME="${DOCKER_CONTAINER:-sam3_clean_test}"
 IMAGE="${DOCKER_IMAGE:-ubuntu:24.04}"
 BUILD_TEXT=true

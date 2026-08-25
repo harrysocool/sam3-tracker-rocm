@@ -12,7 +12,7 @@ Usage:
         --out results/eval/saco_sg/saco_sg_val_504px_preds.json
 
 Then run official eval:
-    python3 /home/amd/project/sam3-repo-sparse/sam3/eval/saco_veval_eval.py one \
+    python3 /path/to/sam3/eval/saco_veval_eval.py one \
         --gt_annot_file dataset/gt-annotations/saco_veval_smartglasses_val.json \
         --pred_file results/eval/saco_sg/saco_sg_val_504px_preds.json \
         --eval_res_file results/eval/saco_sg/saco_sg_val_504px_eval_res.json

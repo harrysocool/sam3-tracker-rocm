@@ -33,7 +33,7 @@ from export.tracker_modules.export_tracker_modules import MemoryAttentionWrapper
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--checkpoint", type=Path, default=Path("/home/amd/project/sam3/model/sam3"))
+    p.add_argument("--checkpoint", type=Path, default=Path("model/sam3"))
     p.add_argument("--onnx-dir", type=Path, default=None,
                    help="Resolution root (e.g. onnx_files_1008). Defaults from --imgsz.")
     p.add_argument("--imgsz", type=int, default=1008)

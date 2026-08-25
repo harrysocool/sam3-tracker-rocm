@@ -23,8 +23,8 @@ n_frames = int(sys.argv[2]) if len(sys.argv) > 2 else 11
 
 print(f"Probe: text='{text_prompt}', frames={n_frames}\n")
 
-proc = AutoProcessor.from_pretrained("/home/amd/project/sam3/model/sam3")
-model = Sam3VideoModel.from_pretrained("/home/amd/project/sam3/model/sam3").to(device).to(dtype).eval()
+proc = AutoProcessor.from_pretrained("model/sam3")
+model = Sam3VideoModel.from_pretrained("model/sam3").to(device).to(dtype).eval()
 patch_sam3_video_model_with_mig(model,
     MIGraphXBackbone(Path("onnx_files_1008/backbone_detector/single_simplified.onnx"),
                      Path("onnx_files_1008/backbone_detector/tuned.mxr")))
