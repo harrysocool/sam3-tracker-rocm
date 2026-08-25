@@ -105,7 +105,11 @@ def main():
         detr_onnx = args.onnx_dir / "detector_modules" / "detr_encoder_simplified.onnx"
         if detr_onnx.exists():
             patch_sam3_video_model_detr_encoder(model, detr_onnx)
-        mem_onnx = args.onnx_dir / "tracker_modules" / "memory_attention_fixed_S7_P32.onnx"
+        ptr_tokens = {504: 64, 1008: 48}.get(args.imgsz, 32)
+        mem_onnx = (
+            args.onnx_dir / "tracker_modules"
+            / f"memory_attention_fixed_S7_P{ptr_tokens}.onnx"
+        )
         if mem_onnx.exists():
             patch_sam3_video_model_memory_attention(model, mem_onnx)
         print("  MIG patches applied")

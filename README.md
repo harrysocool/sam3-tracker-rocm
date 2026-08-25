@@ -208,7 +208,7 @@ Three entry points — pick the one matching your use case:
 | Demo | Prompt | Pipeline | Steady-state FPS @504 | Use for |
 |---|---|---|---|---|
 | **`demo_live.py`** | text(s) | **Streaming hybrid** — SAM3 keyframe + tracker propagate | **~5 FPS multi-prompt** | production / ROS / live sensor |
-| `tools/text_baseline.py --mig` | text | Offline HF Sam3VideoModel, SAM3 every frame | **6.58** (1 obj) | debugging / regression baseline |
+| `tools/text_baseline.py --mig` | text | Offline HF Sam3VideoModel, SAM3 every frame | **7.06** (1 obj) | debugging / regression baseline |
 | `demo_box.py` | bounding box | Tracking only (no detection) | **12.2** (single-object) | specialized: annotation / max-perf |
 
 All commands below assume you have activated the conda env (`conda activate sam3-tracker`)
@@ -357,7 +357,7 @@ section.*
 | Path | Pipeline | Steady-state FPS |
 |---|---|---|
 | **`demo_live.py` (hybrid)** | SAM3 every 1000ms keyframe + tracker propagate between | **~5 FPS multi-prompt** |
-| `tools/text_baseline.py --mig` | SAM3 every frame (offline batch) | **6.58** (1 obj) |
+| `tools/text_baseline.py --mig` | SAM3 every frame (offline batch) | **7.06** (1 obj) |
 | `tools/text_baseline.py` (no MIG) | Pure PyTorch baseline | ~2.6 |
 
 Mask quality: PT vs MIG mean IoU = **0.994** @504px (verified frame-by-frame on 20-30 frames).
@@ -367,7 +367,7 @@ Multi-object scaling @504 MIG (backbone shared across all objects):
 
 | Objects tracked | tools/text_baseline.py prop FPS |
 |---|---|
-| 1 | **6.58** |
+| 1 | **7.06** |
 | 4 | ~4.4 (pre-GPU-I/O baseline; re-benchmark pending) |
 | 8 (estimated) | ~2.9 (pre-GPU-I/O estimate) |
 
@@ -400,18 +400,18 @@ Mask quality (text-prompt): PT vs MIG mean IoU = 0.999 @1008px.
 
 ### Per-module latency breakdown (504px, MIGraphX backbone)
 
-**Text-prompt propagation** (137 ms/frame in the 30-frame module profile;
-6.58 FPS measured end-to-end over 47 propagation frames) — GPU-resident MLIR
+**Text-prompt propagation** (137 ms/frame in the 48-frame module profile;
+7.06 FPS measured end-to-end over 47 propagation frames) — GPU-resident MLIR
 attention backbone plus ORT GPU I/O binding:
 
 | Stage | Latency | Backend |
 |---|---:|---|
 | backbone (vision encoder) | ~67 ms | MIGraphX `tuned_gpuio.mxr` + MLIR attention ops |
-| memory_attention | ~20 ms average ² | ORT MIGraphX EP FP16 + GPU I/O binding ¹ |
+| memory_attention | ~15 ms average ² | ORT MIGraphX EP FP16 + GPU I/O binding ¹ |
 | detr_encoder | ~7 ms | ORT MIGraphX EP FP16 + GPU I/O binding |
 | detr_decoder | ~11 ms | PyTorch |
 | tracker_neck + mask_decoder + memory_encoder | ~8 ms | PyTorch |
-| **Total propagation frame** | **~137 ms → 7.3 FPS profile / 6.58 FPS E2E** | |
+| **Total propagation frame** | **~137 ms → 7.3 FPS profile / 7.06 FPS E2E** | |
 
 **Box-prompt propagation** (~82 ms/frame → 12.21 FPS, with MLIR attention backbone):
 
@@ -428,9 +428,9 @@ a precompiled `.mxr` because the direct MIGraphX FP16 attention kernel produces 
 (analogous to [ROCm/AMDMIGraphX#3596](https://github.com/ROCm/AMDMIGraphX/issues/3596)).
 The ORT EP path uses a different FP16 quantization path that produces correct results.
 
-² Early frames use the PyTorch memory-attention fallback until the seven-slot
-spatial bank is full. The fixed-shape GPU-I/O-bound ORT call is ~8.4 ms in
-steady-state microbenchmarks.
+² Exact S1…S10 graphs avoid dynamic recompilation and PyTorch fallback as the
+memory bank and conditioning frames grow. The S7 GPU-I/O-bound ORT call is
+~8.4 ms in steady-state microbenchmarks.
 
 ### Backbone speed comparison (504px)
 
@@ -522,7 +522,7 @@ sam3-tracker-rocm/
 | **Text-prompt: vision_encoder dominates** | About 49% of the 504px profile after switching to GPU-resident MIGraphX I/O. The 1008px GPU-I/O artifact has not yet been benchmarked and falls back to `tuned.mxr` until built. |
 | **Small modules don't gain from ORT MIG EP** | Under ~30 ms the CPU↔GPU round-trip ≥ PT runtime. `detr_decoder` (~11–25 ms) confirmed net-neutral; `mask_decoder` (~5 ms) / `memory_encoder` (~6 ms) too small to MIG-ize. |
 | **MIG attention must use ORT MIG EP** | Direct `parse_onnx + quantize_fp16` on `memory_attention` / `detr_encoder` yields NaN ([AMDMIGraphX#3596](https://github.com/ROCm/AMDMIGraphX/issues/3596)); even FP32 has ~0.05 max-diff that breaks detection thresholds. ORT EP with `migraphx_fp16_enable=1` is correct. |
-| **memory_attention K=64 cliff** | MIGraphX picks a 14× slower kernel at `num_object_pointer_tokens=64` (791 ms vs 55 ms at K≤32). Shim caps K=32 and truncates oldest pointers — invisible for continuous tracking; re-ID across long disappearances may degrade slightly. |
+| **memory_attention K=64 cliff at 1008px** | MIGraphX picks a much slower kernel at K=64, so 1008px uses K=48. The 504px path has no K=64 cliff and retains capacity for 16 objects. |
 | **Box-prompt `dec_propagate` stays FP32** | ConvTranspose upsampling is numerically sensitive; keep it FP32 (`dec_prop_fp32.mxr`). All other modules run FP16. |
 | **MIGraphX 2.15+patches required** | Stock 2.15.0 (ROCm 7.2 APT) runs the HF backbone in ~916 ms (6.6× slower) due to a `find_splits` fusion limit. See [analysis](analysis/migraphx_backbone_investigation.md). |
 | **Dual LD_PRELOAD for text-prompt MIG** | torch ROCm nightly bundles its own HIP runtime; loading MIGraphX after torch corrupts `.mxr` deserialization. `LD_PRELOAD` forces `/opt/rocm-7.2.x` libs to load first. |

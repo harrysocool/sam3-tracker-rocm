@@ -72,7 +72,7 @@ def build_model(ckpt: Path, imgsz: int, device, dtype):
     return processor, model
 
 
-def patch_mig(model, onnx_dir: Path):
+def patch_mig(model, onnx_dir: Path, imgsz: int):
     from tracker.migraphx_runtime import MIGraphXBackbone
     from tracker.mig_vision_encoder import patch_sam3_video_model_with_mig
     det_dir = onnx_dir / "backbone_detector"
@@ -86,7 +86,11 @@ def patch_mig(model, onnx_dir: Path):
     if detr_onnx.exists():
         from tracker.mig_detr_encoder import patch_sam3_video_model_detr_encoder
         patch_sam3_video_model_detr_encoder(model, detr_onnx)
-    mem_attn_onnx = onnx_dir / "tracker_modules" / "memory_attention_fixed_S7_P32.onnx"
+    ptr_tokens = {504: 64, 1008: 48}.get(imgsz, 32)
+    mem_attn_onnx = (
+        onnx_dir / "tracker_modules"
+        / f"memory_attention_fixed_S7_P{ptr_tokens}.onnx"
+    )
     if mem_attn_onnx.exists():
         from tracker.mig_memory_attention import patch_sam3_video_model_memory_attention
         patch_sam3_video_model_memory_attention(model, mem_attn_onnx)
@@ -161,7 +165,7 @@ def main():
     print(f"\n=== MIG @{args.imgsz} ===")
     t = time.perf_counter()
     processor2, model2 = build_model(args.checkpoint, args.imgsz, device, dtype)
-    patch_mig(model2, args.onnx_dir)
+    patch_mig(model2, args.onnx_dir, args.imgsz)
     mig_results = run_path(processor2, model2, frames, args.text, device, dtype, n)
     mig_time = time.perf_counter() - t
     print(f"  done in {mig_time:.1f}s")

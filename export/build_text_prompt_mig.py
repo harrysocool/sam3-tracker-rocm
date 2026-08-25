@@ -54,6 +54,9 @@ def parse_args():
                    help="Pointer token slots for memory_attention. "
                         "Default: 64 at 504px, 48 at 1008px (highest safe K per kernel cliff). "
                         "Set explicitly to override.")
+    p.add_argument("--max-spatial-slots", type=int, default=10,
+                   help="Generate exact memory-attention shapes S1..N. Default 10 "
+                        "covers 7 non-conditioning plus up to 4 conditioning frames.")
     return p.parse_args()
 
 
@@ -157,16 +160,18 @@ def build_for_imgsz(imgsz: int, args) -> bool:
     if run_all or "memory_attention" in steps:
         # Resolve None default per imgsz (504→64, 1008→48 — kernel cliff aware)
         ptr_tokens = args.ptr_tokens if args.ptr_tokens is not None else {504: 64, 1008: 48}.get(imgsz, 32)
-        name = f"memory_attention_fixed_S7_P{ptr_tokens}.onnx"
-        out = trk_dir / name
-        if not exists(out, name, args.force):
-            ok = ok and run([
-                sys.executable,
-                "export/tracker_modules/export_memory_attention_padded.py",
-                "--imgsz", str(imgsz),
-                "--ptr-tokens", str(ptr_tokens),
-                "--checkpoint", str(args.checkpoint),
-            ], f"[6/6] Export memory_attention (S7_P{ptr_tokens}) @{imgsz}px")
+        for spatial_slots in range(1, args.max_spatial_slots + 1):
+            name = f"memory_attention_fixed_S{spatial_slots}_P{ptr_tokens}.onnx"
+            out = trk_dir / name
+            if not exists(out, name, args.force):
+                ok = ok and run([
+                    sys.executable,
+                    "export/tracker_modules/export_memory_attention_padded.py",
+                    "--imgsz", str(imgsz),
+                    "--spatial-slots", str(spatial_slots),
+                    "--ptr-tokens", str(ptr_tokens),
+                    "--checkpoint", str(args.checkpoint),
+                ], f"[6/6] Export memory_attention (S{spatial_slots}_P{ptr_tokens}) @{imgsz}px")
 
     return ok
 
