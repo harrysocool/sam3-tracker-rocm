@@ -28,7 +28,7 @@ from transformers import AutoProcessor, Sam3VideoModel
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--checkpoint", type=Path, default=Path("/home/amd/project/sam3/model/sam3"))
+    ap.add_argument("--checkpoint", type=Path, default=Path("model/sam3"))
     ap.add_argument("--onnx-dir", type=Path, default=Path("onnx_files_1008"))
     ap.add_argument("--image", type=Path, required=True)
     ap.add_argument("--text", type=str, required=True)

@@ -37,7 +37,7 @@ from tracker.rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
 # MIGraphX direct-API helpers (backbone + memory_attention)
 # ---------------------------------------------------------------------------
 
-_MXR_BUILD_LIB = "/home/amd/project/tools/AMDMIGraphX/build_docker/lib"
+_MXR_BUILD_LIB = os.environ.get("MIGRAPHX_BUILD_LIB")
 
 
 def _load_migraphx_module():
@@ -55,7 +55,9 @@ def _load_migraphx_module():
     )
     if _mxr_py_dir not in sys.path:
         sys.path.insert(0, _mxr_py_dir)
-    if _MXR_BUILD_LIB not in sys.path:
+    if (_MXR_BUILD_LIB
+            and _o.path.isdir(_MXR_BUILD_LIB)
+            and _MXR_BUILD_LIB not in sys.path):
         sys.path.append(_MXR_BUILD_LIB)
     import migraphx
     return migraphx
@@ -140,7 +142,9 @@ class MIGraphXBackbone:
         )
         if _mxr_py_dir not in sys.path:
             sys.path.insert(0, _mxr_py_dir)
-        if _MXR_BUILD_LIB not in sys.path:
+        if (_MXR_BUILD_LIB
+                and _o2.path.isdir(_MXR_BUILD_LIB)
+                and _MXR_BUILD_LIB not in sys.path):
             sys.path.append(_MXR_BUILD_LIB)
 
         import migraphx as _mxr

@@ -60,7 +60,7 @@ def main():
     device = torch.device("cuda")
     dtype = torch.float16
     print("Loading Sam3VideoModel ...")
-    model = Sam3VideoModel.from_pretrained("/home/amd/project/sam3/model/sam3").to(device).to(dtype).eval()
+    model = Sam3VideoModel.from_pretrained("model/sam3").to(device).to(dtype).eval()
     detector = model.detector_model
 
     # Dummy inputs at 1008px shapes

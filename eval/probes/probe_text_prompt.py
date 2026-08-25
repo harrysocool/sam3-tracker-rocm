@@ -31,7 +31,7 @@ from transformers import Sam3VideoModel, AutoProcessor
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--checkpoint", type=Path,
-                    default=Path("/home/amd/project/sam3/model/sam3"))
+                    default=Path("model/sam3"))
     ap.add_argument("--image", type=Path, required=True)
     ap.add_argument("--text", type=str, required=True,
                     help='Text prompt, e.g. "swan", "a person on a bicycle"')

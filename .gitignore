@@ -81,5 +81,5 @@ assets/sidewalk_running_man.mp4
 assets/sideway_lawn.mp4
 assets/two_person_dog_lawn.mp4
 
-# Steve customer rosbag (large, customer-supplied)
+# Local customer rosbag (large, customer-supplied)
 data/

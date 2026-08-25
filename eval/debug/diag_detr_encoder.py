@@ -19,8 +19,8 @@ device = torch.device("cuda")
 dtype = torch.float16
 
 print("Loading model + MIG backbone ...")
-processor = AutoProcessor.from_pretrained("/home/amd/project/sam3/model/sam3")
-model = Sam3VideoModel.from_pretrained("/home/amd/project/sam3/model/sam3").to(device).to(dtype).eval()
+processor = AutoProcessor.from_pretrained("model/sam3")
+model = Sam3VideoModel.from_pretrained("model/sam3").to(device).to(dtype).eval()
 
 mxr_bb = MIGraphXBackbone(
     onnx_path=Path("onnx_files_1008/backbone_detector/single_simplified.onnx"),

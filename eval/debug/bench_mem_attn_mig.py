@@ -9,7 +9,7 @@ from tracker.mig_memory_attention import MIGMemoryAttention, EXPECTED_SPATIAL_LE
 device, dtype = torch.device("cuda"), torch.float16
 
 print("Loading model ...")
-model = Sam3VideoModel.from_pretrained("/home/amd/project/sam3/model/sam3").to(device).to(dtype).eval()
+model = Sam3VideoModel.from_pretrained("model/sam3").to(device).to(dtype).eval()
 trk = model.tracker_model
 mem_attn_pt = trk.memory_attention
 

@@ -127,7 +127,7 @@ def mask_iou_pair(a: np.ndarray, b: np.ndarray) -> float:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--checkpoint", type=Path,
-                    default=Path("/home/amd/project/sam3/model/sam3"))
+                    default=Path("model/sam3"))
     ap.add_argument("--onnx-dir", type=Path,
                     default=Path("onnx_files_1008"),
                     help="Resolution root (e.g. onnx_files_1008). Reads <onnx-dir>/backbone_detector/.")

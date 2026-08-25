@@ -6,8 +6,8 @@ per-frame IoU. Lets us visually verify accuracy after the NHWC fix.
 
 Usage:
     python eval/visualize_correctness.py \
-        --davis-root /home/amd/project/sam3/dataset/DAVIS \
-        --checkpoint /home/amd/project/sam3/model/sam3 \
+        --davis-root dataset/DAVIS \
+        --checkpoint model/sam3 \
         --onnx-dir onnx_files \
         --imgsz 504 \
         --sequence blackswan bmx-trees dog \
