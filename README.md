@@ -376,7 +376,8 @@ section.*
 | Path | Pipeline | Steady-state FPS |
 |---|---|---|
 | **`demo_live.py` (hybrid)** | SAM3 every 1000ms keyframe + tracker propagate between | **~5 FPS multi-prompt** |
-| `tools/text_baseline.py --mig` | SAM3 every frame (offline batch) | **7.06** (1 obj) |
+| `tools/text_baseline.py --mig` (ROCm 7.14 Docker) | SAM3 every frame (offline batch) | **8.51** (1 obj) |
+| `tools/text_baseline.py --mig` (native compatibility stack) | SAM3 every frame (offline batch) | **7.06** (1 obj) |
 | `tools/text_baseline.py` (no MIG) | Pure PyTorch baseline | ~2.6 |
 
 Mask quality: PT vs MIG mean IoU = **0.994** @504px (verified frame-by-frame on 20-30 frames).
@@ -450,6 +451,10 @@ The ORT EP path uses a different FP16 quantization path that produces correct re
 ² Exact S1…S10 graphs avoid dynamic recompilation and PyTorch fallback as the
 memory bank and conditioning frames grow. The S7 GPU-I/O-bound ORT call is
 ~8.4 ms in steady-state microbenchmarks.
+
+The optional ROCm 7.14 Docker stack reaches **111.65 ms/frame (8.96 FPS)** in
+the module profile and **8.51 FPS end-to-end**. See
+[`docs/rocm714_fullstack_evaluation.md`](docs/rocm714_fullstack_evaluation.md).
 
 ### Backbone speed comparison (504px)
 

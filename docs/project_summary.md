@@ -6,7 +6,8 @@
 | Pipeline | 504px FPS | 1008px FPS |
 |---|---|---|
 | Box-prompt (`demo_box.py`) | **12.21** | **3.22** |
-| Text-prompt MIG (`tools/text_baseline.py --mig`) | **7.06** | **~1.5** ¹ |
+| Text-prompt MIG (ROCm 7.14 Docker) | **8.51** | — |
+| Text-prompt MIG (native compatibility stack) | **7.06** | **~1.5** ¹ |
 | Text-prompt PyTorch | 2.6 | 0.52 |
 
 ¹ 1008px has not yet been rebuilt with the GPU-I/O artifact and retains the
@@ -27,6 +28,13 @@ host-I/O baseline.
 
 > **Dual ROCm stack**: nightly pip wheels (ROCm 7.13) provide gfx1151 PyTorch support;
 > stable APT (ROCm 7.2) provides MIGraphX. Both coexist via `LD_PRELOAD`.
+
+The optional gfx1151 Docker path uses ROCm 7.14, MIGraphX 2.17 at commit
+`9f1a138`, and a source-built ONNX Runtime 1.24.2 MIGraphX EP. It reaches
+111.65 ms/frame in the module profile and 8.51 FPS end-to-end. The native
+stack remains the compatibility default. See
+[`rocm714_fullstack_evaluation.md`](rocm714_fullstack_evaluation.md) and
+[`../docker/rocm714/README.md`](../docker/rocm714/README.md).
 
 ---
 
@@ -98,6 +106,7 @@ fallbacks in `tracker/rocm_patches.py`, applied automatically at import).
 | D | MLIR attention backbone (`MIGRAPHX_MLIR_USE_SPECIFIC_OPS=attention`) | ~1.5 | **5.5** |
 | E | GPU-resident backbone + ORT GPU I/O binding | — | **6.58** |
 | F | Exact S1…S10 memory-attention shapes | — | **7.06** |
+| G | ROCm 7.14 + MIGraphX 2.17 + matching ORT EP container | — | **8.51** |
 
 ---
 
@@ -134,7 +143,8 @@ The gap reflects prompt quality difference, not tracker propagation quality.
 |---|---|---|---|
 | NVIDIA H200 | 1008px | ~5–6 | PyTorch, single object |
 | NVIDIA RTX 5090 | 1008px | 30+ | TensorRT + ByteTrack |
-| **AMD Ryzen AI Max+ 395 (APU)** | **504px** | **12.21** (box) / **7.06** (text) | MIGraphX + MLIR |
+| **AMD Ryzen AI Max+ 395 (APU)** | **504px** | **12.21** (box) / **8.51** (text Docker) | MIGraphX + MLIR |
+| AMD Ryzen AI Max+ 395 (native compatibility) | 504px | 7.06 text | ROCm 7.2/7.13 dual stack |
 | **AMD Ryzen AI Max+ 395 (APU)** | **1008px** | **3.22** (box) / **~1.5** (text) | MIGraphX + MLIR |
 
 The Ryzen AI Max+ 395 is memory-bandwidth-limited (APU, unified memory).
