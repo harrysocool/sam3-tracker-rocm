@@ -17,6 +17,7 @@ embedding parameterized by spatial size + dtype).
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -26,6 +27,33 @@ import torch.nn as nn
 from transformers.models.sam3.modeling_sam3 import Sam3VisionEncoderOutput
 
 from .migraphx_runtime import MIGraphXBackbone
+
+
+@dataclass
+class _PendingVisionOutput:
+    """GPU vision result plus the event and allocations that keep it valid."""
+
+    output: Sam3VisionEncoderOutput
+    event: torch.cuda.Event
+    keepalive: object
+    source_data_ptr: int
+
+    def wait_on(self, stream: torch.cuda.Stream | None = None) -> Sam3VisionEncoderOutput:
+        if stream is None:
+            stream = torch.cuda.current_stream()
+        stream.wait_event(self.event)
+        tensors = (
+            self.output.last_hidden_state,
+            *(self.output.fpn_hidden_states or ()),
+            *(self.output.fpn_position_encoding or ()),
+        )
+        for tensor in tensors:
+            if isinstance(tensor, torch.Tensor) and tensor.device.type == "cuda":
+                tensor.record_stream(stream)
+        return self.output
+
+    def synchronize(self) -> None:
+        self.event.synchronize()
 
 
 def _to_torch_output(
@@ -68,16 +96,7 @@ class MIGVisionEncoder(nn.Module):
         self.mxr = mxr_backbone
         self.position_encoding = position_encoding
 
-    def forward(self, pixel_values: torch.Tensor, **kwargs) -> Sam3VisionEncoderOutput:
-        device = pixel_values.device
-        dtype = pixel_values.dtype
-
-        if self.mxr.gpu_io:
-            outs = self.mxr.run_torch(pixel_values)
-        else:
-            # Host-I/O fallback for existing tuned.mxr artifacts.
-            np_in = pixel_values.detach().float().cpu().numpy().astype(np.float32, copy=False)
-            outs = self.mxr(np_in)
+    def _build_output(self, outs, device, dtype) -> Sam3VisionEncoderOutput:
         if len(outs) < 5 or outs[4] is None:
             raise RuntimeError(
                 "MIGVisionEncoder requires a 5-output backbone (4 FPN + last_hidden_state). "
@@ -100,6 +119,65 @@ class MIGVisionEncoder(nn.Module):
             fpn_position_encoding=tuple(pe),
             hidden_states=None,
             attentions=None,
+        )
+
+    def forward(self, pixel_values: torch.Tensor, **kwargs) -> Sam3VisionEncoderOutput:
+        device = pixel_values.device
+        dtype = pixel_values.dtype
+
+        if self.mxr.gpu_io:
+            outs = self.mxr.run_torch(pixel_values)
+        else:
+            # Host-I/O fallback for existing tuned.mxr artifacts.
+            np_in = pixel_values.detach().float().cpu().numpy().astype(np.float32, copy=False)
+            outs = self.mxr(np_in)
+        return self._build_output(outs, device, dtype)
+
+    def _prefetch(
+        self,
+        pixel_values: torch.Tensor,
+        stream: torch.cuda.Stream,
+    ) -> _PendingVisionOutput:
+        """Enqueue the GPU-resident encoder without a host-side wait."""
+        if not self.mxr.gpu_io:
+            raise RuntimeError("vision prefetch requires a GPU-I/O backbone")
+        if getattr(self, "_prefetch_poisoned", False):
+            raise RuntimeError(
+                "vision prefetch is unusable after a failed asynchronous drain"
+            )
+        with torch.cuda.stream(stream):
+            try:
+                outputs, keepalive = self.mxr.enqueue_torch(pixel_values)
+                result = self._build_output(
+                    outputs,
+                    pixel_values.device,
+                    pixel_values.dtype,
+                )
+                event = torch.cuda.Event()
+                event.record(stream)
+            except BaseException:
+                if "keepalive" in locals():
+                    failed_keepalive = (
+                        keepalive,
+                        locals().get("result"),
+                        locals().get("outputs"),
+                    )
+                    if not hasattr(self, "_failed_prefetch_keepalives"):
+                        self._failed_prefetch_keepalives = []
+                    self._failed_prefetch_keepalives.append(failed_keepalive)
+                try:
+                    stream.synchronize()
+                except BaseException:
+                    self._prefetch_poisoned = True
+                else:
+                    if "keepalive" in locals():
+                        self._failed_prefetch_keepalives.remove(failed_keepalive)
+                raise
+        return _PendingVisionOutput(
+            result,
+            event,
+            keepalive,
+            pixel_values.data_ptr(),
         )
 
 

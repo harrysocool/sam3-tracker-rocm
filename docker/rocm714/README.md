@@ -101,6 +101,7 @@ Run the text pipeline:
   --imgsz 504 \
   --mig \
   --parallel-tail \
+  --pipeline-backbone \
   --onnx-dir /models/onnx_files_504 \
   --max-frames 31 \
   --output /workspace/demo_out/text/blackswan_rocm714.mp4
@@ -117,6 +118,7 @@ On Ryzen AI Max+ 395 / gfx1151, 504 px, `blackswan.mp4`, prompt `swan`:
 - profile mean: 111.65 ms/frame
 - propagation: 8.51 FPS
 - propagation with opt-in `--parallel-tail`: 8.93-9.09 FPS (median 9.03)
+- propagation with `--parallel-tail --pipeline-backbone`: 10.21-10.27 FPS
 - two consecutive 30-frame regressions: mean IoU 0.9941, min IoU 0.9893
 
 The repository's native setup remains the compatibility path. This container

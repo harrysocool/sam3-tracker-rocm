@@ -205,6 +205,20 @@ class MIGraphXBackbone:
                 f"{load_path} has no GPU output parameters; rebuild it with "
                 "compile_backbone_mxr.py --gpu-io"
             )
+        self._gpu_io_poisoned = False
+        self._failed_enqueue_keepalives = []
+
+    def _drain_failed_enqueue(self, keepalive, device) -> None:
+        """Retain raw-pointer buffers unless the device can be drained safely."""
+        import torch
+
+        self._failed_enqueue_keepalives.append(keepalive)
+        try:
+            torch.cuda.synchronize(device=device)
+        except BaseException:
+            self._gpu_io_poisoned = True
+        else:
+            self._failed_enqueue_keepalives.remove(keepalive)
 
     def warmup(self, n: int = 3) -> None:
         if self.gpu_io:
@@ -263,10 +277,19 @@ class MIGraphXBackbone:
             out_arrs.append(None)
         return tuple(out_arrs)
 
-    def run_torch(self, pixel_values):
-        """Run a GPU-I/O program directly on Torch CUDA/HIP allocations."""
+    def enqueue_torch(self, pixel_values):
+        """Enqueue a GPU-I/O run on the current Torch stream.
+
+        Returns ``(outputs, keepalive)`` without synchronizing.  The caller
+        must retain ``keepalive`` until all work using ``outputs`` has
+        completed and must establish any cross-stream dependencies.
+        """
         if not self.gpu_io:
-            raise RuntimeError("run_torch() requires a tuned_gpuio.mxr program")
+            raise RuntimeError("enqueue_torch() requires a tuned_gpuio.mxr program")
+        if self._gpu_io_poisoned:
+            raise RuntimeError(
+                "GPU-I/O backbone is unusable after a failed asynchronous drain"
+            )
 
         import torch
 
@@ -313,14 +336,35 @@ class MIGraphXBackbone:
             args[name] = to_argument(tensor)
 
         stream = torch.cuda.current_stream(device=pixel_values.device)
-        self._prog.run_async(args, stream.cuda_stream, "ihipStream_t")
+        try:
+            self._prog.run_async(args, stream.cuda_stream, "ihipStream_t")
+        except BaseException:
+            # The provider may have submitted work before surfacing an error.
+            # Keep pointer-backed allocations alive until the device drains.
+            self._drain_failed_enqueue(
+                (input_tensor, args, outputs),
+                pixel_values.device,
+            )
+            raise
+        return tuple(outputs), (input_tensor, args, outputs)
+
+    def run_torch(self, pixel_values):
+        """Run a GPU-I/O program and wait until all outputs are ready."""
+        import torch
+
+        outputs, keepalive = self.enqueue_torch(pixel_values)
         # MIGraphX only retains raw pointers. Synchronize before the temporary
         # FP32 input and argument wrappers leave scope, otherwise Torch's
         # caching allocator may reuse the input storage while the HIP work is
         # still in flight. The following model stages consume these outputs
         # immediately, so this is already a required dependency boundary.
-        torch.cuda.synchronize(device=pixel_values.device)
-        return tuple(outputs)
+        try:
+            torch.cuda.synchronize(device=pixel_values.device)
+        except BaseException:
+            self._drain_failed_enqueue(keepalive, pixel_values.device)
+            raise
+        del keepalive
+        return outputs
 
 
 # ---------------------------------------------------------------------------

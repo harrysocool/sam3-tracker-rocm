@@ -9,6 +9,7 @@ scores are compared frame by frame.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import statistics
 import subprocess
@@ -31,6 +32,7 @@ from tracker.mig_memory_attention import patch_sam3_video_model_memory_attention
 from tracker.mig_vision_encoder import patch_sam3_video_model_with_mig  # noqa: E402
 from tracker.migraphx_runtime import MIGraphXBackbone  # noqa: E402
 from tracker.batched_mask_decoder import patch_batched_mask_decoder  # noqa: E402
+from tracker.backbone_pipeline import BackbonePrefetchPipeline  # noqa: E402
 from tracker.parallel_video import (  # noqa: E402
     close_parallel_video_tail,
     patch_parallel_video_tail,
@@ -53,6 +55,11 @@ def parse_args():
     parser.add_argument("--imgsz", type=int, default=504, choices=(504, 1008))
     parser.add_argument("--max-frames", type=int, default=50)
     parser.add_argument("--repeats", type=int, default=2)
+    parser.add_argument(
+        "--pipeline-backbone",
+        action="store_true",
+        help="Also prefetch frame N+1's backbone in the parallel candidate.",
+    )
     parser.add_argument(
         "--steady-frames",
         type=int,
@@ -129,7 +136,15 @@ def build_model(args):
     return processor, model
 
 
-def run_once(processor, model, frames, prompts, parallel: bool, steady_frames: int):
+def run_once(
+    processor,
+    model,
+    frames,
+    prompts,
+    parallel: bool,
+    steady_frames: int,
+    pipeline_backbone: bool = False,
+):
     if parallel:
         patch_parallel_video_tail(model)
     else:
@@ -145,14 +160,9 @@ def run_once(processor, model, frames, prompts, parallel: bool, steady_frames: i
 
     timings = []
     outputs = []
-    for frame_idx in range(len(frames)):
-        torch.cuda.synchronize()
-        start = time.perf_counter()
-        with torch.inference_mode():
-            output = model(inference_session=session, frame_idx=frame_idx)
-        torch.cuda.synchronize()
-        timings.append((time.perf_counter() - start) * 1000)
 
+    def record(frame_idx, output, elapsed_ms):
+        timings.append(elapsed_ms)
         prompt_by_object = {
             object_id: session.prompts[session.obj_id_to_prompt_id[object_id]]
             for object_id in output.object_ids
@@ -160,16 +170,15 @@ def run_once(processor, model, frames, prompts, parallel: bool, steady_frames: i
         masks = {
             object_id: output.obj_id_to_mask[object_id]
             .detach()
-            .float()
             .cpu()
             .numpy()
             .squeeze()
-            > 0
             for object_id in output.object_ids
             if object_id in output.obj_id_to_mask
         }
         outputs.append(
             {
+                "frame_idx": frame_idx,
                 "ids": list(output.object_ids),
                 "prompts": prompt_by_object,
                 "scores": {
@@ -180,54 +189,147 @@ def run_once(processor, model, frames, prompts, parallel: bool, steady_frames: i
             }
         )
 
+    # Frame 0 cannot overlap a tracker tail or a future frame's backbone.
+    torch.cuda.synchronize()
+    start = time.perf_counter()
+    with torch.inference_mode():
+        output = model(inference_session=session, frame_idx=0)
+    torch.cuda.synchronize()
+    record(0, output, (time.perf_counter() - start) * 1000)
+
+    if pipeline_backbone:
+        with BackbonePrefetchPipeline(model, session) as pipeline:
+            iterator = iter(pipeline.run(range(1, len(frames))))
+            while True:
+                torch.cuda.synchronize()
+                start = time.perf_counter()
+                try:
+                    frame_idx, output = next(iterator)
+                except StopIteration:
+                    break
+                torch.cuda.synchronize()
+                record(frame_idx, output, (time.perf_counter() - start) * 1000)
+    else:
+        for frame_idx in range(1, len(frames)):
+            torch.cuda.synchronize()
+            start = time.perf_counter()
+            with torch.inference_mode():
+                output = model(inference_session=session, frame_idx=frame_idx)
+            torch.cuda.synchronize()
+            record(frame_idx, output, (time.perf_counter() - start) * 1000)
+
     propagation = timings[1:]
-    steady = propagation[-min(steady_frames, len(propagation)) :]
+    # A pipelined sequence has a fill sample at the front and a drain sample
+    # at the end. Exclude both when reporting steady-state output cadence;
+    # keeping only the drain would systematically overstate the speedup.
+    if len(propagation) > 2:
+        steady_pool = propagation[1:-1]
+        steady_index_pool = list(range(2, len(frames) - 1))
+    else:
+        steady_pool = propagation
+        steady_index_pool = list(range(1, len(frames)))
+    steady_count = min(steady_frames, len(steady_pool))
+    steady = steady_pool[-steady_count:]
+    steady_indices = steady_index_pool[-steady_count:]
     return {
-        "schedule": "parallel" if parallel else "serial",
+        "schedule": (
+            "parallel+backbone-prefetch"
+            if pipeline_backbone
+            else ("parallel" if parallel else "serial")
+        ),
         "mean_ms": statistics.mean(propagation),
         "median_ms": statistics.median(propagation),
         "p95_ms": float(np.percentile(propagation, 95)),
         "steady_mean_ms": statistics.mean(steady),
         "steady_median_ms": statistics.median(steady),
+        "steady_p95_ms": float(np.percentile(steady, 95)),
+        "steady_frame_indices": steady_indices,
+        "pipeline_fill_ms": propagation[0] if pipeline_backbone else None,
+        "pipeline_drain_ms": propagation[-1] if pipeline_backbone else None,
         "timings_ms": timings,
         "outputs": outputs,
     }
 
-
 def compare_outputs(serial, parallel):
     ious = []
     maximum_score_difference = 0.0
-    ids_equal = True
-    prompts_equal = True
+    maximum_mask_abs_difference = 0.0
+    frame_indices_equal = len(serial["outputs"]) == len(parallel["outputs"])
+    ids_equal = frame_indices_equal
+    prompts_equal = frame_indices_equal
+    mask_shapes_equal = frame_indices_equal
+    score_keys_equal = frame_indices_equal
     for serial_frame, parallel_frame in zip(serial["outputs"], parallel["outputs"]):
+        frame_indices_equal &= serial_frame["frame_idx"] == parallel_frame["frame_idx"]
         ids_equal &= serial_frame["ids"] == parallel_frame["ids"]
         prompts_equal &= serial_frame["prompts"] == parallel_frame["prompts"]
         for object_id in set(serial_frame["masks"]) | set(parallel_frame["masks"]):
             left = serial_frame["masks"].get(object_id)
             right = parallel_frame["masks"].get(object_id)
             if left is None or right is None:
+                mask_shapes_equal = False
                 ious.append(0.0)
                 continue
-            union = np.logical_or(left, right).sum()
-            ious.append(
-                1.0 if union == 0 else float(np.logical_and(left, right).sum() / union)
+            if left.shape != right.shape:
+                mask_shapes_equal = False
+                ious.append(0.0)
+                continue
+            maximum_mask_abs_difference = max(
+                maximum_mask_abs_difference,
+                float(np.max(np.abs(left.astype(np.float32) - right.astype(np.float32)))),
             )
-        for object_id in set(serial_frame["scores"]) | set(parallel_frame["scores"]):
-            left = serial_frame["scores"].get(object_id, float("inf"))
-            right = parallel_frame["scores"].get(object_id, float("-inf"))
+            left_binary = left > 0
+            right_binary = right > 0
+            union = np.logical_or(left_binary, right_binary).sum()
+            ious.append(
+                1.0
+                if union == 0
+                else float(np.logical_and(left_binary, right_binary).sum() / union)
+            )
+        serial_score_ids = set(serial_frame["scores"])
+        parallel_score_ids = set(parallel_frame["scores"])
+        score_keys_equal &= serial_score_ids == parallel_score_ids
+        for object_id in serial_score_ids & parallel_score_ids:
+            left = serial_frame["scores"][object_id]
+            right = parallel_frame["scores"][object_id]
             maximum_score_difference = max(maximum_score_difference, abs(left - right))
     return {
+        "frame_indices_equal": frame_indices_equal,
         "ids_equal": ids_equal,
         "prompts_equal": prompts_equal,
+        "mask_shapes_equal": mask_shapes_equal,
+        "score_keys_equal": score_keys_equal,
         "mask_count": len(ious),
         "mean_mask_iou": statistics.mean(ious) if ious else 1.0,
         "minimum_mask_iou": min(ious, default=1.0),
+        "maximum_mask_abs_diff": maximum_mask_abs_difference,
         "maximum_score_abs_diff": maximum_score_difference,
     }
 
 
 def strip_outputs(result):
-    return {key: value for key, value in result.items() if key != "outputs"}
+    summary = {key: value for key, value in result.items() if key != "outputs"}
+    summary["output_signatures"] = []
+    for frame in result["outputs"]:
+        summary["output_signatures"].append(
+            {
+                "frame_idx": frame["frame_idx"],
+                "ids": frame["ids"],
+                "prompts": frame["prompts"],
+                "scores": frame["scores"],
+                "masks": {
+                    object_id: {
+                        "shape": list(mask.shape),
+                        "positive_pixels": int((mask > 0).sum()),
+                        "sha256": hashlib.sha256(
+                            np.ascontiguousarray(mask).view(np.uint8)
+                        ).hexdigest(),
+                    }
+                    for object_id, mask in frame["masks"].items()
+                },
+            }
+        )
+    return summary
 
 
 def main() -> int:
@@ -239,46 +341,82 @@ def main() -> int:
     frames = load_frames(args.video, args.max_frames)
     processor, model = build_model(args)
 
-    # Exercise every shape-specialized session before collecting timings.
-    run_once(processor, model, frames, args.text, False, args.steady_frames)
-    run_once(processor, model, frames, args.text, True, args.steady_frames)
+    modes = [("serial", False, False), ("parallel", True, False)]
+    if args.pipeline_backbone:
+        modes.append(("parallel_pipeline", True, True))
+
+    # Exercise every shape-specialized session and schedule before timing.
+    for _, parallel, pipeline_backbone in modes:
+        run_once(
+            processor,
+            model,
+            frames,
+            args.text,
+            parallel,
+            args.steady_frames,
+            pipeline_backbone=pipeline_backbone,
+        )
 
     pairs = []
     for repeat in range(args.repeats):
-        order = (False, True) if repeat % 2 == 0 else (True, False)
+        order = modes if repeat % 2 == 0 else list(reversed(modes))
         results = {
-            parallel: run_once(
+            name: run_once(
                 processor,
                 model,
                 frames,
                 args.text,
                 parallel,
                 args.steady_frames,
+                pipeline_backbone=pipeline_backbone,
             )
-            for parallel in order
+            for name, parallel, pipeline_backbone in order
         }
-        serial = results[False]
-        parallel = results[True]
-        comparison = compare_outputs(serial, parallel)
+        serial = results["serial"]
+        comparisons = {
+            name: compare_outputs(serial, result)
+            for name, result in results.items()
+            if name != "serial"
+        }
         pairs.append(
             {
-                "serial": strip_outputs(serial),
-                "parallel": strip_outputs(parallel),
-                "correctness": comparison,
+                "runs": {name: strip_outputs(result) for name, result in results.items()},
+                "correctness_vs_serial": comparisons,
             }
         )
-        print(
-            f"repeat {repeat + 1}: "
-            f"serial={serial['steady_mean_ms']:.2f} ms "
-            f"parallel={parallel['steady_mean_ms']:.2f} ms "
-            f"min_iou={comparison['minimum_mask_iou']:.6f}"
+        timing = " ".join(
+            f"{name}={result['steady_mean_ms']:.2f}ms"
+            for name, result in results.items()
         )
+        minimum_iou = min(
+            comparison["minimum_mask_iou"] for comparison in comparisons.values()
+        )
+        print(f"repeat {repeat + 1}: {timing} min_iou={minimum_iou:.6f}")
 
-    serial_mean = statistics.mean(pair["serial"]["steady_mean_ms"] for pair in pairs)
-    parallel_mean = statistics.mean(pair["parallel"]["steady_mean_ms"] for pair in pairs)
+    means = {
+        name: statistics.mean(
+            pair["runs"][name]["steady_mean_ms"] for pair in pairs
+        )
+        for name, _, _ in modes
+    }
+    amortized_means = {
+        name: statistics.mean(pair["runs"][name]["mean_ms"] for pair in pairs)
+        for name, _, _ in modes
+    }
+    candidate_name = "parallel_pipeline" if args.pipeline_backbone else "parallel"
+    serial_mean = means["serial"]
+    candidate_mean = means[candidate_name]
+    source_paths = (
+        "tracker/parallel_video.py",
+        "tracker/backbone_pipeline.py",
+        "tracker/migraphx_runtime.py",
+        "tracker/mig_vision_encoder.py",
+        "tracker/ort_gpu_io.py",
+        "eval/benchmarks/benchmark_parallel_tail.py",
+    )
     summary = {
         "git_head": subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], text=True
+            ["git", "rev-parse", "HEAD"], text=True, cwd=WORKSPACE
         ).strip(),
         "runtime": {
             "torch": torch.__version__,
@@ -288,18 +426,43 @@ def main() -> int:
             "providers": ort.get_available_providers(),
             "device": torch.cuda.get_device_name(),
         },
+        "git_status": subprocess.check_output(
+            ["git", "status", "--porcelain"], text=True, cwd=WORKSPACE
+        ).splitlines(),
+        "source_sha256": {
+            path: hashlib.sha256((WORKSPACE / path).read_bytes()).hexdigest()
+            for path in source_paths
+        },
         "video": str(args.video),
         "prompts": args.text,
         "imgsz": args.imgsz,
         "frames": len(frames),
-        "steady_frames": min(args.steady_frames, len(frames) - 1),
+        "steady_frames": len(
+            pairs[0]["runs"]["serial"]["steady_frame_indices"]
+        ),
+        "steady_frame_indices": pairs[0]["runs"]["serial"][
+            "steady_frame_indices"
+        ],
         "repeats": args.repeats,
-        "serial_mean_ms": serial_mean,
-        "parallel_mean_ms": parallel_mean,
-        "latency_reduction_pct": 100.0 * (1.0 - parallel_mean / serial_mean),
-        "throughput_gain_pct": 100.0 * (serial_mean / parallel_mean - 1.0),
+        "pipeline_backbone": args.pipeline_backbone,
+        "steady_mean_ms": means,
+        "steady_fps": {name: 1000.0 / value for name, value in means.items()},
+        "amortized_mean_ms": amortized_means,
+        "amortized_fps": {
+            name: 1000.0 / value for name, value in amortized_means.items()
+        },
+        "latency_reduction_pct": 100.0 * (1.0 - candidate_mean / serial_mean),
+        "throughput_gain_pct": 100.0 * (serial_mean / candidate_mean - 1.0),
         "pairs": pairs,
     }
+    if args.pipeline_backbone:
+        parallel_mean = means["parallel"]
+        summary["prefetch_incremental_latency_reduction_pct"] = 100.0 * (
+            1.0 - candidate_mean / parallel_mean
+        )
+        summary["prefetch_incremental_throughput_gain_pct"] = 100.0 * (
+            parallel_mean / candidate_mean - 1.0
+        )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(summary, indent=2))
     print(json.dumps({key: value for key, value in summary.items() if key != "pairs"}, indent=2))

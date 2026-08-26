@@ -62,11 +62,15 @@ def main():
                     help="Use MIGraphX acceleration (requires LD_PRELOAD)")
     ap.add_argument("--parallel-tail", action="store_true",
                     help="Overlap detector and tracker tails. Requires --mig.")
+    ap.add_argument("--pipeline-backbone", action="store_true",
+                    help="Prefetch the next MIG backbone. Requires --parallel-tail.")
     ap.add_argument("--onnx-dir", type=Path, default=None,
                     help="ONNX artefacts root (default: onnx_files_<imgsz>)")
     args = ap.parse_args()
     if args.parallel_tail and not args.mig:
         ap.error("--parallel-tail requires --mig")
+    if args.pipeline_backbone and not args.parallel_tail:
+        ap.error("--pipeline-backbone requires --parallel-tail")
     if args.onnx_dir is None:
         args.onnx_dir = WORKSPACE / f"onnx_files_{args.imgsz}"
 
@@ -179,10 +183,17 @@ def main():
                             pred_areas[fi] = int(bm.sum())
 
                 record(0, out0)
-                for fi in range(1, n_frames):
-                    with torch.inference_mode():
-                        out = model(inference_session=session, frame_idx=fi)
-                    record(fi, out)
+                if args.pipeline_backbone and n_frames > 1:
+                    from tracker.backbone_pipeline import BackbonePrefetchPipeline
+
+                    with BackbonePrefetchPipeline(model, session) as pipeline:
+                        for fi, out in pipeline.run(range(1, n_frames)):
+                            record(fi, out)
+                else:
+                    for fi in range(1, n_frames):
+                        with torch.inference_mode():
+                            out = model(inference_session=session, frame_idx=fi)
+                        record(fi, out)
 
         except Exception as e:
             print(f"  ERROR ann {ann['id']} ({noun}): {e}")

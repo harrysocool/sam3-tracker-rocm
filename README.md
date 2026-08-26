@@ -282,6 +282,11 @@ the shared backbone. It is opt-in and currently validated at 504 px with the
 ROCm 7.14 container; add it to the container command documented in
 [`docker/rocm714/README.md`](docker/rocm714/README.md).
 
+For preloaded videos, add `--pipeline-backbone` as well. It computes frame
+N+1's stateless vision backbone while frame N's detector/tracker tail runs.
+This improves throughput but adds a one-frame pipeline fill, so it is not used
+by the low-latency streaming API.
+
 **Multi-object flags** (text-prompt detection — `text_baseline.py` / `demo_live.py`):
 - `--min-score 0.5` — only track detections above this confidence (default 0.5)
 - `--max-objects 0` — cap by score rank, 0 = all above threshold (default 0 = all)
@@ -382,6 +387,7 @@ section.*
 | Path | Pipeline | Steady-state FPS |
 |---|---|---|
 | **`demo_live.py` (hybrid)** | SAM3 every 1000ms keyframe + tracker propagate between | **~5 FPS multi-prompt** |
+| `tools/text_baseline.py --mig --parallel-tail --pipeline-backbone` | Full SAM3 every frame, one-frame backbone lookahead | **10.24** (1 obj, 2-run mean) |
 | `tools/text_baseline.py --mig --parallel-tail` (ROCm 7.14 Docker) | SAM3 every frame, detector/tracker overlap | **9.03** (1 obj, 3-run median) |
 | `tools/text_baseline.py --mig` (ROCm 7.14 Docker) | SAM3 every frame (offline batch) | **8.51** (1 obj) |
 | `tools/text_baseline.py --mig` (native compatibility stack) | SAM3 every frame (offline batch) | **7.06** (1 obj) |
@@ -508,14 +514,15 @@ python eval/datasets/eval_davis.py \
 # PT vs MIG mask regression check
 python eval/datasets/mask_diff_pt_vs_mig.py \
     --checkpoint model/sam3 --video assets/blackswan.mp4 \
-    --text "swan" --imgsz 504 --max-frames 30 --parallel-tail \
+    --text "swan" --imgsz 504 --max-frames 30 \
+    --parallel-tail --pipeline-backbone \
     --out results/eval/mask_diff_504.json
 
 # Serial-vs-parallel tail A/B, with per-frame output equivalence checks
 python eval/benchmarks/benchmark_parallel_tail.py \
     --checkpoint model/sam3 --onnx-dir onnx_files_504 \
     --video assets/blackswan.mp4 --text swan --imgsz 504 \
-    --max-frames 50 --repeats 2 \
+    --max-frames 50 --repeats 2 --pipeline-backbone \
     --out results/perf/parallel_tail_504.json
 
 # Pipeline latency benchmark (box-prompt)
@@ -541,7 +548,8 @@ sam3-tracker-rocm/
 ├── demo_box.py             # ← Specialized box-prompt (max single-object FPS)
 ├── setup.sh                # ← One-command environment setup
 ├── tracker/                # Inference: SAM3Live, SAM3HybridLive, SAM3OnnxTracker, MIG shims
-│   └── parallel_video.py   # Opt-in detector/tracker HIP-stream overlap
+│   ├── parallel_video.py   # Opt-in detector/tracker HIP-stream overlap
+│   └── backbone_pipeline.py # Offline one-frame backbone lookahead
 ├── export/                 # ONNX export + .mxr compile (build.py = unified entry point)
 ├── eval/                   # Benchmarks, dataset evals, probes, debug tools
 ├── examples/               # ROS 2 node skeleton + integrator guide

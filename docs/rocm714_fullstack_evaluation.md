@@ -20,6 +20,10 @@ and tracker branches after the shared backbone. The opt-in `--parallel-tail`
 path reaches 8.93-9.09 FPS end to end (9.03 median) while preserving the
 serial path as the default.
 
+For preloaded videos, a second opt-in stage pipelines frame N+1's vision
+backbone against frame N's parallel detector/tracker tail. It reaches
+10.21-10.27 FPS end to end without changing model outputs.
+
 The Docker path is an additional gfx1151-specific runtime. It does not replace
 the native ROCm 7.2/7.13 compatibility path.
 
@@ -89,6 +93,11 @@ All generated artifacts remain outside Git:
 /home/amd/project/sam3-artifacts/gpu/experiments/parallel-tail/
   scoped_fence_50f_ab.json
   scoped_fence_person_dog_50f_ab.json
+  backbone_pipeline_final_acceptance.json
+  backbone_pipeline_person_dog_final_acceptance.json
+  mask_diff_pipeline_run1.json
+  mask_diff_pipeline_run2.json
+  sg3_pipeline.json
   mask_diff_parallel.json
   sg3_serial.json
   sg3_parallel.json
@@ -132,10 +141,12 @@ synchronization.
 | Native stable stack | 7.06 |
 | ROCm 7.14 container | **8.51** |
 | ROCm 7.14 + `--parallel-tail` | **8.93-9.09** (median 9.03) |
+| ROCm 7.14 + both pipeline flags | **10.21, 10.27** |
 
 The serial ROCm 7.14 path improves on the native stack by approximately 20.5%.
 The median parallel-tail run improves on native by 27.9% and on the serial
-7.14 result by 6.1%.
+7.14 result by 6.1%. The median pipelined result improves on native by 45.0%
+and on the serial 7.14 path by 20.3%.
 
 ### Parallel detector/tracker tail
 
@@ -149,10 +160,10 @@ clip, with the ORT input fence scoped to parallel workers, produced:
 
 | Schedule | Mean propagation latency | Model throughput |
 |---|---:|---:|
-| Serial | 117.06 ms | 8.54 FPS |
-| Parallel tail | **108.26 ms** | **9.24 FPS** |
+| Serial | 117.80 ms | 8.49 FPS |
+| Parallel tail | **108.87 ms** | **9.18 FPS** |
 
-That is a 7.5% latency reduction and 8.1% model-throughput increase. The
+That is a 7.6% latency reduction and 8.2% model-throughput increase. The
 un-instrumented video path, which also includes rendering and encoding, reached
 8.93-9.09 FPS (median 9.03 across three runs). The existing per-module profiler
 is intentionally not used to measure this optimization because its device-wide
@@ -160,14 +171,15 @@ synchronization hooks serialize the two branches.
 
 Correctness checks:
 
-- Two serial/parallel 50-frame pairs had bit-identical masks and object IDs.
+- Two serial/parallel 50-frame pairs had bit-identical raw mask tensors,
+  scores, and object IDs.
 - The canonical 30-frame PT-vs-MIG regression remained at mean IoU 0.994175,
   minimum IoU 0.989274, with no frame below 0.95.
 - A seeded three-sequence SG text subset produced byte-identical prediction
   JSON in serial and parallel modes.
 - A two-prompt, three-object 50-frame clip produced bit-identical object masks,
   object IDs/prompt ownership, and scores. Its two-run hot averages were
-  172.69 ms serial and 148.33 ms parallel (-14.1%).
+  173.50 ms serial and 147.89 ms parallel (-14.8%).
 - The full DAVIS 2017 validation regression remained at mean J 0.8156, matching
   the saved 504 px baseline. This exercises the unchanged box-tracker path and
   guards against branch-level regressions.
@@ -178,6 +190,40 @@ output synchronization remains enabled.
 
 Use `eval/benchmarks/benchmark_parallel_tail.py` for alternating serial/parallel
 runs with per-frame mask, object-ID, prompt-ownership, and score checks.
+
+### Cross-frame backbone pipeline
+
+For a preloaded clip, `--pipeline-backbone` starts frame N+1's stateless
+MIGraphX vision encoder while frame N is in the parallel detector/tracker tail.
+Tracker state updates remain strictly ordered. The flag requires
+`--parallel-tail`; it is intentionally unavailable in `SAM3Live`, where the
+next camera frame has not arrived yet.
+
+The corrected steady-state window compares the same frame indices (29-48) and
+excludes both pipeline fill and drain:
+
+| Schedule | Output interval | Throughput |
+|---|---:|---:|
+| Serial | 117.80 ms | 8.49 FPS |
+| Parallel tail | 108.87 ms | 9.18 FPS |
+| Parallel tail + backbone prefetch | **94.57 ms** | **10.57 FPS** |
+
+Relative to serial, the combined schedule lowers the steady output interval by
+19.7% and raises throughput by 24.6%. Prefetch alone, measured on top of the
+parallel tail in the same runs, lowers the interval by another 13.1%. This is
+throughput optimization rather than single-frame response-time reduction: the
+first propagation output includes a roughly 147 ms pipeline fill.
+The lookahead retains one extra frame's input and vision outputs (roughly
+50 MB at 504 px) until its completion event is consumed.
+
+The two-prompt/three-object 50-frame test measured 173.09 ms serial, 148.73 ms
+with parallel tails, and 138.76 ms with both pipeline stages. All 300 compared
+raw object-mask tensors, object IDs, prompt ownership, and scores matched the
+serial output exactly across two reversed-order runs.
+
+Two canonical PT-vs-MIG runs with both flags retained mean IoU 0.994142 and
+minimum IoU 0.989274, with no frame below 0.95. The seeded three-sequence SG
+prediction JSON was byte-identical to the serial result.
 
 ## Correctness and synchronization
 
@@ -227,6 +273,8 @@ tuning switches disabled.
 | Experimental AOTriton attention | 112.94 ms total; net regression |
 | `torch.compile(max-autotune)` DETR decoder | 5.8 ms microbenchmark, but 113.4-122.2 ms full-model; numerical changes altered object lifecycle |
 | Remove unused detector `fpn_3` output | No repeatable backbone gain; recompiled output also introduced avoidable numerical drift |
+| Standalone tracker-neck MIGraphX graph | 3.13 to 2.72 ms microbenchmark; ~0.4 ms does not justify another artifact/runtime boundary |
+| `torch.compile` tracker neck | 3.13 to 2.85 ms best case; lower gain than standalone MIGraphX |
 
 Rejected model artifacts were deleted.
 
@@ -254,9 +302,9 @@ kernel or compiler work, not additional environment-variable tuning.
 1. A custom gfx1151 fused MLP implementation targeting the two dominant MLP
    projections. A 20% improvement to that portion would save roughly 5 ms per
    full frame.
-2. Cross-frame backbone pipelining or double buffering. This has a larger
-   theoretical ceiling but changes scheduling semantics and was intentionally
-   left out of this investigation.
+2. Fixed B=2/B=4 backbone micro-batching. Cross-frame lookahead is now
+   implemented for preloaded video, but batch-level weight reuse remains
+   unexplored.
 
 The current ROCm 7.14 Docker configuration is the best validated single-frame
 configuration from this evaluation.
