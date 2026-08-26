@@ -1,0 +1,10 @@
+.git
+__pycache__/
+*.pyc
+model/
+onnx_files*/
+results/
+demo_out/
+*.mp4
+*.mxr
+*.onnx

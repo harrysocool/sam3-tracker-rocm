@@ -21,6 +21,7 @@ DAVIS 2017 val Mean J: **81.6%** (504px box-prompt).
 
 - [How it works](#how-it-works)
 - [Setup](#setup)
+- [Reproducible ROCm 7.14 Docker build](#reproducible-rocm-714-docker-build)
 - [Run the demos](#run-the-demos)
 - [Results](#results)
 - [Performance](#performance)
@@ -118,6 +119,24 @@ What it does:
 5. ONNX Runtime MIGraphX EP wheel (1.24.2)
 6. Python dependencies from `requirements.txt`
 7. Model weights from community mirror `1038lab/sam3` (no HF account needed)
+
+### Reproducible ROCm 7.14 Docker build
+
+The native setup above remains the compatibility path. For an isolated,
+from-source gfx1151 build of ROCm 7.14 + MIGraphX 2.17 + ONNX Runtime 1.24.2,
+use:
+
+```bash
+./docker/rocm714/build.sh
+```
+
+This pins the MIGraphX and ONNX Runtime source commits, builds both inside
+Docker, installs the gfx1151 PyTorch wheel, and runs a Torch-to-ORT-to-MIGraphX
+GPU smoke test. It does not modify the host ROCm installation. A clean build
+requires approximately 45 GB of free disk space.
+
+See [`docker/rocm714/README.md`](docker/rocm714/README.md) for artifact mounts,
+runtime commands, version pins, and the gfx1151 PyTorch compatibility detail.
 
 ### Stage 2 — Build model artefacts (`export/build.py`)
 
