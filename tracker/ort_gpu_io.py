@@ -56,4 +56,9 @@ def run_float32_gpu(
         output.data_ptr(),
     )
     session.run_with_iobinding(binding)
+    # MIGraphX can enqueue work on ORT's asynchronous compute stream. The
+    # returned Torch tensor is consumed immediately on Torch's stream, so wait
+    # for the bound output before exposing its raw allocation to the caller.
+    # This is a no-op for providers that already complete synchronously.
+    binding.synchronize_outputs()
     return output
