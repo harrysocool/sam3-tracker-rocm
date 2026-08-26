@@ -60,9 +60,13 @@ def main():
                     help="Input resolution (504 or 1008)")
     ap.add_argument("--mig", action="store_true",
                     help="Use MIGraphX acceleration (requires LD_PRELOAD)")
+    ap.add_argument("--parallel-tail", action="store_true",
+                    help="Overlap detector and tracker tails. Requires --mig.")
     ap.add_argument("--onnx-dir", type=Path, default=None,
                     help="ONNX artefacts root (default: onnx_files_<imgsz>)")
     args = ap.parse_args()
+    if args.parallel_tail and not args.mig:
+        ap.error("--parallel-tail requires --mig")
     if args.onnx_dir is None:
         args.onnx_dir = WORKSPACE / f"onnx_files_{args.imgsz}"
 
@@ -112,6 +116,9 @@ def main():
         )
         if mem_onnx.exists():
             patch_sam3_video_model_memory_attention(model, mem_onnx)
+        if args.parallel_tail:
+            from tracker.parallel_video import patch_parallel_video_tail
+            patch_parallel_video_tail(model)
         print("  MIG patches applied")
 
     print(f"  loaded in {time.perf_counter()-t0:.1f}s\n")

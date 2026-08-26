@@ -87,12 +87,19 @@ def parse_args():
                         "and per-frame backbone). Reads <onnx-dir>/backbone_detector/tuned.mxr "
                         "(build with: python export/backbone/export_backbone_single.py "
                         "--backbone-source detector + simplify + compile).")
+    p.add_argument(
+        "--parallel-tail",
+        action="store_true",
+        help="Overlap detector and tracker tails on two HIP streams. Requires --mig.",
+    )
     p.add_argument("--onnx-dir", type=Path, default=Path("onnx_files_1008"),
                    help="Resolution root (e.g. onnx_files_1008). The MIG path reads "
                         "<onnx-dir>/backbone_detector/{single_simplified.onnx,tuned.mxr}.")
     args = p.parse_args()
     if (args.image is None) == (args.video is None):
         sys.exit("Pass exactly one of --image or --video")
+    if args.parallel_tail and not args.mig:
+        sys.exit("--parallel-tail requires --mig")
     return args
 
 
@@ -271,6 +278,11 @@ def main():
         from tracker.batched_mask_decoder import patch_batched_mask_decoder
         patch_batched_mask_decoder(model)
         print(f"  Batched mask_decoder patch applied (active for N>1 obj)")
+
+        if args.parallel_tail:
+            from tracker.parallel_video import patch_parallel_video_tail
+            patch_parallel_video_tail(model)
+            print("  Parallel detector/tracker tail enabled")
 
     # Collect frames
     if args.image is not None:

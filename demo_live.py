@@ -94,6 +94,8 @@ def parse_args():
                    help="Cap frames processed (0 = entire video).")
     p.add_argument("--imgsz", type=int, default=504, choices=(504, 1008))
     p.add_argument("--mig", action="store_true")
+    p.add_argument("--parallel-tail", action="store_true",
+                   help="Overlap detector and tracker tails on two HIP streams. Requires --mig.")
     p.add_argument("--onnx-dir", type=Path, default=Path("onnx_files_504"))
     p.add_argument("--dtype", choices=("fp16", "fp32"), default="fp16")
     p.add_argument("--min-score", type=float, default=0.5,
@@ -101,6 +103,8 @@ def parse_args():
     args = p.parse_args()
     if (args.text is None) == (args.text_set is None):
         sys.exit("Pass exactly one of --text or --text-set.")
+    if args.parallel_tail and not args.mig:
+        sys.exit("--parallel-tail requires --mig")
     return args
 
 
@@ -265,6 +269,7 @@ def main():
             imgsz=args.imgsz,
             dtype=dtype,
             mig=args.mig,
+            parallel_tail=args.parallel_tail,
             redetect_every=1,
             max_objects_per_prompt=max_obj,
             bootstrap_frames=args.bootstrap_frames,
@@ -280,6 +285,7 @@ def main():
             imgsz=args.imgsz,
             dtype=dtype,
             mig=args.mig,
+            parallel_tail=args.parallel_tail,
             redetect_interval_ms=args.redetect_interval_ms,
             max_objects_per_prompt=max_obj,
             bootstrap_frames=args.bootstrap_frames,
@@ -349,6 +355,8 @@ def main():
 
     cap.release()
     writer.release()
+    if hasattr(live, "close"):
+        live.close()
     t_total = time.perf_counter() - t_total
 
     # Transcode to H.264 if ffmpeg is available — cv2 writes MPEG-4 Part 2

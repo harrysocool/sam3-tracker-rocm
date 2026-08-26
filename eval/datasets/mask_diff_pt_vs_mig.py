@@ -33,6 +33,8 @@ def parse_args():
     p.add_argument("--max-frames", type=int, default=20)
     p.add_argument("--onnx-dir", type=Path, default=None,
                    help="Default: onnx_files_<imgsz>")
+    p.add_argument("--parallel-tail", action="store_true",
+                   help="Enable detector/tracker tail overlap on the MIG model")
     p.add_argument("--out", type=Path, required=True,
                    help="JSON output with per-frame IoU stats")
     return p.parse_args()
@@ -72,7 +74,7 @@ def build_model(ckpt: Path, imgsz: int, device, dtype):
     return processor, model
 
 
-def patch_mig(model, onnx_dir: Path, imgsz: int):
+def patch_mig(model, onnx_dir: Path, imgsz: int, parallel_tail: bool = False):
     from tracker.migraphx_runtime import MIGraphXBackbone
     from tracker.mig_vision_encoder import patch_sam3_video_model_with_mig
     det_dir = onnx_dir / "backbone_detector"
@@ -94,6 +96,9 @@ def patch_mig(model, onnx_dir: Path, imgsz: int):
     if mem_attn_onnx.exists():
         from tracker.mig_memory_attention import patch_sam3_video_model_memory_attention
         patch_sam3_video_model_memory_attention(model, mem_attn_onnx)
+    if parallel_tail:
+        from tracker.parallel_video import patch_parallel_video_tail
+        patch_parallel_video_tail(model)
 
 
 def run_path(processor, model, frames_pil, text, device, dtype, n: int):
@@ -165,7 +170,7 @@ def main():
     print(f"\n=== MIG @{args.imgsz} ===")
     t = time.perf_counter()
     processor2, model2 = build_model(args.checkpoint, args.imgsz, device, dtype)
-    patch_mig(model2, args.onnx_dir, args.imgsz)
+    patch_mig(model2, args.onnx_dir, args.imgsz, args.parallel_tail)
     mig_results = run_path(processor2, model2, frames, args.text, device, dtype, n)
     mig_time = time.perf_counter() - t
     print(f"  done in {mig_time:.1f}s")
@@ -189,6 +194,7 @@ def main():
         "video": str(args.video),
         "text": args.text,
         "n_frames": n,
+        "parallel_tail": args.parallel_tail,
         "pt_time_s": pt_time,
         "mig_time_s": mig_time,
         "iou_mean": float(np.mean(ious)),

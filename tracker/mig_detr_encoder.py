@@ -22,7 +22,7 @@ import onnxruntime as ort
 
 from transformers.models.sam3.modeling_sam3 import Sam3DETREncoderOutput
 
-from .ort_gpu_io import run_float32_gpu
+from .ort_gpu_io import GpuIoExecutionError, run_float32_gpu
 
 
 def precompute_cross_attn_mask(text_mask: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
@@ -164,6 +164,8 @@ class MIGDetrEncoder(nn.Module):
                     self.output_name,
                     self.output_shape,
                 ).to(dtype=dtype)
+            except GpuIoExecutionError:
+                raise
             except Exception as exc:
                 if not getattr(self, "_warned_gpu_io", False):
                     print(f"  [MIGDetrEncoder] GPU I/O binding disabled: {exc}")

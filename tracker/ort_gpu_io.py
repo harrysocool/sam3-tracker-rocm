@@ -6,10 +6,30 @@ the otherwise implicit GPU -> NumPy -> ORT -> NumPy -> GPU bridge.
 """
 from __future__ import annotations
 
+import threading
+from contextlib import contextmanager
 from collections.abc import Mapping, Sequence
 
 import numpy as np
 import torch
+
+
+_thread_state = threading.local()
+
+
+class GpuIoExecutionError(RuntimeError):
+    """ORT failed after a GPU-bound run may already have been submitted."""
+
+
+@contextmanager
+def fence_ort_inputs():
+    """Fence Torch-produced ORT inputs in the current worker thread."""
+    previous = getattr(_thread_state, "fence_inputs", False)
+    _thread_state.fence_inputs = True
+    try:
+        yield
+    finally:
+        _thread_state.fence_inputs = previous
 
 
 def run_float32_gpu(
@@ -55,10 +75,29 @@ def run_float32_gpu(
         tuple(output.shape),
         output.data_ptr(),
     )
-    session.run_with_iobinding(binding)
-    # MIGraphX can enqueue work on ORT's asynchronous compute stream. The
-    # returned Torch tensor is consumed immediately on Torch's stream, so wait
-    # for the bound output before exposing its raw allocation to the caller.
-    # This is a no-op for providers that already complete synchronously.
-    binding.synchronize_outputs()
+    try:
+        if getattr(_thread_state, "fence_inputs", False):
+            # The casts above are Torch kernels queued on the branch stream.
+            # ORT owns a different stream and receives only raw pointers, so
+            # it cannot infer this producer dependency. Fence only the
+            # caller's stream.
+            torch.cuda.current_stream(device=device).synchronize()
+        session.run_with_iobinding(binding)
+        # MIGraphX can enqueue work on ORT's asynchronous compute stream. The
+        # returned Torch tensor is consumed immediately on Torch's stream, so
+        # wait before exposing its raw allocation to the caller.
+        binding.synchronize_outputs()
+    except Exception as exc:
+        # A failed call may already have submitted work on an ORT-owned stream.
+        # Drain the device before bound tensors leave scope, and distinguish
+        # this from a pre-launch binding error that callers may safely fall
+        # back from.
+        try:
+            torch.cuda.synchronize(device=device)
+        except Exception:
+            pass
+        raise GpuIoExecutionError("ORT GPU-I/O execution failed") from exc
     return output
+
+
+__all__ = ["GpuIoExecutionError", "fence_ort_inputs", "run_float32_gpu"]

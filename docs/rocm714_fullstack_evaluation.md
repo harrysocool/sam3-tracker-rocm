@@ -15,6 +15,11 @@ The gain comes primarily from the newer ONNX Runtime/MIGraphX combination on
 the DETR encoder and memory attention. The newer backbone is only about 4%
 faster than the stable backbone.
 
+A follow-up execution-schedule optimization overlaps the independent detector
+and tracker branches after the shared backbone. The opt-in `--parallel-tail`
+path reaches 8.93-9.09 FPS end to end (9.03 median) while preserving the
+serial path as the default.
+
 The Docker path is an additional gfx1151-specific runtime. It does not replace
 the native ROCm 7.2/7.13 compatibility path.
 
@@ -80,6 +85,14 @@ All generated artifacts remain outside Git:
   mask_diff_synced.json
   mask_diff_synced_rerun.json
   text_fullmodel_synced.mp4
+
+/home/amd/project/sam3-artifacts/gpu/experiments/parallel-tail/
+  scoped_fence_50f_ab.json
+  scoped_fence_person_dog_50f_ab.json
+  mask_diff_parallel.json
+  sg3_serial.json
+  sg3_parallel.json
+  davis_val_504_post_parallel.json
 ```
 
 New backbone SHA256:
@@ -118,8 +131,53 @@ synchronization.
 |---|---:|
 | Native stable stack | 7.06 |
 | ROCm 7.14 container | **8.51** |
+| ROCm 7.14 + `--parallel-tail` | **8.93-9.09** (median 9.03) |
 
-End-to-end throughput improved by approximately **20.5%**.
+The serial ROCm 7.14 path improves on the native stack by approximately 20.5%.
+The median parallel-tail run improves on native by 27.9% and on the serial
+7.14 result by 6.1%.
+
+### Parallel detector/tracker tail
+
+After the shared vision encoder completes, the detector branch and tracker
+propagation branch have no data dependency until mask association. The
+experimental scheduler runs them on two persistent worker threads and two HIP
+streams, then joins before the unchanged association/update phase.
+
+Two interleaved, hot-process A/B pairs over the complete 50-frame bundled
+clip, with the ORT input fence scoped to parallel workers, produced:
+
+| Schedule | Mean propagation latency | Model throughput |
+|---|---:|---:|
+| Serial | 117.06 ms | 8.54 FPS |
+| Parallel tail | **108.26 ms** | **9.24 FPS** |
+
+That is a 7.5% latency reduction and 8.1% model-throughput increase. The
+un-instrumented video path, which also includes rendering and encoding, reached
+8.93-9.09 FPS (median 9.03 across three runs). The existing per-module profiler
+is intentionally not used to measure this optimization because its device-wide
+synchronization hooks serialize the two branches.
+
+Correctness checks:
+
+- Two serial/parallel 50-frame pairs had bit-identical masks and object IDs.
+- The canonical 30-frame PT-vs-MIG regression remained at mean IoU 0.994175,
+  minimum IoU 0.989274, with no frame below 0.95.
+- A seeded three-sequence SG text subset produced byte-identical prediction
+  JSON in serial and parallel modes.
+- A two-prompt, three-object 50-frame clip produced bit-identical object masks,
+  object IDs/prompt ownership, and scores. Its two-run hot averages were
+  172.69 ms serial and 148.33 ms parallel (-14.1%).
+- The full DAVIS 2017 validation regression remained at mean J 0.8156, matching
+  the saved 504 px baseline. This exercises the unchanged box-tracker path and
+  guards against branch-level regressions.
+
+Enable the path with `--parallel-tail`. The implementation also fences the
+calling Torch stream before ORT consumes externally bound input pointers; ORT
+output synchronization remains enabled.
+
+Use `eval/benchmarks/benchmark_parallel_tail.py` for alternating serial/parallel
+runs with per-frame mask, object-ID, prompt-ownership, and score checks.
 
 ## Correctness and synchronization
 
@@ -167,6 +225,8 @@ tuning switches disabled.
 | `MIGRAPHX_NSTREAMS=2` | 69.38 ms |
 | One CPU/OpenMP thread | 111.65 to 111.35 ms; noise-level |
 | Experimental AOTriton attention | 112.94 ms total; net regression |
+| `torch.compile(max-autotune)` DETR decoder | 5.8 ms microbenchmark, but 113.4-122.2 ms full-model; numerical changes altered object lifecycle |
+| Remove unused detector `fpn_3` output | No repeatable backbone gain; recompiled output also introduced avoidable numerical drift |
 
 Rejected model artifacts were deleted.
 

@@ -6,6 +6,7 @@
 | Pipeline | 504px FPS | 1008px FPS |
 |---|---|---|
 | Box-prompt (`demo_box.py`) | **12.21** | **3.22** |
+| Text-prompt MIG, parallel tail (ROCm 7.14 Docker) | **9.03** | — |
 | Text-prompt MIG (ROCm 7.14 Docker) | **8.51** | — |
 | Text-prompt MIG (native compatibility stack) | **7.06** | **~1.5** ¹ |
 | Text-prompt PyTorch | 2.6 | 0.52 |
@@ -32,7 +33,8 @@ host-I/O baseline.
 The optional gfx1151 Docker path uses ROCm 7.14, MIGraphX 2.17 at commit
 `9f1a138`, and a source-built ONNX Runtime 1.24.2 MIGraphX EP. It reaches
 111.65 ms/frame in the module profile and 8.51 FPS end-to-end. The native
-stack remains the compatibility default. See
+stack remains the compatibility default. Opt-in detector/tracker tail overlap
+raises the median end-to-end result to 9.03 FPS. See
 [`rocm714_fullstack_evaluation.md`](rocm714_fullstack_evaluation.md) and
 [`../docker/rocm714/README.md`](../docker/rocm714/README.md).
 
@@ -107,6 +109,7 @@ fallbacks in `tracker/rocm_patches.py`, applied automatically at import).
 | E | GPU-resident backbone + ORT GPU I/O binding | — | **6.58** |
 | F | Exact S1…S10 memory-attention shapes | — | **7.06** |
 | G | ROCm 7.14 + MIGraphX 2.17 + matching ORT EP container | — | **8.51** |
+| H | Parallel detector/tracker tails after the shared backbone | — | **9.03** |
 
 ---
 
@@ -143,7 +146,7 @@ The gap reflects prompt quality difference, not tracker propagation quality.
 |---|---|---|---|
 | NVIDIA H200 | 1008px | ~5–6 | PyTorch, single object |
 | NVIDIA RTX 5090 | 1008px | 30+ | TensorRT + ByteTrack |
-| **AMD Ryzen AI Max+ 395 (APU)** | **504px** | **12.21** (box) / **8.51** (text Docker) | MIGraphX + MLIR |
+| **AMD Ryzen AI Max+ 395 (APU)** | **504px** | **12.21** (box) / **9.03** (text Docker, parallel tail) | MIGraphX + MLIR |
 | AMD Ryzen AI Max+ 395 (native compatibility) | 504px | 7.06 text | ROCm 7.2/7.13 dual stack |
 | **AMD Ryzen AI Max+ 395 (APU)** | **1008px** | **3.22** (box) / **~1.5** (text) | MIGraphX + MLIR |
 

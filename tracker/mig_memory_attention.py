@@ -31,7 +31,7 @@ import torch
 import torch.nn as nn
 import onnxruntime as ort
 
-from .ort_gpu_io import run_float32_gpu
+from .ort_gpu_io import GpuIoExecutionError, run_float32_gpu
 
 
 # ----- shape constants -----
@@ -206,6 +206,8 @@ class MIGMemoryAttention(nn.Module):
                     output_name,
                     output_shape,
                 )
+            except GpuIoExecutionError:
+                raise
             except Exception as exc:
                 print(
                     f"  [MIGMemoryAttention] S{spatial_slots} GPU I/O "

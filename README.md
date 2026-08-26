@@ -253,7 +253,8 @@ LD_PRELOAD=... python demo_live.py --checkpoint model/sam3 --onnx-dir onnx_files
 ```
 
 Key flags: `--redetect-interval-ms` (0 = SAM3 every frame; >0 = keyframe-every-N-ms +
-tracker propagate); `--periodic-rebootstrap-seconds` (drift safety net, default 180s).
+tracker propagate); `--parallel-tail` (overlap detector/tracker work on MIG keyframes);
+`--periodic-rebootstrap-seconds` (drift safety net, default 180s).
 See `python demo_live.py --help` for the full set.
 
 ### Offline batch text-prompt (`tools/text_baseline.py`) — reference / debugging
@@ -270,11 +271,16 @@ python tools/text_baseline.py --checkpoint model/sam3 \
 python tools/text_baseline.py --checkpoint model/sam3 \
     --video assets/blackswan.mp4 --text "swan" --max-frames 60
 
-# Video — MIG @504 (~5.1 FPS, 10× over PT baseline, best for offline demos)
+# Video — native compatibility-stack MIG @504 (~7.06 FPS)
 LD_PRELOAD=/opt/rocm-7.2.x/lib/libmigraphx_c.so.3:/opt/rocm-7.2.x/lib/migraphx/lib/libmigraphx.so.2016000.0 \
     python tools/text_baseline.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
     --video assets/blackswan.mp4 --text "swan" --imgsz 504 --mig --max-frames 60
 ```
+
+`--parallel-tail` overlaps the independent detector and tracker branches after
+the shared backbone. It is opt-in and currently validated at 504 px with the
+ROCm 7.14 container; add it to the container command documented in
+[`docker/rocm714/README.md`](docker/rocm714/README.md).
 
 **Multi-object flags** (text-prompt detection — `text_baseline.py` / `demo_live.py`):
 - `--min-score 0.5` — only track detections above this confidence (default 0.5)
@@ -376,6 +382,7 @@ section.*
 | Path | Pipeline | Steady-state FPS |
 |---|---|---|
 | **`demo_live.py` (hybrid)** | SAM3 every 1000ms keyframe + tracker propagate between | **~5 FPS multi-prompt** |
+| `tools/text_baseline.py --mig --parallel-tail` (ROCm 7.14 Docker) | SAM3 every frame, detector/tracker overlap | **9.03** (1 obj, 3-run median) |
 | `tools/text_baseline.py --mig` (ROCm 7.14 Docker) | SAM3 every frame (offline batch) | **8.51** (1 obj) |
 | `tools/text_baseline.py --mig` (native compatibility stack) | SAM3 every frame (offline batch) | **7.06** (1 obj) |
 | `tools/text_baseline.py` (no MIG) | Pure PyTorch baseline | ~2.6 |
@@ -501,8 +508,15 @@ python eval/datasets/eval_davis.py \
 # PT vs MIG mask regression check
 python eval/datasets/mask_diff_pt_vs_mig.py \
     --checkpoint model/sam3 --video assets/blackswan.mp4 \
-    --text "swan" --imgsz 504 --max-frames 30 \
+    --text "swan" --imgsz 504 --max-frames 30 --parallel-tail \
     --out results/eval/mask_diff_504.json
+
+# Serial-vs-parallel tail A/B, with per-frame output equivalence checks
+python eval/benchmarks/benchmark_parallel_tail.py \
+    --checkpoint model/sam3 --onnx-dir onnx_files_504 \
+    --video assets/blackswan.mp4 --text swan --imgsz 504 \
+    --max-frames 50 --repeats 2 \
+    --out results/perf/parallel_tail_504.json
 
 # Pipeline latency benchmark (box-prompt)
 python eval/benchmarks/bench_pipeline.py \
@@ -527,6 +541,7 @@ sam3-tracker-rocm/
 ├── demo_box.py             # ← Specialized box-prompt (max single-object FPS)
 ├── setup.sh                # ← One-command environment setup
 ├── tracker/                # Inference: SAM3Live, SAM3HybridLive, SAM3OnnxTracker, MIG shims
+│   └── parallel_video.py   # Opt-in detector/tracker HIP-stream overlap
 ├── export/                 # ONNX export + .mxr compile (build.py = unified entry point)
 ├── eval/                   # Benchmarks, dataset evals, probes, debug tools
 ├── examples/               # ROS 2 node skeleton + integrator guide
