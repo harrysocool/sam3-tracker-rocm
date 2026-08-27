@@ -114,6 +114,13 @@ All generated artifacts remain outside Git:
 /home/amd/project/sam3-artifacts/gpu/experiments/mlp-fc1-triton/
   real_finalists.json
 
+/home/amd/project/sam3-artifacts/gpu/experiments/hipblaslt-fc1/
+  result.json
+
+/home/amd/project/sam3-artifacts/gpu/experiments/rocwmma-fc1/
+  real_layers_exact_final.json
+  rocwmma_fc1_exact_summary.json
+
 /home/amd/project/sam3-artifacts/gpu/experiments/memory-attention-grouped/
   b1_vs_b2_s7.json
   b1_vs_b3_s7.json
@@ -301,6 +308,8 @@ tuning switches disabled.
 | `torch.compile` tracker neck | 3.13 to 2.85 ms best case; lower gain than standalone MIGraphX |
 | Fixed B=2 backbone | 135.43 ms/batch vs 136.10 ms for two B1 calls (~0.5% gain); missed 120 ms gate and changed B1-vs-B2 numerics |
 | Triton first MLP + exact GELU | 0.502 ms median vs 0.523 ms MLIR (~4.0%); missed the 0.42 ms gate |
+| hipBLASLt first MLP | Fused tanh-GELU 0.394-0.407 ms; exact two-kernel path 0.439-0.454 ms and missed the gate |
+| Hand-written rocWMMA first MLP | Exact path 0.476-0.497 ms on real layers; 138 VGPR, 12 KiB LDS, no scratch |
 | Memory-attention B=2 / B=3 | 18.67 / 29.87 ms vs repeated-B1 15.75 / 23.82 ms; both slower |
 | Concurrent B1 memory attention | Same-session execution silently corrupted output; two sessions saved only ~0.99 ms per pair |
 | Batched multi-object mask decoder | 2.7% without backbone prefetch, but -0.7% with it; 50-frame minimum mask IoU 0.9368 |
@@ -366,6 +375,22 @@ but still used 228 VGPRs and 12 KiB LDS. A persistent-kernel variant was slower
 at about 0.67 ms. Because integrating a Triton HSACO into the monolithic graph
 would require at least a MIGraphX C++ custom-op plugin plus ONNX parser work,
 the small standalone gain does not justify integration.
+
+The lower-level follow-up used hipBLASLt and a hand-written rocWMMA 2.2
+kernel. hipBLASLt algorithm 2032 (`128x96x64`, zero workspace) reached
+0.394-0.407 ms with its fused `GELU_BIAS` epilogue, but the epilogue implements
+the tanh approximation rather than exact-erf GELU. Keeping exact semantics by
+running a separate HIP GELU kernel took 0.439-0.454 ms.
+
+The custom rocWMMA implementation used native gfx1151
+`v_wmma_f32_16x16x16_f16`, cooperative double-buffered LDS loads, a `64x32`
+wave tile, FP32 accumulation, register-mapped bias/exact-GELU, and a separate
+16-row tail. The main kernel used 138 VGPRs, 12 KiB dynamic LDS, and no scratch.
+Despite a misleading 0.419 ms result on saturated synthetic values, real
+layers 0, 15 and 31 measured 0.497, 0.489 and 0.476 ms median respectively.
+The exact-erf cost is data-dependent and leaves the complete implementation
+above the 0.42 ms gate. This route was therefore stopped before MIGraphX
+custom-op integration.
 
 ### Multi-object batching and scheduling probes
 
@@ -436,9 +461,9 @@ is therefore no remaining straightforward QKV fusion opportunity.
 
 ## Remaining directions
 
-1. A lower-level HIP/rocWMMA MLP kernel is only justified if it first beats
-   the same 0.42 ms standalone gate; the Triton result shows that ordinary
-   tiling alone is insufficient.
+1. Further exact MLP work would require modifying the hipBLASLt generator or
+   rocMLIR lowering itself; standalone Triton, hipBLASLt plus exact epilogue,
+   and hand-written rocWMMA all missed the acceptance gate.
 2. Memory-history reduction can lower multi-object cost, but it changes model
    behavior and is therefore an explicit accuracy/performance mode rather than
    a default optimization.
