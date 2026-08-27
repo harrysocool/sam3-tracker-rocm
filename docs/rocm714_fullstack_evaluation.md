@@ -102,6 +102,13 @@ All generated artifacts remain outside Git:
   sg3_serial.json
   sg3_parallel.json
   davis_val_504_post_parallel.json
+  backbone_b2_rejected.json
+
+/home/amd/project/sam3-artifacts/gpu/experiments/backbone-kernel-profile/
+  backbone_kernel_trace.csv
+  backbone_kernel_stats.csv
+  mlp_counter_summary.json
+  {OccupancyPercent,L2CacheHit,MemUnitBusy,VALUInsts,FETCH_SIZE,WRITE_SIZE}/
 ```
 
 New backbone SHA256:
@@ -275,8 +282,9 @@ tuning switches disabled.
 | Remove unused detector `fpn_3` output | No repeatable backbone gain; recompiled output also introduced avoidable numerical drift |
 | Standalone tracker-neck MIGraphX graph | 3.13 to 2.72 ms microbenchmark; ~0.4 ms does not justify another artifact/runtime boundary |
 | `torch.compile` tracker neck | 3.13 to 2.85 ms best case; lower gain than standalone MIGraphX |
+| Fixed B=2 backbone | 135.43 ms/batch vs 136.10 ms for two B1 calls (~0.5% gain); missed 120 ms gate and changed B1-vs-B2 numerics |
 
-Rejected model artifacts were deleted.
+Rejected model artifacts were deleted; only compact result summaries remain.
 
 ## Backbone kernel profile
 
@@ -293,6 +301,22 @@ These four groups account for approximately 73% of backbone time. FP16-to-FP32
 input conversion and per-frame output allocation together cost only about
 0.08 ms, so Python allocation cleanup is not a useful target.
 
+ROCm 7.14 hardware counters make the first MLP projection the clearest custom
+kernel target. Across 15 backbone runs, its fused
+`mlir_dot_add_mul_erf_add_mul` dispatch averaged 522.85 us per layer and
+accounted for 25.81% of all backbone kernel time. For the
+`1296x1024 @ 1024x4736` GEMM this is about 24.0 FP16 TFLOP/s. rocprof measured
+roughly 78.8 MiB fetched and 48.3 MiB written per dispatch, or about 255 GB/s
+effective traffic, close to the APU memory-bandwidth ceiling. The kernel also
+reports 248 VGPRs, 20 KiB LDS and 772 bytes of scratch. A useful replacement
+must therefore reduce spill/re-read traffic and register pressure; merely
+batching more frames cannot fix this kernel shape.
+
+The second MLP projection averaged 395.49 us, about 31.8 FP16 TFLOP/s and
+102 GB/s measured traffic. It is a secondary compute/utilization target after
+the first projection. Counter CSVs are stored under
+`gpu/experiments/backbone-kernel-profile/`.
+
 Forcing the fused MLP kernels through hipBLASLt roughly doubled backbone time.
 Further meaningful single-frame gains require a gfx1151-specific fused MLP
 kernel or compiler work, not additional environment-variable tuning.
@@ -300,11 +324,11 @@ kernel or compiler work, not additional environment-variable tuning.
 ## Remaining directions
 
 1. A custom gfx1151 fused MLP implementation targeting the two dominant MLP
-   projections. A 20% improvement to that portion would save roughly 5 ms per
-   full frame.
-2. Fixed B=2/B=4 backbone micro-batching. Cross-frame lookahead is now
-   implemented for preloaded video, but batch-level weight reuse remains
-   unexplored.
+   projections. The first milestone is <=0.42 ms for the first projection
+   (>=20% faster than 0.523 ms) with lower scratch/traffic; a 20% improvement
+   across both MLP groups would save roughly 5 ms per full frame.
+2. Grouped/batched memory attention for multi-object workloads, where the
+   current tracker tail still scales approximately with object count.
 
 The current ROCm 7.14 Docker configuration is the best validated single-frame
 configuration from this evaluation.
