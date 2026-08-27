@@ -108,7 +108,24 @@ All generated artifacts remain outside Git:
   backbone_kernel_trace.csv
   backbone_kernel_stats.csv
   mlp_counter_summary.json
+  qkv_probe_result.json
   {OccupancyPercent,L2CacheHit,MemUnitBusy,VALUInsts,FETCH_SIZE,WRITE_SIZE}/
+
+/home/amd/project/sam3-artifacts/gpu/experiments/mlp-fc1-triton/
+  real_finalists.json
+
+/home/amd/project/sam3-artifacts/gpu/experiments/memory-attention-grouped/
+  b1_vs_b2_s7.json
+  b1_vs_b3_s7.json
+  s7_b1_concurrency_comparative.json
+
+/home/amd/project/sam3-artifacts/gpu/experiments/low-precision-probes/
+  sam3_int8_fc1_final.json
+  sam3_int8_fc1_tune.json
+  sam3_quant_fc1_results.json
+
+/home/amd/project/sam3-artifacts/gpu/experiments/
+  deep_optimization_rejections_20260826.json
 ```
 
 New backbone SHA256:
@@ -283,6 +300,16 @@ tuning switches disabled.
 | Standalone tracker-neck MIGraphX graph | 3.13 to 2.72 ms microbenchmark; ~0.4 ms does not justify another artifact/runtime boundary |
 | `torch.compile` tracker neck | 3.13 to 2.85 ms best case; lower gain than standalone MIGraphX |
 | Fixed B=2 backbone | 135.43 ms/batch vs 136.10 ms for two B1 calls (~0.5% gain); missed 120 ms gate and changed B1-vs-B2 numerics |
+| Triton first MLP + exact GELU | 0.502 ms median vs 0.523 ms MLIR (~4.0%); missed the 0.42 ms gate |
+| Memory-attention B=2 / B=3 | 18.67 / 29.87 ms vs repeated-B1 15.75 / 23.82 ms; both slower |
+| Concurrent B1 memory attention | Same-session execution silently corrupted output; two sessions saved only ~0.99 ms per pair |
+| Batched multi-object mask decoder | 2.7% without backbone prefetch, but -0.7% with it; 50-frame minimum mask IoU 0.9368 |
+| Prefetch next-frame detector tail | Bit-exact, but 110.12 to 124.88 ms (+13.4% latency) |
+| Collapse association GPU-to-CPU synchronizations | Bit-exact, but 137.58 to 138.16 ms on the optimized three-object pipeline |
+| Triton dynamic W8A8 first MLP | 0.463 ms vs 0.502 ms FP16 (~8.4% throughput); missed 0.42 ms gate and layer relative-L2 was 1.8-2.5% |
+| Triton FP8 first MLP | ~4.9 ms; gfx1151 lowered it to FP16 WMMA with 130 spills |
+| Whole-backbone MIGraphX INT8 PTQ | ~47 GiB RSS; OOM during serialization and multi-minute warmup behavior |
+| Custom QKV projection | Window: Triton 0.527 ms / Torch 0.427 ms vs MLIR 0.430 ms; global paths also only matched MLIR |
 
 Rejected model artifacts were deleted; only compact result summaries remain.
 
@@ -321,14 +348,104 @@ Forcing the fused MLP kernels through hipBLASLt roughly doubled backbone time.
 Further meaningful single-frame gains require a gfx1151-specific fused MLP
 kernel or compiler work, not additional environment-variable tuning.
 
+### Custom first-MLP prototype
+
+A standalone Triton 3.6 kernel was tested on the real layer-0 input and
+weights (`1296x1024 @ 1024x4736`). It used an offline-packed contiguous
+weight transpose, FP32 accumulation, FP32 bias/GELU arithmetic and the exact
+erf GELU formula. A 400-configuration synthetic sweep was followed by 25
+real-input finalists. The best configuration was `64x128x32`, four waves per
+workgroup, `matrix_instr_nonkdim=16`, `kpack=2` and default
+`waves_per_eu=0`.
+
+Its median/p95 latency was 0.502/0.512 ms, only about 4% faster than the
+current 0.523 ms MLIR kernel and well above the 0.42 ms integration gate.
+Numerics were sound versus an FP32 reference (maximum absolute error 0.00195,
+mean absolute error 2.30e-5), and the generated kernel eliminated scratch,
+but still used 228 VGPRs and 12 KiB LDS. A persistent-kernel variant was slower
+at about 0.67 ms. Because integrating a Triton HSACO into the monolithic graph
+would require at least a MIGraphX C++ custom-op plugin plus ONNX parser work,
+the small standalone gain does not justify integration.
+
+### Multi-object batching and scheduling probes
+
+The three-object `person` + `dog` workload invokes memory attention exactly
+three times per propagation frame. All three objects have the same spatial
+slot count on every tested frame, so it is an ideal batching case. Nevertheless,
+static S7/P64 graphs scaled negatively:
+
+| Memory-attention schedule | Pair/triple latency | Repeated B1 | Relative throughput |
+|---|---:|---:|---:|
+| B=2 graph | 18.67 ms | 15.75 ms | 0.843x |
+| B=3 graph | 29.87 ms | 23.82 ms | 0.797x |
+
+Rows were batch-independent, but the compiled batch graphs had small numerical
+drift (maximum absolute difference 0.00586) and no speed advantage. Concurrent
+B1 calls on one ORT session appeared faster but silently corrupted outputs
+(maximum absolute difference 9.50). Two independent sessions were exact but
+saved only 0.99 ms per pair before pipeline contention while doubling session
+resources. Both alternatives were rejected.
+
+The existing experimental batched mask decoder was also repaired locally to
+extract the valid diagonal from Transformers 5.8.1's erroneous `[N,N,...]`
+advanced-index result. It reduced a non-prefetched three-object run by 2.7%,
+but regressed the active backbone-prefetch pipeline by 0.7%. More importantly,
+recurrent feedback amplified batch-GEMM drift to a minimum mask IoU of 0.9368
+over 50 frames. The patch was reverted.
+
+Finally, prefetching frame N+1's detector after its backbone was bit-exact but
+increased the steady output interval from 110.12 to 124.88 ms. The current
+pipeline already overlaps the current detector tail with the next backbone;
+serializing them in one lookahead lane removes useful overlap and increases
+GPU contention. The accepted scheduler therefore remains backbone-only.
+
+The final exact host-side candidate collapsed repeated `.item()`/`.tolist()`
+synchronizations in association into one small transfer and grouped prompt
+indices directly in Python. Although bit-exact, it changed the optimized
+three-object pipeline from 137.58 to 138.16 ms, so this sub-millisecond target
+was also left unchanged.
+
+### Low-precision probes
+
+gfx1151 does execute INT8 dot products with native
+`v_wmma_i32_16x16x16_iu8`. A Triton W8A8 first-MLP kernel with static
+per-output-channel weights and dynamic per-row activation scaling reached
+0.463 ms including the 0.033 ms activation quantizer. This was only an 8.4%
+throughput improvement over the best FP16 Triton kernel and missed the 0.42 ms
+gate. On real layers 0, 15 and 31, relative-L2 error was 1.8-2.5% before any
+32-layer accumulation. FP8 is not natively supported by the gfx1151 backend;
+Triton lowered it through FP16 WMMA, used 256 VGPRs plus 130 spills, and took
+about 4.9 ms.
+
+A direct MIGraphX whole-backbone INT8 PTQ experiment was also attempted with
+real-frame calibration, followed by FP16 conversion of the remaining graph.
+The public API quantizes both dot and convolution operators and cannot target
+only the MLPs. The quantized graph reached roughly 47 GiB process RSS and was
+killed by the system while serializing the compiled program. A separate
+performance-only build using default scales compiled, but did not finish five
+warmup executions within several minutes. No deployable MXR was produced, and
+the original artifacts were not modified.
+
+The QKV projection was checked independently as well. MIGraphX already merges
+the three 1024-wide Q/K/V projections into one 3072-wide dispatch. For the 28
+window-attention layers, the current fused reshape/transpose/dot/bias kernel
+takes 0.430 ms; a single Torch `addmm` only matched it at 0.427 ms, while the
+best Triton candidate took 0.527 ms. The four global-attention projections
+showed the same result (0.313 ms MLIR, 0.311 ms Torch, 0.324 ms Triton). There
+is therefore no remaining straightforward QKV fusion opportunity.
+
 ## Remaining directions
 
-1. A custom gfx1151 fused MLP implementation targeting the two dominant MLP
-   projections. The first milestone is <=0.42 ms for the first projection
-   (>=20% faster than 0.523 ms) with lower scratch/traffic; a 20% improvement
-   across both MLP groups would save roughly 5 ms per full frame.
-2. Grouped/batched memory attention for multi-object workloads, where the
-   current tracker tail still scales approximately with object count.
+1. A lower-level HIP/rocWMMA MLP kernel is only justified if it first beats
+   the same 0.42 ms standalone gate; the Triton result shows that ordinary
+   tiling alone is insufficient.
+2. Memory-history reduction can lower multi-object cost, but it changes model
+   behavior and is therefore an explicit accuracy/performance mode rather than
+   a default optimization.
+3. Otherwise, further material gains require model-level changes such as
+   structured sparsity, distillation, or token/layer pruning with a new
+   accuracy budget; the remaining exact runtime-only candidates have not paid
+   for their complexity.
 
 The current ROCm 7.14 Docker configuration is the best validated single-frame
 configuration from this evaluation.
