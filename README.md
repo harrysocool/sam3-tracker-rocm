@@ -285,7 +285,9 @@ ROCm 7.14 container; add it to the container command documented in
 For preloaded videos, add `--pipeline-backbone` as well. It computes frame
 N+1's stateless vision backbone while frame N's detector/tracker tail runs.
 This improves throughput but adds a one-frame pipeline fill, so it is not used
-by the low-latency streaming API.
+by the low-latency streaming API. The MIG vision shim also caches its four
+fixed sine position encodings locally, preventing the detector and tracker
+instances from thrashing Transformers' shared four-entry cache.
 
 **Multi-object flags** (text-prompt detection — `text_baseline.py` / `demo_live.py`):
 - `--min-score 0.5` — only track detections above this confidence (default 0.5)
@@ -384,10 +386,10 @@ section.*
 
 ### Text-prompt (`tools/text_baseline.py --mig` / `demo_live.py`)
 
-| Path | Pipeline | Steady-state FPS |
+| Path | Pipeline | Measured FPS |
 |---|---|---|
 | **`demo_live.py` (hybrid)** | SAM3 every 1000ms keyframe + tracker propagate between | **~5 FPS multi-prompt** |
-| `tools/text_baseline.py --mig --parallel-tail --pipeline-backbone` | Full SAM3 every frame, one-frame backbone lookahead | **10.24** (1 obj, 2-run mean) |
+| `tools/text_baseline.py --mig --parallel-tail --pipeline-backbone` | Full SAM3 every frame, one-frame backbone lookahead | **10.78** (1 obj, 3-run median) |
 | `tools/text_baseline.py --mig --parallel-tail` (ROCm 7.14 Docker) | SAM3 every frame, detector/tracker overlap | **9.03** (1 obj, 3-run median) |
 | `tools/text_baseline.py --mig` (ROCm 7.14 Docker) | SAM3 every frame (offline batch) | **8.51** (1 obj) |
 | `tools/text_baseline.py --mig` (native compatibility stack) | SAM3 every frame (offline batch) | **7.06** (1 obj) |

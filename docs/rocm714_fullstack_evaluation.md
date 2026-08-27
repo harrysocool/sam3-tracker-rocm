@@ -1,6 +1,6 @@
 # ROCm 7.14 Full-Stack Evaluation on gfx1151
 
-**Date:** 2026-08-25
+**Evaluation dates:** 2026-08-25 to 2026-08-27
 **Hardware:** AMD Ryzen AI Max+ 395 / Radeon 8060S (`gfx1151`)
 **Workload:** `assets/blackswan.mp4`, prompt `swan`, 504 px, 30 propagation frames
 
@@ -21,8 +21,9 @@ path reaches 8.93-9.09 FPS end to end (9.03 median) while preserving the
 serial path as the default.
 
 For preloaded videos, a second opt-in stage pipelines frame N+1's vision
-backbone against frame N's parallel detector/tracker tail. It reaches
-10.21-10.27 FPS end to end without changing model outputs.
+backbone against frame N's parallel detector/tracker tail. Per-instance
+position-encoding caching raises this path to 10.63-10.84 FPS end to end
+without changing model outputs.
 
 The Docker path is an additional gfx1151-specific runtime. It does not replace
 the native ROCm 7.2/7.13 compatibility path.
@@ -104,6 +105,16 @@ All generated artifacts remain outside Git:
   davis_val_504_post_parallel.json
   backbone_b2_rejected.json
 
+/home/amd/project/sam3-artifacts/gpu/experiments/position-encoding-cache/
+  benchmark_pipeline.py
+  swan_50f_ab.json
+  person_dog_50f_ab.json
+  mask_diff_30f.json
+  sg3_pipeline.json
+  e2e.log
+  summary.json
+  SHA256SUMS
+
 /home/amd/project/sam3-artifacts/gpu/experiments/backbone-kernel-profile/
   backbone_kernel_trace.csv
   backbone_kernel_stats.csv
@@ -117,9 +128,27 @@ All generated artifacts remain outside Git:
 /home/amd/project/sam3-artifacts/gpu/experiments/hipblaslt-fc1/
   result.json
 
+/home/amd/project/sam3-artifacts/gpu/experiments/hipblaslt-fc2/
+  result.json
+
 /home/amd/project/sam3-artifacts/gpu/experiments/rocwmma-fc1/
   real_layers_exact_final.json
   rocwmma_fc1_exact_summary.json
+
+/home/amd/project/sam3-artifacts/gpu/experiments/detr-rpb-compile/
+  rpb_compile_bench.json
+  rpb_cuda_graph_bench.json
+
+/home/amd/project/sam3-artifacts/gpu/experiments/detr-rpb-pipeline/
+  rpb_runtime_patch.py
+  rpb_exact_patch.py
+  rpb_pipeline_bench.py
+  rpb_compile_pipeline_50f_ab.json
+  rpb_exact_pipeline_50f_ab.json
+
+/home/amd/project/sam3-artifacts/gpu/experiments/runtime-overhead-probes/
+  ort_reuse_bench.py
+  ort_reuse_s7.json
 
 /home/amd/project/sam3-artifacts/gpu/experiments/memory-attention-grouped/
   b1_vs_b2_s7.json
@@ -172,7 +201,7 @@ synchronization.
 | Native stable stack | 7.06 |
 | ROCm 7.14 container | **8.51** |
 | ROCm 7.14 + `--parallel-tail` | **8.93-9.09** (median 9.03) |
-| ROCm 7.14 + both pipeline flags | **10.21, 10.27** |
+| ROCm 7.14 + both pipeline flags + PE cache | **10.63-10.84** |
 
 The serial ROCm 7.14 path improves on the native stack by approximately 20.5%.
 The median parallel-tail run improves on native by 27.9% and on the serial
@@ -256,6 +285,39 @@ Two canonical PT-vs-MIG runs with both flags retained mean IoU 0.994142 and
 minimum IoU 0.989274, with no frame below 0.95. The seeded three-sequence SG
 prediction JSON was byte-identical to the serial result.
 
+### Per-instance position-encoding cache
+
+Transformers 5.8.1 puts `Sam3SinePositionEmbedding.forward` behind one
+function-level LRU with only four entries. The detector and tracker neck use
+different module instances and four fixed FPN shapes each, so their eight keys
+evicted one another every frame. Four cache hits take about 0.004 ms, whereas
+alternating the two four-shape instances recomputed about 1.57 ms of GPU work.
+
+`MIGVisionEncoder` now keeps its four immutable `mask=None` position encodings
+in a per-instance LRU keyed by shape, device and dtype. A local miss still uses
+the position-encoding module's normal call path; after those four startup
+misses, local hits stop the detector from churning the shared Transformers LRU,
+so the tracker neck's four entries remain resident. CUDA events make first
+production and cross-stream consumption explicit; moving the module to another
+device or dtype clears the local cache.
+
+On the final ROCm 7.14 stack, reversed-order 50-frame A/B runs measured:
+
+| Workload | Previous pipeline | Cached PE | Throughput gain |
+|---|---:|---:|---:|
+| `swan`, one object | 93.03 ms | **91.90 ms** | **1.22%** |
+| `person` + `dog`, three objects | 136.18 ms | 136.35 ms | neutral |
+
+The multi-object result is neutral because neither saving shortens its critical
+path: detector PE work is in the prefetched backbone and is hidden by the frame
+tail, while tracker PE work is hidden by the roughly 10 ms longer detector
+tail.
+
+All 400 compared raw masks across both workloads were bit-identical, as were
+scores, IDs and prompt ownership. The 30-frame PT-vs-MIG regression remained
+at mean IoU 0.994142, minimum 0.989274, with no frame below 0.95. Three
+uninstrumented single-object runs reached 10.63, 10.84 and 10.78 FPS.
+
 ## Correctness and synchronization
 
 The first regression run exposed one transient bad frame at frame 24. ORT
@@ -308,8 +370,12 @@ tuning switches disabled.
 | `torch.compile` tracker neck | 3.13 to 2.85 ms best case; lower gain than standalone MIGraphX |
 | Fixed B=2 backbone | 135.43 ms/batch vs 136.10 ms for two B1 calls (~0.5% gain); missed 120 ms gate and changed B1-vs-B2 numerics |
 | Triton first MLP + exact GELU | 0.502 ms median vs 0.523 ms MLIR (~4.0%); missed the 0.42 ms gate |
-| hipBLASLt first MLP | Fused tanh-GELU 0.394-0.407 ms; exact two-kernel path 0.439-0.454 ms and missed the gate |
+| hipBLASLt first MLP | Fused tanh-GELU 0.394-0.407 ms was rejected as non-exact; bias plus a separate exact-GELU kernel took 0.439-0.454 ms and missed the gate |
 | Hand-written rocWMMA first MLP | Exact path 0.476-0.497 ms on real layers; 138 VGPR, 12 KiB LDS, no scratch |
+| hipBLASLt second MLP | Best 0.327-0.333 ms vs 0.395 ms MLIR; missed the 0.316 ms (20%) gate |
+| Reusable ORT GPU-I/O buffers/binding | Bit-exact, but memory-attention S7 regressed from 7.97-8.21 ms to 8.11-8.34 ms |
+| `torch.compile` DETR RPB | 1.763 to 0.798 ms microbenchmark, but changed RPB values by up to 0.25 and improved the 50-frame pipeline by only 0.72% |
+| Exact cached/Triton DETR RPB | Bit-exact, but reduced the 50-frame pipeline by only 0.205 ms (0.22%) and one of three pairs regressed |
 | Memory-attention B=2 / B=3 | 18.67 / 29.87 ms vs repeated-B1 15.75 / 23.82 ms; both slower |
 | Concurrent B1 memory attention | Same-session execution silently corrupted output; two sessions saved only ~0.99 ms per pair |
 | Batched multi-object mask decoder | 2.7% without backbone prefetch, but -0.7% with it; 50-frame minimum mask IoU 0.9368 |
@@ -392,6 +458,47 @@ The exact-erf cost is data-dependent and leaves the complete implementation
 above the 0.42 ms gate. This route was therefore stopped before MIGraphX
 custom-op integration.
 
+The second MLP projection was also tested through hipBLASLt with the exact
+operation `D = X @ W.T + residual + bias`: the residual was supplied as C with
+`beta=1`, and the bias used the built-in bias epilogue. Algorithm 2037
+(`128x96x64`, zero workspace) was the best candidate. Full enumeration measured
+0.333 ms median, while the best WGM=1 enumeration measured 0.327 ms, versus
+0.395 ms for the existing MLIR kernel. These are useful 15.7-17.2% standalone
+gains, but no enumerated or WGM-overridden configuration sustained the required
+0.316 ms (20%) gate. The fused FP32 accumulation/addition also differed from
+PyTorch's staged FP16 result by up to 0.015625. A second custom integration was
+therefore not justified.
+
+### DETR RPB and ORT GPU-I/O follow-ups
+
+The six fixed-shape DETR relative-position-bias computations
+(`B=1`, `Q=200`, `H=W=36`, eight heads) take 1.763 ms in eager PyTorch. Isolating
+that function under `torch.compile` reduced the six-call total to 1.064 ms in
+`reduce-overhead` mode and 0.798 ms in `max-autotune` mode. However, both modes
+changed the RPB tensor by up to 0.25; per-layer mean absolute error was
+0.0011-0.0024 and 12-19% of FP16 elements changed bits. A two-pair 50-frame
+pipeline check reduced the steady interval from 91.960 to 91.298 ms (0.72%),
+but raw mask logits differed by up to 0.015625. This does not meet the exact
+optimization requirement.
+
+An exact alternative retained the eager coordinate/log and MLP operations,
+cached the fixed coordinate vectors, and replaced only the final broadcast,
+addition and layout materialization with a Triton kernel. All output masks and
+scores were bit-identical. Across three reversed-order 50-frame pairs, however,
+the individual latency changes were +0.140, +0.589 and -0.112 ms; the aggregate
+steady interval changed from 92.600 to 92.395 ms, only 0.205 ms (0.22%). A
+CUDA-graph control was likewise bit-exact but changed the six-call RPB
+microbenchmark only from 1.762 to 1.743 ms. These gains are too small and
+unstable to justify a fixed-shape Triton runtime path.
+
+Finally, persistent FP32 staging tensors, a persistent output tensor and a
+reused ORT I/O binding were tested on the S7 memory-attention session. Two runs
+measured 8.208 to 8.336 ms and 7.965 to 8.114 ms respectively. Outputs were
+bit-identical, but the explicit staging copies and stream synchronization cost
+more than rebuilding the small binding and allocations. Reusing ORT bindings
+also requires additional lifetime protection before a later invocation can
+overwrite output storage, so this path was rejected.
+
 ### Multi-object batching and scheduling probes
 
 The three-object `person` + `dog` workload invokes memory attention exactly
@@ -462,8 +569,8 @@ is therefore no remaining straightforward QKV fusion opportunity.
 ## Remaining directions
 
 1. Further exact MLP work would require modifying the hipBLASLt generator or
-   rocMLIR lowering itself; standalone Triton, hipBLASLt plus exact epilogue,
-   and hand-written rocWMMA all missed the acceptance gate.
+   rocMLIR lowering itself; standalone Triton, hipBLASLt bias plus a separate
+   exact-GELU kernel, and hand-written rocWMMA all missed the acceptance gate.
 2. Memory-history reduction can lower multi-object cost, but it changes model
    behavior and is therefore an explicit accuracy/performance mode rather than
    a default optimization.
