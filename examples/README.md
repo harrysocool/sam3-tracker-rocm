@@ -1,192 +1,212 @@
-# SAM3Live — practical guide
+# SAM3Live freshness-first integration guide
 
-A focused reference for integrating `tracker.live_inference.SAM3Live` into a
-live sensor pipeline (robotics, RTSP, webcam). For the model architecture see
-the top-level README; this file documents only the knobs that matter at
-deployment time, with measured numbers and recommended starting points.
+This directory shows the deployment shape for a camera, ROS 2 image topic, or
+other real-time source. The primary example is
+[ros_node_skeleton.py](ros_node_skeleton.py).
 
-All numbers below are on the AMD Strix Halo dev box (`gfx1151`), 504 px,
-MIGraphX path enabled. Use them as relative baselines; absolute latency on
-your hardware will differ.
+The design optimizes observation freshness for occupancy-grid updates:
 
----
+    camera callback
+        |
+        | owned frame copy + host monotonic arrival + sensor timestamp
+        v
+    LatestFramePipeline raw latest[1]
+        |
+        | one consumer thread
+        v
+    preprocess -> backbone -> detector/tracker -> publish
 
-## 1. Minimum usable code
+There is no live N+1 preprocessing or backbone lookahead. While inference is
+busy, newer camera arrivals replace the one waiting frame before any model
+state is touched.
 
-```python
-from tracker.live_inference import SAM3Live
+## 1. Required threading and ownership rules
 
-live = SAM3Live(
-    checkpoint="model/sam3",
-    prompts=["person", "car", "sidewalk"],
-    onnx_dir="onnx_files_504",
-    imgsz=504,
-    mig=True,
-)
+1. The subscription callback must not call SAM3Live.infer. It should call
+   SAM3Node.on_image and return.
+2. LatestFramePipeline uses copy_frames=True in the example. A ROS loaned
+   message, cv_bridge shared view, V4L2 buffer, or GStreamer buffer may therefore
+   be recycled as soon as on_image returns.
+3. Exactly one consumer thread calls infer_next and publishes its result.
+   Do not share the wrapped SAM3Live with another inference thread.
+4. Configure the upstream transport for latest semantics too. For ROS 2 images,
+   use sensor-data QoS, best effort when appropriate, KEEP_LAST, depth 1.
+5. Do not pass a ROS, PTP, or camera timestamp as captured_at. The pipeline age
+   clock is host-monotonic. The sensor exposure timestamp is carried separately
+   as sensor_timestamp for TF and pose lookup.
 
-for frame_bgr in your_camera_stream():       # HxWx3 uint8, OpenCV BGR
-    out = live.infer(frame_bgr)
-    for prompt, obj_ids in out["prompt_to_obj_ids"].items():
-        for oid in obj_ids:
-            mask  = out["masks"][oid]         # HxW bool, original resolution
-            score = out["scores"][oid]
-            box   = out["boxes"][oid]         # (x1, y1, x2, y2)
-            # publish / visualize / fuse with your pipeline
-```
+The callback-facing API is intentionally small:
 
-The constructor does the slow stuff once (model load + MIG compile, ~5 s);
-each `infer()` is the per-frame call you put in your callback.
+    accepted = node.on_image(
+        frame_bgr,
+        header_stamp_ns=msg.header.stamp.sec * 1_000_000_000
+                        + msg.header.stamp.nanosec,
+    )
 
-The constructor default is `imgsz=504` (the primary supported resolution).
-`mig=False` by default so the class is usable without MIG artifacts; for
-deployment **pass `mig=True` as shown above** to get the ~5 FPS numbers in
-this guide. 1008px is supported as an advanced option but isn't the
-recommended path — most numbers in this guide assume 504 + MIG.
+accepted=False means a lifecycle transition or shutdown rejected that arrival.
+It is not a request to retry an old image.
 
----
+## 2. ROS 2 wiring
 
-## 2. The four knobs that decide perf
+The skeleton does not import rclpy, but maps directly to a node:
 
-| Knob | Default | What it does | When to change |
-|---|---|---|---|
-| **`max_objects_per_prompt`** | `5` | Cap on simultaneously tracked objects per prompt. Excess (lowest score) are evicted via `session.remove_object` so the tracker stops propagating them. | Lower (1-3) if you know each prompt has at most a handful of real instances. Set higher only if you genuinely expect more (crowds). **Do not set to `None` unless you've verified your scene's true object count — without a cap the session silently accumulates ghost detections that bloat per-frame cost 5-20×.** |
-| **`redetect_every`** | `1` | Run the full SAM3 detector every Nth frame; intermediate frames run tracker propagation only. | Bump to 3-5 once tracking is stable to recover FPS. New objects entering the scene are only discovered at detect frames. |
-| **`full_detection=` (per-call)** | `None` | Override the redetect schedule for a single `infer()` call. `True` forces detection, `False` forces propagate-only, `None` uses the schedule. | Use in ROS callbacks to drive detection by your own policy (wall-clock interval, external trigger, queue depth) instead of a fixed frame counter. |
-| **`min_score`** (in your post-filter) | n/a | Drop detections below this confidence from the **output** you publish. Higher values reduce visible noise; they do *not* prevent the detector from spawning the candidate inside the session. | Pair with `max_objects_per_prompt` for both clean output and bounded compute. 0.4-0.6 is a sensible band for outdoor robotics. |
+1. Construct SAM3Node in on_configure. Model loading and MIG warmup happen once.
+2. Start a sensor_msgs/Image subscription in on_activate:
 
-A 5th knob exists but you can usually ignore it: `keep_recent_frames` (default
-`0` = don't prune raw frame tensors). Pruning is unsafe in isolation because
-the tracker keeps per-frame state in `output_dict_per_obj` that must stay in
-sync. For long-running streams, periodically call `live.reset_tracking()`
-instead.
+       qos = QoSProfile(
+           history=HistoryPolicy.KEEP_LAST,
+           depth=1,
+           reliability=ReliabilityPolicy.BEST_EFFORT,
+       )
+       self.create_subscription(Image, topic, self.on_ros_image, qos)
 
----
+3. The ROS callback converts and submits only:
 
-## 3. Recommended starting configs
+       def on_ros_image(self, msg):
+           frame = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+           stamp_ns = msg.header.stamp.sec * 1_000_000_000
+           stamp_ns += msg.header.stamp.nanosec
+           self.sam3.on_image(frame, header_stamp_ns=stamp_ns)
 
-| Use case | prompts | max_objects | redetect_every | min_score | Measured FPS |
-|---|---|---|---|---|---|
-| Single class, single target (e.g. tracking one swan) | 1 | 5 (default) | 1 (default) | 0.5 | ~4-5 |
-| Two classes, bounded instances (e.g. swan + water) | 2 | 5 (default) | 5 | 0.4 | ~4.4 |
-| Three classes, semi-dense (e.g. person + car + sidewalk) | 3 | 5 (default) | 5 | 0.4 | ~3.2 |
-| Tight 5 Hz budget, accept tracking-only most frames | 3 | 5 (default) | 10 | 0.4 | extrapolated ~4-5 (not directly measured at N=10) |
+4. Replace SAM3Node._publish_masks with publishers for masks, detections, or a
+   costmap input. This function already runs on the sole inference consumer
+   thread. If ROS publisher ownership requires a different executor thread,
+   enqueue immutable result messages after all tensor-to-CPU conversion.
+5. Call node.finish for an orderly finite-source drain. Call node.close from
+   on_cleanup/on_shutdown to abort queued work, join the consumer, and close the
+   model.
 
-These come from the perf sweep in `results/perf_rerun_*.log` and
-`results/cap_default_perf_*.log` — see `git log` for context.
+The pipeline queue does not compensate for a deep DDS, camera-driver, RTSP, or
+decoder queue. Those queues must also be bounded and configured for low latency.
 
----
+## 3. Occupancy-grid timestamps and age
 
-## 4. Resetting state
+Each result retains:
 
-Two escape hatches, least to most destructive. The model itself stays
-loaded across both — only session state is cleared.
+- packet.sequence: host source ordering;
+- packet.captured_at: host monotonic arrival used only for latency;
+- packet.sensor_timestamp: camera exposure time in the sensor/ROS clock;
+- packet.metadata.generation: prompt generation;
+- age_ms and service_ms.
 
-```python
-live.reset_tracking()     # drop tracked-object history; keep prompts + cache
-live.reset_prompts([...]) # drop prompts + objects; install a new prompt list
-                          # (1 ms; CLIP encode folded into next frame)
-```
+Update the map with the transform at sensor_timestamp:
 
-Frame 0 and the first frame after any reset always run full detection
-regardless of `redetect_every`, so you never end up with an empty session
-trying to propagate nothing.
+    T_map_camera(sensor_timestamp)
 
----
+Do not use the robot pose at inference completion. Apply a maximum result-age
+gate based on allowable spatial error and relative velocity. The skeleton
+defaults `max_result_age_ms` to 200 ms and drops older results before publish;
+set a stricter value for faster motion. A stale positive
+observation can create obstacle ghosts; stale negative/free-space evidence can
+incorrectly clear a current obstacle. Publish and handle empty observations
+explicitly rather than silently omitting them.
 
-## 5. ROS 2 integration (Nav2-friendly)
+The previously measured single-prompt full-detection reference on the target
+machine was roughly 8.1-8.4 Hz with about 139 ms mean frame age. Treat that as a
+reference, not a deadline guarantee. Re-measure p50, p95, and p99 age with the
+complete robot stack sharing the GPU.
 
-The end-to-end pattern (image subscription → infer → mask/detection
-publication, with a pluggable "when do I run full detection" policy) is
-in **[`ros_node_skeleton.py`](ros_node_skeleton.py)**. The file does not
-import `rclpy`, so it is readable and runnable as a plain Python script
-against a video file — but it's structured as a `rclpy.node.Node`-style
-class with four marked `# REPLACE` sections you swap for real ROS 2
-plumbing:
+## 4. Detection policy
 
-1. `self.create_subscription(Image, "/camera/image_raw", self.on_image, qos)`
-   with `rclpy.qos.qos_profile_sensor_data` (BestEffort, depth 1) for
-   live sensor streams.
-2. `self.create_publisher(...)` for your output topics — typically
-   `vision_msgs/Detection2DArray` for boxes+scores, `sensor_msgs/Image`
-   for an overlay, and/or a per-prompt mask topic for downstream
-   costmap layers (e.g. Nav2 costmap filter inputs, spatio-temporal
-   voxel layer occupancy).
-3. `self.create_service(SetPrompts, ...)` to wire `reset_prompts(...)`
-   to a runtime prompt swap (e.g. switching from "indoor objects" to
-   "outdoor objects" when crossing a doorway).
-4. Trigger source (service, parameter callback, GUI button) for the
-   `OnDemandTrigger` policy if you go that route.
+The example defaults to AlwaysFull. Every frame that survives latest-frame
+selection requests the text detector:
 
-Four reference policies, all subclasses of the same `(ctx) -> bool`
-protocol — write your own if you need queue-depth-aware or
-velocity-aware scheduling:
+    node = SAM3Node(
+        checkpoint="model/sam3",
+        onnx_dir="onnx_files_504",
+        prompts=["person", "vehicle", "obstacle"],
+        policy=AlwaysFull(),
+        imgsz=504,
+        mig=True,
+    )
 
-- `AlwaysFull` — full SAM3 every callback (Nav2 baseline)
-- `TimeBasedRedetect` — full SAM3 only if N ms have elapsed since the
-  last (recommended for steady-rate sensors; self-heals on dropped frames)
-- `PeriodicRedetect` — full SAM3 every Nth callback
-- `OnDemandTrigger` — propagation only, external `trigger()` arms one
-  detection (use with a service / lifecycle transition)
+Optional policies remain available:
 
-If you wrap this as a lifecycle node, do the `SAM3Live(...)` construction
-in `on_configure` (model load + MIG compile is ~5 s) and start the
-image subscription in `on_activate`.
+- TimeBasedRedetect: request detection on a host-monotonic interval;
+- PeriodicRedetect: request detection every N source arrivals;
+- OnDemandTrigger: an external service arms one detection.
 
-Run it standalone against a video file to verify the pattern works on
-your hardware before wiring it up:
+Detection requests are sticky across latest-slot replacement, so dropping the
+particular camera frame that carried a trigger does not lose the trigger.
+AlwaysFull is the recommended default for the full-text occupancy workload.
+Tracker-heavy policies need their own map-quality regression because source
+frames can be skipped.
 
-```bash
-python examples/ros_node_skeleton.py \
-    --checkpoint model/sam3 --onnx-dir onnx_files_504 \
-    --video assets/blackswan.mp4 --text swan water \
-    --policy time_based --redetect-interval-ms 300
-```
+## 5. Prompt reset and generations
 
----
+Never call live.reset_prompts while a pipeline is active. The skeleton exposes
+SAM3Node.reset_prompts, which performs:
 
-## 6. Common gotchas
+    stop accepting into generation G
+        -> detach G so late G results are suppressed
+        -> close G and wait for its consumer
+        -> live.reset_prompts(...)
+        -> create and start generation G+1
 
-- **`--max-objects 0` is "explicitly unlimited", not "use default"** in the
-  demo CLI. Pass `-1` for the SAM3Live default (5). Pass `0` only when you
-  understand the ghost-accumulation hazard.
+Callbacks arriving during the transition return False. A queued old-prompt
+frame is discarded, and no old-generation result is published after the reset
+returns. Include the generation in downstream messages if publication is
+followed by another asynchronous queue; consumers can then reject late messages
+from an older generation.
 
-- **`init_video_session(video=...)` is for batch processing, not streaming.**
-  It preprocesses every frame up front (~2 ms × N frames). SAM3Live uses
-  the streaming entry point under the hood (empty session + `add_new_frame`
-  per call) — don't bypass it.
+The reset service must run outside the inference/publish consumer thread.
+`SAM3Node.reset_tracking()` uses the same generation barrier and should be
+called periodically according to the robot's memory budget; do not reset the
+underlying `SAM3Live` directly.
 
-- **Don't share one `SAM3Live` across threads.** One model, one session, one
-  thread. If you need parallelism, run multiple instances on separate model
-  loads (memory cost is non-trivial — only do this if you've measured the
-  need).
+## 6. Finish and shutdown
 
-- **Long-running streams**: raw frame tensors and tracker memory grow
-  monotonically. Call `reset_tracking()` every few minutes (your call —
-  depends on memory budget and how much continuity you want across the
-  reset). The model itself is unaffected.
+Use the two shutdown paths deliberately:
 
-- **Multi-instance prompts ("tree", "person") in dense scenes** generate
-  many low-score candidates per frame. `max_objects_per_prompt` keeps them
-  bounded, but if you also need them out of the *output*, raise `min_score`
-  in your post-filter — the cap controls compute, the score threshold
-  controls what reaches the user.
+- finish(): stop new submissions, process the final queued latest frame, join
+  the consumer, and leave the loaded model available;
+- close(): reject new submissions, discard queued work, wait for in-flight
+  inference, join the consumer, and close model resources.
 
----
+The standalone harness calls finish at video EOF and close in a finally block.
+A real camera adapter must also provide a way to cancel a blocking camera read;
+closing LatestFramePipeline cannot unblock a driver call that it does not own.
 
-## 7. What `infer()` returns
+## 7. Standalone source-paced check
 
-```python
-{
-    "object_ids":         [3, 7, 12],                # tracked obj IDs this frame
-    "scores":             {3: 0.91, 7: 0.83, ...},   # detection score per ID
-    "masks":              {3: <HxW bool>, ...},      # mask at original resolution
-    "boxes":              {3: (x1,y1,x2,y2), ...},   # XYXY format
-    "prompt_to_obj_ids":  {"person": [3, 7], "car": [12]},
-    "frame_idx":          42,                        # session-internal counter
-    "detected":           True,                      # did the detector run this frame?
-}
-```
+The example reads at the video file's declared FPS instead of processing the
+file as fast as possible:
 
-`detected` reflects what actually happened (after forced-detect and override
-precedence). Useful for logging and for your policy to know when it last got
-new candidates.
+    python examples/ros_node_skeleton.py \
+        --checkpoint model/sam3 \
+        --onnx-dir onnx_files_504 \
+        --video assets/blackswan.mp4 \
+        --text swan \
+        --policy always_full \
+        --max-frames 200
+
+The default policy is always_full, and MIG enables parallel detector/tracker
+tails and the fixed 504px DETR decoder automatically when its artifact is
+present. Use `--no-parallel-tail` or `--no-fixed-detr-decoder` only for
+diagnosis. The report separates source callbacks,
+accepted submissions, emitted outputs, rejected transition frames, inference
+service time, frame age, and per-generation drop counters.
+
+Prompt generation changes can be exercised with:
+
+    --switch-at 60:person,vehicle 120:floor,wall
+
+The indices are source arrivals, not model frame indices or output counts.
+
+## 8. Model output
+
+The result carried by LatestFrameResult.output has the normal SAM3Live schema:
+
+    {
+        "object_ids":         [3, 7, 12],
+        "scores":             {3: 0.91, 7: 0.83},
+        "masks":              {3: HxW_bool_array},
+        "boxes":              {3: (x1, y1, x2, y2)},
+        "prompt_to_obj_ids":  {"person": [3, 7], "car": [12]},
+        "frame_idx":          42,
+        "detected":           True,
+    }
+
+For long-running streams, model/session history still needs a bounded reset
+policy. Perform any tracking reset with the same stop/join/reset/new-generation
+discipline used for prompt changes; never mutate the active SAM3Live directly.

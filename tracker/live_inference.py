@@ -21,10 +21,9 @@ Quick start
 
     live = SAM3Live(
         checkpoint="model/sam3",
-        onnx_dir="onnx_files_504",
+        onnx_dir="onnx_files_504_mgx217",
         prompts=["car", "sidewalk", "grass"],
         imgsz=504,
-        mig=True,
     )
 
     for frame_bgr in video_stream():
@@ -82,8 +81,9 @@ class SAM3Live:
         imgsz: int = 504,
         dtype: torch.dtype = torch.float16,
         device: str | torch.device | None = None,
-        mig: bool = False,
-        parallel_tail: bool = False,
+        mig: bool = True,
+        parallel_tail: bool | None = None,
+        fixed_detr_decoder: bool | None = None,
         max_vision_features_cache_size: int = 1,
         keep_recent_frames: int = 0,
         redetect_every: int = 1,
@@ -96,14 +96,24 @@ class SAM3Live:
         Args:
             checkpoint: HF model dir (contains model.safetensors).
             prompts: initial text prompts (e.g. ["car", "sidewalk"]).
-            onnx_dir: required if ``mig=True`` (e.g. ``onnx_files_504``).
+            onnx_dir: MIGraphX artifact root. When omitted with ``mig=True``,
+                defaults to ``onnx_files_<imgsz>_mgx217`` in the current workspace
+                or `SAM3_DEFAULT_ONNX_DIR` when set by the container launcher.
             imgsz: 504 or 1008. Must match the MIG artifacts under ``onnx_dir``.
             dtype: fp16 (default) or fp32.
             device: torch device, defaults to cuda if available.
             mig: enable MIGraphX accelerated paths (vision encoder, DETR encoder,
-                memory attention, batched mask decoder). Highly recommended.
+                memory attention, fixed DETR decoder, batched mask decoder).
+                Default ``True`` for the supported optimized runtime; pass
+                ``False`` only for pure-PyTorch diagnosis.
             parallel_tail: overlap the detector and tracker branches on two HIP
-                streams after their shared backbone. Requires ``mig=True``.
+                streams after their shared backbone. ``None`` (default) enables
+                it when ``mig=True`` and leaves it disabled otherwise. Pass
+                ``False`` for an explicit diagnostic fallback.
+            fixed_detr_decoder: use the direct-MXR fixed 504px DETR decoder.
+                ``None`` (default) loads it when MIG is enabled and
+                ``onnx_dir/detr_decoder_fixed/direct_gpuio.mxr`` exists.
+                Pass ``False`` to force the native decoder.
             max_vision_features_cache_size: HF vision-feature LRU size. Default 1
                 — only keeps the most recent frame's features.
             keep_recent_frames: bound on number of past raw frame tensors kept
@@ -161,9 +171,24 @@ class SAM3Live:
         self.keep_recent_frames = keep_recent_frames
         self.redetect_every = max(1, int(redetect_every))
         self.max_objects_per_prompt = max_objects_per_prompt
+        if mig:
+            onnx_dir = Path(
+                onnx_dir
+                or os.environ.get(
+                    "SAM3_DEFAULT_ONNX_DIR",
+                    f"onnx_files_{imgsz}_mgx217",
+                )
+            )
+            if not onnx_dir.is_dir():
+                raise FileNotFoundError(f"MIGraphX artifact directory not found: {onnx_dir}")
+        if parallel_tail is None:
+            parallel_tail = mig
         if parallel_tail and not mig:
             raise ValueError("parallel_tail=True requires mig=True")
         self.parallel_tail = bool(parallel_tail)
+        if fixed_detr_decoder is True and not mig:
+            raise ValueError("fixed_detr_decoder=True requires mig=True")
+        self.fixed_detr_decoder = fixed_detr_decoder
         # Force full detection on next infer() (frame 0, or first after reset).
         self._force_detect_next = True
         # Monotonic count of calls to infer() — drives the redetect schedule.
@@ -175,6 +200,17 @@ class SAM3Live:
         # CxCyWH normalized [0,1] format (matches Sam3GeometryEncoder input).
         self.bootstrap_frames = max(0, int(bootstrap_frames))
         self.bootstrap_min_score = float(bootstrap_min_score)
+        if (
+            mig
+            and imgsz == 504
+            and fixed_detr_decoder is not False
+            and self.bootstrap_frames > 0
+        ):
+            raise ValueError(
+                "fixed DETR decoder requires a 32-token prompt contract and "
+                "cannot be combined with bootstrap_frames > 0; pass "
+                "fixed_detr_decoder=False for the native diagnostic path"
+            )
         self._bootstrap_remaining: dict[int, int] = {}
         # During bootstrap: per-prompt accumulator of high-conf pred_boxes.
         # After bootstrap done: per-prompt stored exemplar boxes (tensor).
@@ -318,6 +354,33 @@ class SAM3Live:
             print(f"  detr_encoder MIG ready")
         else:
             print(f"  (skip detr_encoder MIG: {detr_onnx} not found)")
+
+        fixed_decoder_mxr = (
+            onnx_dir / "detr_decoder_fixed" / "direct_gpuio.mxr"
+        )
+        fixed_decoder_enabled = (
+            self.fixed_detr_decoder is not False and imgsz == 504
+        )
+        if self.fixed_detr_decoder is True and imgsz != 504:
+            raise ValueError("fixed_detr_decoder currently requires imgsz=504")
+        if fixed_decoder_enabled and fixed_decoder_mxr.exists():
+            from .mig_detr_decoder import MIGFixedDetrDecoder
+
+            original_decoder = self.model.detector_model.detr_decoder
+            fixed_decoder = MIGFixedDetrDecoder(
+                fixed_decoder_mxr,
+                original_decoder,
+            )
+            self.model.detector_model.detr_decoder = fixed_decoder
+            self._fixed_detr_decoder = fixed_decoder
+            print(
+                "  fixed DETR decoder direct-MXR enabled "
+                f"({fixed_decoder_mxr.name})"
+            )
+        elif fixed_decoder_enabled:
+            raise FileNotFoundError(
+                f"fixed DETR decoder artifact not found: {fixed_decoder_mxr}"
+            )
 
         # K is resolution-dependent (MLIR attention perf cliff).
         k = _K_PER_IMGSZ.get(imgsz, 32)
@@ -619,6 +682,10 @@ class SAM3Live:
         """Add prompts to the current session. Duplicates are deduped by
         the processor. Incremental — does NOT clear existing prompts.
         """
+        if getattr(self, "_latest_frame_pipeline_active", False):
+            raise RuntimeError(
+                "close the active LatestFramePipeline before set_prompts()"
+            )
         prompts = [p for p in prompts if p]
         if not prompts:
             return
@@ -636,6 +703,10 @@ class SAM3Live:
         prompt set. Use when the operating context changes (e.g. user
         switches from "indoor objects" to "outdoor objects").
         """
+        if getattr(self, "_latest_frame_pipeline_active", False):
+            raise RuntimeError(
+                "close the active LatestFramePipeline before reset_prompts()"
+            )
         # reset_state() clears prompts, tracking, and vision cache.
         # processed_frames is preserved (raw pixel tensors stay), but we
         # don't reuse old frame_idx so this is OK.
@@ -664,6 +735,8 @@ class SAM3Live:
 
     def close(self) -> None:
         """Release resources owned by optional inference schedulers."""
+        if getattr(self, "_latest_frame_pipeline_active", False):
+            raise RuntimeError("close the active LatestFramePipeline before SAM3Live")
         if hasattr(self.model, "_parallel_tail_runtime"):
             from .parallel_video import close_parallel_video_tail
 
@@ -677,6 +750,10 @@ class SAM3Live:
         installed) stay in session.prompt_embeddings. To re-bootstrap, use
         reset_prompts() with the same prompt list.
         """
+        if getattr(self, "_latest_frame_pipeline_active", False):
+            raise RuntimeError(
+                "close the active LatestFramePipeline before reset_tracking()"
+            )
         self.session.reset_inference_session()
         if self.parallel_tail:
             self.session._parallel_tail_failed = False
@@ -718,6 +795,13 @@ class SAM3Live:
                 frame_idx:          int                  session-internal frame counter
                 detected:           bool                 True if detector ran this frame
         """
+        active_pipeline = getattr(self, "_latest_frame_pipeline_active", None)
+        if active_pipeline is not None and not getattr(
+            active_pipeline, "_is_inference_owner_thread", lambda: False
+        )():
+            raise RuntimeError(
+                "use LatestFramePipeline.infer_next() while the live pipeline is active"
+            )
         if frame_bgr.ndim != 3 or frame_bgr.shape[2] != 3:
             raise ValueError(f"expected HxWx3 BGR, got shape {frame_bgr.shape}")
         H, W = frame_bgr.shape[:2]

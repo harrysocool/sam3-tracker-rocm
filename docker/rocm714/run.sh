@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IMAGE="${SAM3_DOCKER_IMAGE:-sam3-gpu714-ort1242-mgx217-gfx1151:torch211}"
 MODEL_DIR="${SAM3_MODEL_DIR:-${ROOT}/model/sam3}"
-ONNX_DIR="${SAM3_ONNX_DIR:-${ROOT}/onnx_files_504}"
+ONNX_DIR="${SAM3_ONNX_DIR:-${ROOT}/onnx_files_504_mgx217}"
 
 if [[ ! -e /dev/kfd || ! -d /dev/dri ]]; then
     echo "ROCm devices /dev/kfd and /dev/dri are required" >&2
@@ -14,7 +14,10 @@ if [[ ! -d "${MODEL_DIR}" ]]; then
     echo "Set SAM3_MODEL_DIR to an existing SAM3 model directory" >&2
     exit 1
 fi
-mkdir -p "${ONNX_DIR}"
+if [[ ! -d "${ONNX_DIR}" ]]; then
+    echo "Set SAM3_ONNX_DIR to the MIGraphX 2.17 artifact root" >&2
+    exit 1
+fi
 
 gpu_args=(--device=/dev/kfd --device=/dev/dri --group-add "$(stat -c '%g' /dev/kfd)")
 if [[ -e /dev/dri/renderD128 ]]; then
@@ -40,7 +43,12 @@ if [[ -L "${weight_link}" ]]; then
         )
     fi
 fi
-for subdir in backbone_detector backbone_tracker detector_modules tracker_modules; do
+for subdir in \
+    backbone_detector \
+    backbone_tracker \
+    detector_modules \
+    detr_decoder_fixed \
+    tracker_modules; do
     link_path="${ONNX_DIR}/${subdir}"
     if [[ -L "${link_path}" ]]; then
         raw_target="$(readlink "${link_path}")"
@@ -66,6 +74,7 @@ exec docker run --rm "${tty_args[@]}" --network host --ipc=host \
     -e HOME=/tmp \
     -e TRANSFORMERS_OFFLINE=1 \
     -e HF_HUB_OFFLINE=1 \
+    -e SAM3_DEFAULT_ONNX_DIR=/models/onnx_files_504 \
     -e PYTHONPATH=/workspace:/opt/migraphx-develop/lib \
     "${mount_args[@]}" \
     -w /workspace \

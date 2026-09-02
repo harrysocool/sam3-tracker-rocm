@@ -6,9 +6,9 @@ until the association/update phase.  Running those branches on separate HIP
 streams hides part of the detector tail behind tracker propagation without
 changing the model outputs.
 
-This patch is intentionally opt-in.  It is meant for single-threaded callers
-that invoke one frame at a time; the model and its inference session must not
-be shared by concurrent callers.
+MIG live inference enables this patch by default; callers can disable it for
+diagnosis.  It is meant for one ordered frame owner at a time, and the model
+and its inference session must not be shared by concurrent callers.
 """
 from __future__ import annotations
 

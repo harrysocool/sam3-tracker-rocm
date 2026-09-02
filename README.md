@@ -6,7 +6,8 @@ finds the target on frame 0 (or every Nth keyframe in streaming mode); SAM3 prop
 the masks through subsequent frames.
 
 **Primary path** — streaming live API (`demo_live.py`), the deployment shape used by ROS / robotics
-consumers. Multi-prompt, hybrid keyframes + lightweight tracker propagation, ~5 FPS at 504px.
+consumers. It continuously drains the source, retains one newest frame, and runs full text detection
+on every consumed frame by default. No next-frame GPU work is launched ahead of the current result.
 
 Reference paths:
 - `tools/text_baseline.py` — offline batch text-prompt via HF `Sam3VideoModel` (debugging / regression)
@@ -16,6 +17,13 @@ DAVIS 2017 val Mean J: **81.6%** (504px box-prompt).
 
 > **Hardware requirement**: AMD gfx1151 (Radeon 8060S / Ryzen AI Max+ 395) with ROCm 7.x.
 > Other AMD GPUs supporting ROCm may work but are untested.
+>
+> **Supported optimized runtime**: `docker/rocm714/run.sh` with ROCm 7.14,
+> MIGraphX 2.17, and ORT 1.24.2. The host MIGraphX 2.16 environment is not a
+> supported performance/deployment path and cannot load the default fixed
+> decoder artifact.
+> The launcher defaults to `onnx_files_504_mgx217`, which combines the accepted
+> FC1-sink backbone and fixed DETR decoder without modifying legacy baselines.
 
 ## Contents
 
@@ -39,20 +47,21 @@ tracker propagation. They differ in **how the first-frame mask is obtained** and
 SAM3 detection re-runs after frame 0**:
 
 ```
-demo_live.py             text → SAM3 keyframe (every N ms)  ──┐
-                         └── propagate via SAM3 tracker ──────┴──► streaming mask output
+demo_live.py             latest frame → full SAM3             ──────► streaming mask output
+                         optional >0ms redetect interval → hybrid tracker propagation
 tools/text_baseline.py   text → full SAM3 every frame          ──────► offline batch output
 demo_box.py              [box] (frame 0 only)                  ──────► fastest, single-object
 ```
 
 ### Streaming live API (`demo_live.py`) — primary
 
-The deployment shape used by robotics / ROS consumers. Frame 0 runs SAM3 detection
-on the text prompts and captures exemplar boxes; subsequent frames run SAM3 only every
-`--redetect-interval-ms` (default 1000ms), with a lightweight SAM3 tracker
-propagating masks in between. Internally combines `SAM3Live` (per-frame HF
-`Sam3VideoModel`) for keyframes and `SAM3OnnxTracker` for tracker propagation. Supports
-multi-prompt, periodic re-bootstrap on drift / scene change, runtime prompt swap.
+The deployment shape used by robotics / ROS consumers. A capture producer continuously
+drains the source into a capacity-one latest-frame slot. Once the current inference
+finishes, the consumer starts all preprocessing and model work on the newest available
+frame. Full text detection runs on every consumed frame by default
+(`--redetect-interval-ms 0`). A positive interval explicitly enables the hybrid
+SAM3-keyframe plus lightweight-tracker path. The live scheduler never performs N+1 GPU
+preprocessing or backbone lookahead.
 
 ### Offline batch text-prompt (`tools/text_baseline.py`)
 
@@ -226,35 +235,57 @@ Three entry points — pick the one matching your use case:
 
 | Demo | Prompt | Pipeline | Steady-state FPS @504 | Use for |
 |---|---|---|---|---|
-| **`demo_live.py`** | text(s) | **Streaming hybrid** — SAM3 keyframe + tracker propagate | **~5 FPS multi-prompt** | production / ROS / live sensor |
+| **`demo_live.py`** | text(s) | **Latest-frame live** — full SAM3, parallel tail, fixed decoder | **9.13 Hz** | production / ROS / live sensor |
 | `tools/text_baseline.py --mig` | text | Offline HF Sam3VideoModel, SAM3 every frame | **7.06** (1 obj) | debugging / regression baseline |
 | `demo_box.py` | bounding box | Tracking only (no detection) | **12.2** (single-object) | specialized: annotation / max-perf |
 
-All commands below assume you have activated the conda env (`conda activate sam3-tracker`)
-and are in the project root. The MIGraphX text-prompt path requires the `LD_PRELOAD` shown
-in the commands below to resolve a dual-ROCm-version conflict; the box-prompt and PyTorch
-text-prompt paths do not need it.
+All commands below assume you are in the project root. The optimized live path uses
+the pinned ROCm 7.14 / MIGraphX 2.17 container through `docker/rocm714/run.sh`.
+Host MIGraphX 2.16 is not a supported live/deployment runtime.
 
 ### Streaming live API (`demo_live.py`) — primary
 
 The deployment shape used by robotics consumers. Reads frames from a video file (or
 later, a ROS image topic — see `examples/ros_node_skeleton.py`) and emits a multi-prompt
-mask per frame.
+mask for each frame selected by the bounded latest-frame scheduler.
 
 ```bash
-# Multi-prompt live (default: 1000ms keyframe interval, hybrid pipeline)
-LD_PRELOAD=/opt/rocm-7.2.x/lib/libmigraphx_c.so.3:/opt/rocm-7.2.x/lib/migraphx/lib/libmigraphx.so.2016000.0 \
-    python demo_live.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
-    --video assets/office_hallway.mp4 --text floor wall --mig
+# Default optimized live path: MIG + parallel tail + fixed decoder + latest[1]
+./docker/rocm714/run.sh python demo_live.py \
+    --checkpoint /models/sam3 \
+    --video assets/office_hallway.mp4 --text floor wall
 
-# Single-prompt, baseline mode (SAM3 every frame — equivalent to old --hybrid off)
-LD_PRELOAD=... python demo_live.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
-    --video assets/blackswan.mp4 --text swan --mig --redetect-interval-ms 0
+# Single-prompt live uses the same defaults
+./docker/rocm714/run.sh python demo_live.py \
+    --checkpoint /models/sam3 \
+    --video assets/blackswan.mp4 --text swan
+
+# Optional hybrid keyframes; all other optimized defaults remain enabled
+./docker/rocm714/run.sh python demo_live.py \
+    --checkpoint /models/sam3 \
+    --video assets/blackswan.mp4 --text swan \
+    --redetect-interval-ms 1000
 ```
 
-Key flags: `--redetect-interval-ms` (0 = SAM3 every frame; >0 = keyframe-every-N-ms +
-tracker propagate); `--parallel-tail` (overlap detector/tracker work on MIG keyframes);
-`--periodic-rebootstrap-seconds` (drift safety net, default 180s).
+Key flags: live defaults to MIG; use `--no-mig` only for pure-PyTorch diagnosis;
+`--redetect-interval-ms` selects full detection (0) or hybrid keyframes (>0);
+MIG live runs enable detector/tracker `parallel-tail` by default;
+use `--no-parallel-tail` only for diagnosis or compatibility;
+504px MIG live also auto-loads `detr_decoder_fixed/direct_gpuio.mxr`; use
+`--no-fixed-detr-decoder` only to diagnose against the native PyTorch decoder,
+not as a second supported deployment configuration;
+`--periodic-rebootstrap-seconds` (drift safety net, default 180s);
+`demo_live.py` always uses latest-frame scheduling. Capture continues while the current
+inference runs, but the queue retains only the newest waiting frame. All GPU work for
+that frame starts after the preceding inference completes; there is no live N+1
+backbone lookahead. The resulting MP4 contains emitted frames only and therefore plays
+faster than wall clock when source frames were dropped. `--max-frames` counts captured
+source frames. Optional `--warmup-frames N` explicitly pre-runs N file frames and seeks
+back; the default is zero. The bundled demo paces video files to emulate arrivals; a
+camera/ROS adapter should submit frames immediately and configure its upstream queue
+for latest-frame semantics. `captured_at` must use a host monotonic clock; preserve the
+sensor exposure timestamp separately for pose/TF alignment. Runtime prompt changes
+must close the pipeline, reset the session, and start a new pipeline generation.
 See `python demo_live.py --help` for the full set.
 
 ### Offline batch text-prompt (`tools/text_baseline.py`) — reference / debugging
@@ -388,7 +419,9 @@ section.*
 
 | Path | Pipeline | Measured FPS |
 |---|---|---|
-| **`demo_live.py` (hybrid)** | SAM3 every 1000ms keyframe + tracker propagate between | **~5 FPS multi-prompt** |
+| **`demo_live.py` (integrated default)** | Full SAM3, accepted FC1 sink, fixed decoder, no N+1 lookahead | **9.1275 Hz / 250 arrivals** |
+| Fixed-decoder eight-arm A/B | Same latest-frame workload, position-balanced control/candidate | **8.193 → 8.743 Hz (+6.72%)** |
+| `demo_live.py --redetect-interval-ms 1000` | Opt-in hybrid keyframe + tracker propagation | **~5 FPS multi-prompt** |
 | `tools/text_baseline.py --mig --parallel-tail --pipeline-backbone` | Full SAM3 every frame, one-frame backbone lookahead | **10.78** (1 obj, 3-run median) |
 | `tools/text_baseline.py --mig --parallel-tail` (ROCm 7.14 Docker) | SAM3 every frame, detector/tracker overlap | **9.03** (1 obj, 3-run median) |
 | `tools/text_baseline.py --mig` (ROCm 7.14 Docker) | SAM3 every frame (offline batch) | **8.51** (1 obj) |
@@ -550,7 +583,9 @@ sam3-tracker-rocm/
 ├── demo_box.py             # ← Specialized box-prompt (max single-object FPS)
 ├── setup.sh                # ← One-command environment setup
 ├── tracker/                # Inference: SAM3Live, SAM3HybridLive, SAM3OnnxTracker, MIG shims
-│   ├── parallel_video.py   # Opt-in detector/tracker HIP-stream overlap
+│   ├── latest_frame.py     # Default bounded latest-frame live scheduler
+│   ├── mig_detr_decoder.py # Fixed 504px direct-MXR DETR decoder
+│   ├── parallel_video.py   # Detector/tracker HIP-stream overlap (MIG live default)
 │   └── backbone_pipeline.py # Offline one-frame backbone lookahead
 ├── export/                 # ONNX export + .mxr compile (build.py = unified entry point)
 ├── eval/                   # Benchmarks, dataset evals, probes, debug tools

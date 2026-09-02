@@ -88,7 +88,8 @@ class SAM3HybridLive:
         dtype: torch.dtype = torch.float16,
         device: str | torch.device | None = None,
         mig: bool = True,
-        parallel_tail: bool = False,
+        parallel_tail: bool | None = None,
+        fixed_detr_decoder: bool | None = None,
         redetect_interval_ms: float = 1000.0,
         max_objects_per_prompt: int | dict[str, int] | None = 5,
         iou_assoc_threshold: float = 0.3,
@@ -119,7 +120,10 @@ class SAM3HybridLive:
                 Default 0 = pure text-prompt keyframes (original behavior).
             bootstrap_min_score: passthrough to underlying SAM3Live.
             parallel_tail: overlap detector/tracker work on SAM3 keyframes.
-                Requires ``mig=True``.
+                ``None`` (default) enables it with MIG; pass ``False`` for a
+                serial diagnostic fallback.
+            fixed_detr_decoder: auto-load the fixed 504px direct-MXR decoder
+                when present; pass ``False`` for the native decoder.
         """
         self.imgsz = imgsz
         self.onnx_dir = Path(onnx_dir)
@@ -138,6 +142,7 @@ class SAM3HybridLive:
             device=device,
             mig=mig,
             parallel_tail=parallel_tail,
+            fixed_detr_decoder=fixed_detr_decoder,
             redetect_every=1,
             max_objects_per_prompt=max_objects_per_prompt,
             max_vision_features_cache_size=max_vision_features_cache_size,
@@ -145,6 +150,7 @@ class SAM3HybridLive:
             bootstrap_min_score=bootstrap_min_score,
             periodic_rebootstrap_seconds=periodic_rebootstrap_seconds,
         )
+        self.device = self.live.device
         print(f"[SAM3HybridLive] SAM3Live ready in {time.perf_counter()-t:.1f}s "
               f"(bootstrap_frames={bootstrap_frames})")
 
@@ -176,6 +182,10 @@ class SAM3HybridLive:
     # ------------------------------------------------------------------
 
     def reset_prompts(self, prompts: Sequence[str]) -> None:
+        if getattr(self, "_latest_frame_pipeline_active", False):
+            raise RuntimeError(
+                "close the active LatestFramePipeline before reset_prompts()"
+            )
         self.live.reset_prompts(prompts)
         self.trackers.clear()
         self.tracker_to_prompt.clear()
@@ -183,6 +193,10 @@ class SAM3HybridLive:
         self._force_keyframe_next = True
 
     def reset_tracking(self) -> None:
+        if getattr(self, "_latest_frame_pipeline_active", False):
+            raise RuntimeError(
+                "close the active LatestFramePipeline before reset_tracking()"
+            )
         self.live.reset_tracking()
         self.trackers.clear()
         self.tracker_to_prompt.clear()
@@ -191,18 +205,31 @@ class SAM3HybridLive:
 
     def close(self) -> None:
         """Release worker resources owned by the underlying live model."""
+        if getattr(self, "_latest_frame_pipeline_active", False):
+            raise RuntimeError("close the active LatestFramePipeline before SAM3HybridLive")
         self.live.close()
 
     def infer(self, frame_bgr: np.ndarray, *, full_detection: bool | None = None) -> dict:
+        active_pipeline = getattr(self, "_latest_frame_pipeline_active", None)
+        if active_pipeline is not None and not getattr(
+            active_pipeline, "_is_inference_owner_thread", lambda: False
+        )():
+            raise RuntimeError(
+                "use LatestFramePipeline.infer_next() while the live pipeline is active"
+            )
         if frame_bgr.ndim != 3 or frame_bgr.shape[2] != 3:
             raise ValueError(f"expected HxWx3 BGR, got shape {frame_bgr.shape}")
         H, W = frame_bgr.shape[:2]
 
         _now = time.perf_counter()
-        is_keyframe = (
-            self._force_keyframe_next
-            or (_now - self._last_keyframe_time) >= self.keyframe_interval_s
-        )
+        if self._force_keyframe_next:
+            is_keyframe = True
+        elif full_detection is not None:
+            is_keyframe = bool(full_detection)
+        else:
+            is_keyframe = (
+                (_now - self._last_keyframe_time) >= self.keyframe_interval_s
+            )
         self._force_keyframe_next = False
 
         # Tracker backbone input (preprocessed to imgsz). Cheap; ~1ms.

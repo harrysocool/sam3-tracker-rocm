@@ -1,5 +1,10 @@
 # ROCm 7.14 / MIGraphX 2.17 container
 
+This is the single supported runtime for the optimized SAM3 GPU/live path.
+The host ROCm 7.2/MIGraphX 2.16 environment may remain installed for unrelated
+projects, but it is not a supported SAM3 performance or deployment target and
+cannot load the default fixed-decoder MXR.
+
 This directory builds the tested gfx1151 stack entirely from source or pinned
 public wheels without modifying the host ROCm installation.
 
@@ -75,6 +80,10 @@ export SAM3_MODEL_DIR=/path/to/model/sam3
 export SAM3_ONNX_DIR=/path/to/onnx_files_504
 ```
 
+Without an override, `run.sh` uses the checkout symlink
+`onnx_files_504_mgx217`, which points at the assembled 2.17 production root.
+The legacy `onnx_files_504` directory is not the optimized default.
+
 Open a shell:
 
 ```bash
@@ -85,6 +94,7 @@ For a fresh checkout, create the 504 px artifacts inside the container:
 
 ```bash
 mkdir -p onnx_files_504
+SAM3_ONNX_DIR="$PWD/onnx_files_504" \
 ./docker/rocm714/run.sh python export/build.py \
   --pipeline text \
   --imgsz 504 \
@@ -111,15 +121,31 @@ MIGraphX `.mxr` files and ORT caches are ABI-specific. Do not reuse artifacts
 built by the legacy ROCm 7.2/MIGraphX stack in this image. Build them inside
 this image or download artifacts published for the exact stack.
 
+Run the default freshness-oriented live path:
+
+```bash
+./docker/rocm714/run.sh python demo_live.py \
+  --checkpoint /models/sam3 \
+  --video assets/blackswan.mp4 \
+  --text swan
+```
+
+For MIG 504px this automatically enables same-frame parallel detector/tracker
+tails and loads `detr_decoder_fixed/direct_gpuio.mxr`. A missing or incompatible
+fixed decoder is a deployment error for the optimized configuration; do not mix
+2.16 and 2.17 MXR artifacts.
+
 ## Validated result
 
 On Ryzen AI Max+ 395 / gfx1151, 504 px, `blackswan.mp4`, prompt `swan`:
 
 - profile mean: 111.65 ms/frame
+- default latest-frame + fixed decoder: 9.1275 Hz, age p95 152.73 ms
 - propagation: 8.51 FPS
-- propagation with opt-in `--parallel-tail`: 8.93-9.09 FPS (median 9.03)
+- offline propagation with `--parallel-tail`: 8.93-9.09 FPS (median 9.03)
 - propagation with `--parallel-tail --pipeline-backbone`: 10.21-10.27 FPS
 - two consecutive 30-frame regressions: mean IoU 0.9941, min IoU 0.9893
 
-The repository's native setup remains the compatibility path. This container
-is the reproducible ROCm 7.14 optimization path.
+The host setup is retained for source diagnostics and unrelated projects, not
+as a second supported SAM3 deployment path. This container is the reproducible
+ROCm 7.14 optimization and production path.
