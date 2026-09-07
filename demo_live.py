@@ -68,7 +68,8 @@ def parse_args():
                    help="Wall-clock interval between SAM3 detections (ms). "
                         "0 = SAM3 on every consumed latest frame (default; "
                         "recommended for occupancy-grid freshness). "
-                        ">0 = SAM3 on keyframes, lightweight tracker propagates between. "
+                        ">0 = SAM3 on keyframes; the same model's native tracker "
+                        "propagates between. "
                         "Hybrid propagation is opt-in.")
     p.add_argument(
         "--bootstrap-frames", type=int, default=0,
@@ -97,9 +98,10 @@ def parse_args():
         "--warmup-frames",
         type=int,
         default=0,
-        help="Explicit live benchmark warmup count. Reads N file frames with full "
-             "detection, synchronizes, resets tracking, then seeks back to frame 0. "
-             "Default 0 performs no preload/warmup.",
+        help="Explicit live benchmark warmup count. Full-detection mode detects "
+             "on every warmup frame; hybrid mode detects on the first and uses "
+             "tracker propagation thereafter. Synchronizes, resets tracking, "
+             "then seeks to frame 0. Default 0 performs no preload/warmup.",
     )
     p.add_argument("--imgsz", type=int, default=504, choices=(504, 1008))
     mig_group = p.add_mutually_exclusive_group()
@@ -304,7 +306,7 @@ def filter_result(result: dict, min_score: float) -> dict:
     keep = [oid for oid in result["object_ids"]
             if result["scores"].get(oid, 0.0) >= min_score]
     keep_set = set(keep)
-    return {
+    filtered = {
         "object_ids": keep,
         "scores": {k: v for k, v in result["scores"].items() if k in keep_set},
         "masks": {k: v for k, v in result["masks"].items() if k in keep_set},
@@ -313,6 +315,21 @@ def filter_result(result: dict, min_score: float) -> dict:
                               for p, oids in result["prompt_to_obj_ids"].items()},
         "frame_idx": result["frame_idx"],
     }
+    for key in (
+        "detected",
+        "keyframe",
+        "lost_object_ids",
+        "redetect_reason",
+        "negative_evidence_valid",
+    ):
+        if key in result:
+            filtered[key] = result[key]
+    return filtered
+
+
+def _warmup_uses_full_detection(index: int, *, hybrid: bool) -> bool:
+    """Warm full mode every frame; warm hybrid detection then propagation."""
+    return not hybrid or index == 0
 
 
 def _capture_latest_video(cap, pipeline, source_fps: float, max_frames: int,
@@ -368,7 +385,8 @@ def main():
         None if args.max_objects == 0
         else (args.max_objects if args.max_objects > 0 else 5)
     )
-    if args.redetect_interval_ms <= 0.0:
+    hybrid_mode = args.redetect_interval_ms > 0.0
+    if not hybrid_mode:
         live = SAM3Live(
             checkpoint=args.checkpoint,
             prompts=current_prompts,
@@ -410,9 +428,14 @@ def main():
     H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
     if args.warmup_frames:
+        warmup_description = (
+            "full detection on frame 0, then detector-skip propagation"
+            if hybrid_mode
+            else "full detection on every frame"
+        )
         print(
-            f"[demo_live] explicit warmup: {args.warmup_frames} full-detection "
-            "file frame(s); these are not live arrivals"
+            f"[demo_live] explicit warmup: {args.warmup_frames} file frame(s), "
+            f"{warmup_description}; these are not live arrivals"
         )
         for index in range(args.warmup_frames):
             ok, warm_frame = cap.read()
@@ -420,7 +443,13 @@ def main():
                 cap.release()
                 live.close()
                 sys.exit(f"Warmup frame {index} unavailable in {args.video}")
-            live.infer(warm_frame, full_detection=True)
+            live.infer(
+                warm_frame,
+                full_detection=_warmup_uses_full_detection(
+                    index,
+                    hybrid=hybrid_mode,
+                ),
+            )
         torch.cuda.synchronize(device=live.device)
         live.reset_tracking()
         if not cap.set(cv2.CAP_PROP_POS_FRAMES, 0):

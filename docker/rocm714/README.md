@@ -135,16 +135,74 @@ tails and loads `detr_decoder_fixed/direct_gpuio.mxr`. A missing or incompatible
 fixed decoder is a deployment error for the optimized configuration; do not mix
 2.16 and 2.17 MXR artifacts.
 
+The default remains freshness-oriented full detection on every consumed frame.
+An explicitly positive interval enables the optional unified hybrid:
+
+```bash
+./docker/rocm714/run.sh python demo_live.py \
+  --checkpoint /models/sam3 \
+  --video assets/blackswan.mp4 \
+  --text swan \
+  --redetect-interval-ms 1000
+```
+
+This path uses one `SAM3Live` model and at most one active inference session.
+Before every wall-clock keyframe it creates a fresh inner session, reuses the
+encoded prompt tensors, and associates the fresh detections with stable public
+IDs by same-prompt mask IoU. The same model then performs native detector-skip
+tracking between keyframes. It does not instantiate the separate
+`SAM3OnnxTracker` backbone and does not load its legacy MIGraphX 2.16 artifacts.
+If tracker-only output loses an object, the request for full detection is
+sticky until the next consumed frame. Inspect `lost_object_ids` and
+`redetect_reason` in the result, and use `negative_evidence_valid` as the
+clearing gate. `redetect_reason` is one of `first_frame`, `interval`,
+`caller_override`, `inner_forced`, `object_loss`, `reset_prompts`,
+`reset_tracking`, `detection_retry`, or `None`.
+
+For occupancy mapping, tracker-only output (`detected=False`) is positive-only
+evidence: present masks may mark occupied space, but missing masks must not
+clear free space. Apply negative/free-space clearing only from a non-stale full
+detection result (`detected=True`).
+
 ## Validated result
 
 On Ryzen AI Max+ 395 / gfx1151, 504 px, `blackswan.mp4`, prompt `swan`:
 
 - profile mean: 111.65 ms/frame
 - default latest-frame + fixed decoder: 9.1275 Hz, age p95 152.73 ms
+- clean-keyframe unified hybrid headless, one object, 250 arrivals at 24 FPS:
+  10.4719/10.4724/10.4749 Hz across three runs, 110 outputs per run,
+  approximately 95.45 ms mean service time, and 135.63-137.76 ms frame-age p95
 - propagation: 8.51 FPS
 - offline propagation with `--parallel-tail`: 8.93-9.09 FPS (median 9.03)
 - propagation with `--parallel-tail --pipeline-backbone`: 10.21-10.27 FPS
 - two consecutive 30-frame regressions: mean IoU 0.9941, min IoU 0.9893
+
+The multi-object unified-hybrid matrix uses
+`two_person_dog_lawn.mp4`, 300 arrivals at 25 FPS, and no overlay/video
+encoding:
+
+| Prompts | Representative objects/output | Output rate | Service mean | Age p50/p95 |
+|---|---:|---:|---:|---:|
+| `people` | 2 | 9.4621 Hz | 105.60 ms | 126.91/150.74 ms |
+| `people,dog` | 3 | 8.3682 Hz | 119.44 ms | 139.49/172.52 ms |
+| `people,dog,lawn,sidewalk` | 6–7 | 6.2287 Hz | 160.47 ms | 178.26/237.65 ms |
+
+Prompt count alone is not the scaling variable; retained object count drives
+much of the tracker cost. All three matrix runs reported zero propagation-frame
+object-loss events.
+
+A separate 50-frame `office_hallway_two_way` check compared clean hybrid
+propagation with full SAM3 on every frame. Floor union IoU mean/min was
+0.981233/0.949965 and wall was 0.963659/0.933420; false-free rates were 1.4169%
+and 1.7963%, respectively. A tracker loss on frame 47 triggered sticky
+recovery on the next frame. These figures are workload-specific bounds.
+Tracker-only output remains positive-only evidence regardless of this result.
+
+A 120-keyframe no-GC fresh-session soak showed no sustained growth: Torch
+allocated memory changed by about +508 KB, reserved memory by +4 MiB, and
+process RSS by +72 KiB, with all metrics flat after iteration 10. See
+`/home/amd/project/sam3-artifacts/gpu/experiments/unified-reset-soak/REPORT.md`.
 
 The host setup is retained for source diagnostics and unrelated projects, not
 as a second supported SAM3 deployment path. This container is the reproducible

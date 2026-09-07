@@ -76,6 +76,16 @@ def test_bootstrap_requires_native_decoder_diagnostic(monkeypatch):
     assert args.bootstrap_frames == 2
     assert args.fixed_detr_decoder is False
 
+    args = _parse(
+        monkeypatch,
+        "--redetect-interval-ms",
+        "1000",
+        "--bootstrap-frames",
+        "2",
+        "--no-fixed-detr-decoder",
+    )
+    assert args.bootstrap_frames == 2
+
 
 def test_live_api_defaults_parallel_tail_to_auto():
     assert inspect.signature(SAM3Live).parameters["mig"].default is True
@@ -104,3 +114,49 @@ def test_live_api_rejects_bootstrap_with_default_fixed_decoder(tmp_path):
         inspect.signature(SAM3HybridLive).parameters["fixed_detr_decoder"].default
         is None
     )
+
+
+def test_filter_result_preserves_scheduler_metadata():
+    result = {
+        "object_ids": [1, 2],
+        "scores": {1: 0.9, 2: 0.1},
+        "masks": {1: "mask-1", 2: "mask-2"},
+        "boxes": {1: "box-1", 2: "box-2"},
+        "prompt_to_obj_ids": {"object": [1, 2]},
+        "frame_idx": 7,
+        "detected": False,
+        "keyframe": False,
+        "lost_object_ids": [3, 4],
+        "redetect_reason": None,
+        "negative_evidence_valid": False,
+    }
+
+    filtered = demo_live.filter_result(result, min_score=0.5)
+
+    assert filtered == {
+        "object_ids": [1],
+        "scores": {1: 0.9},
+        "masks": {1: "mask-1"},
+        "boxes": {1: "box-1"},
+        "prompt_to_obj_ids": {"object": [1]},
+        "frame_idx": 7,
+        "detected": False,
+        "keyframe": False,
+        "lost_object_ids": [3, 4],
+        "redetect_reason": None,
+        "negative_evidence_valid": False,
+    }
+
+
+def test_explicit_warmup_uses_propagation_after_first_hybrid_frame():
+    assert [
+        demo_live._warmup_uses_full_detection(index, hybrid=True)
+        for index in range(4)
+    ] == [True, False, False, False]
+
+
+def test_explicit_warmup_keeps_full_detection_for_non_hybrid_mode():
+    assert [
+        demo_live._warmup_uses_full_detection(index, hybrid=False)
+        for index in range(4)
+    ] == [True, True, True, True]

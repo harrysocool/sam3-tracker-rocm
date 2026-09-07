@@ -637,31 +637,425 @@ def test_active_latest_frame_pipeline_blocks_hybrid_session_mutation():
         live.infer(_frame(1))
 
 
-def test_hybrid_honors_full_detection_override(monkeypatch):
-    live = SAM3HybridLive.__new__(SAM3HybridLive)
-    live.imgsz = 4
-    live.keyframe_interval_s = 1000.0
-    live._last_keyframe_time = time.perf_counter()
-    live._force_keyframe_next = False
-    live._last_was_keyframe = False
-    live._call_count = 0
-    calls = []
-    monkeypatch.setattr(
-        hybrid_inference,
-        "preprocess_image",
-        lambda frame, imgsz: np.empty((3, imgsz, imgsz), dtype=np.float32),
-    )
-    live._keyframe_infer = lambda frame, image, height, width: calls.append(
-        "keyframe"
-    ) or {}
-    live._propagation_infer = lambda image, height, width: calls.append(
-        "propagation"
-    ) or {}
+def test_direct_sam3live_negative_evidence_matches_detector_execution():
+    class _Model:
+        _skip_detection = False
 
-    assert live.infer(_frame(1), full_detection=True)["keyframe"] is True
-    live._last_keyframe_time = 0.0
-    assert live.infer(_frame(2), full_detection=False)["keyframe"] is False
-    assert calls == ["keyframe", "propagation"]
+        def __call__(self, *, inference_session, frame, frame_idx):
+            return SimpleNamespace(
+                frame_idx=frame_idx,
+                obj_id_to_tracker_score={},
+                obj_id_to_mask={},
+                obj_id_to_score={},
+                suppressed_obj_ids=set(),
+            )
+
+    live = SAM3Live.__new__(SAM3Live)
+    live.processor = SimpleNamespace(
+        video_processor=lambda **_kwargs: SimpleNamespace(
+            pixel_values_videos=torch.zeros((1, 1, 3, 4, 5)),
+        ),
+        postprocess_outputs=lambda **_kwargs: {
+            "object_ids": torch.empty(0, dtype=torch.int64),
+            "scores": torch.empty(0),
+            "prompt_to_obj_ids": {},
+        },
+    )
+    live.device = torch.device("cpu")
+    live.dtype = torch.float32
+    live.model = _Model()
+    live.session = object()
+    live._force_detect_next = True
+    live._infer_calls = 0
+    live.redetect_every = 1
+    live._next_frame_idx = 0
+    live.bootstrap_frames = 0
+    live.max_objects_per_prompt = None
+    live.keep_recent_frames = 0
+    live._drift_enabled = False
+
+    forced_detection = live.infer(_frame(1), full_detection=False)
+    propagation = live.infer(_frame(2), full_detection=False)
+
+    assert forced_detection["detected"] is True
+    assert forced_detection["negative_evidence_valid"] is True
+    assert propagation["detected"] is False
+    assert propagation["negative_evidence_valid"] is False
+
+
+class _FakeUnifiedLive:
+    def __init__(self, outputs):
+        self.device = torch.device("cpu")
+        self.outputs = list(outputs)
+        self.infer_calls = []
+        self.reset_prompts_calls = []
+        self.reset_tracking_calls = 0
+        self.fresh_session_calls = 0
+        self.close_calls = 0
+        self._infer_calls = 0
+
+    def infer(self, _frame, *, full_detection):
+        self.infer_calls.append(full_detection)
+        self._infer_calls += 1
+        next_output = self.outputs.pop(0)
+        if isinstance(next_output, dict):
+            result = dict(next_output)
+            result["object_ids"] = list(next_output["object_ids"])
+            result["scores"] = dict(next_output.get("scores", {}))
+            result["masks"] = dict(next_output.get("masks", {}))
+            result["boxes"] = dict(next_output.get("boxes", {}))
+            result["prompt_to_obj_ids"] = {
+                prompt: list(object_ids)
+                for prompt, object_ids in next_output.get(
+                    "prompt_to_obj_ids", {}
+                ).items()
+            }
+            result["detected"] = bool(next_output.get("detected", full_detection))
+            result["negative_evidence_valid"] = bool(
+                next_output.get("negative_evidence_valid", result["detected"])
+            )
+            return result
+        object_ids = list(next_output)
+        return {
+            "object_ids": object_ids,
+            "scores": {object_id: 0.9 for object_id in object_ids},
+            "masks": {},
+            "boxes": {},
+            "prompt_to_obj_ids": {"object": object_ids},
+            "frame_idx": len(self.infer_calls) - 1,
+            "detected": full_detection,
+            "negative_evidence_valid": full_detection,
+        }
+
+    def reset_prompts(self, prompts):
+        self.reset_prompts_calls.append(list(prompts))
+
+    def reset_tracking(self):
+        self.reset_tracking_calls += 1
+        self._infer_calls = 0
+
+    def _replace_tracking_session_preserving_prompts(self):
+        self.fresh_session_calls += 1
+        self._infer_calls = 0
+
+    def close(self):
+        self.close_calls += 1
+
+
+def _unified_hybrid(outputs):
+    hybrid = SAM3HybridLive.__new__(SAM3HybridLive)
+    hybrid.live = _FakeUnifiedLive(outputs)
+    hybrid.device = hybrid.live.device
+    hybrid.keyframe_interval_s = 1.0
+    hybrid.iou_thresh = 0.3
+    hybrid.max_per_prompt = 5
+    hybrid._call_count = 0
+    hybrid._last_keyframe_time = 0.0
+    hybrid._last_was_keyframe = False
+    hybrid._force_keyframe_next = True
+    hybrid._pending_redetect_reason = "first_frame"
+    hybrid._previous_output_object_ids = set()
+    hybrid._previous_public_masks = {}
+    hybrid._previous_public_prompts = {}
+    hybrid._inner_to_public = {}
+    hybrid._next_public_object_id = 0
+    hybrid._inner_session_fresh = True
+    return hybrid
+
+
+def test_hybrid_constructs_only_one_sam3live_backend(monkeypatch):
+    captured = {}
+
+    class FakeConstructedLive:
+        device = torch.device("cpu")
+
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(hybrid_inference, "SAM3Live", FakeConstructedLive)
+
+    live = SAM3HybridLive(
+        checkpoint="checkpoint",
+        prompts=["floor", "wall"],
+        onnx_dir="onnx",
+        iou_assoc_threshold=0.42,
+        bootstrap_frames=3,
+    )
+
+    assert type(live.live) is FakeConstructedLive
+    assert not hasattr(live, "shared")
+    assert not hasattr(live, "trackers")
+    assert live.iou_thresh == pytest.approx(0.42)
+    assert captured["prompts"] == ["floor", "wall"]
+    assert captured["bootstrap_frames"] == 3
+
+
+def test_hybrid_first_frame_and_wall_clock_schedule(monkeypatch):
+    live = _unified_hybrid([[1], [1], [1]])
+    clock = iter((10.0, 10.9, 11.01))
+    monkeypatch.setattr(hybrid_inference.time, "perf_counter", lambda: next(clock))
+
+    first = live.infer(_frame(1), full_detection=False)
+    before_interval = live.infer(_frame(2))
+    at_interval = live.infer(_frame(3))
+
+    assert live.live.infer_calls == [True, False, True]
+    assert first["keyframe"] is True
+    assert first["redetect_reason"] == "first_frame"
+    assert first["negative_evidence_valid"] is True
+    assert before_interval["keyframe"] is False
+    assert before_interval["redetect_reason"] is None
+    assert before_interval["negative_evidence_valid"] is False
+    assert at_interval["keyframe"] is True
+    assert at_interval["redetect_reason"] == "interval"
+    assert at_interval["negative_evidence_valid"] is True
+    assert live._last_keyframe_time == 11.01
+
+
+def test_hybrid_explicit_detection_override(monkeypatch):
+    live = _unified_hybrid([[1], [1]])
+    live._force_keyframe_next = False
+    live._pending_redetect_reason = None
+    live._last_keyframe_time = 10.0
+    clock = iter((10.2, 12.0))
+    monkeypatch.setattr(hybrid_inference.time, "perf_counter", lambda: next(clock))
+
+    forced = live.infer(_frame(1), full_detection=True)
+    skipped = live.infer(_frame(2), full_detection=False)
+
+    assert live.live.infer_calls == [True, False]
+    assert forced["redetect_reason"] == "caller_override"
+    assert skipped["redetect_reason"] is None
+
+
+def test_hybrid_uses_inner_actual_detected_state(monkeypatch):
+    live = _unified_hybrid([
+        {
+            "object_ids": [2],
+            "detected": True,
+            "negative_evidence_valid": False,
+        },
+    ])
+    live._force_keyframe_next = False
+    live._pending_redetect_reason = None
+    live._last_keyframe_time = 9.0
+    live._previous_output_object_ids = {1}
+    monkeypatch.setattr(hybrid_inference.time, "perf_counter", lambda: 10.0)
+
+    result = live.infer(_frame(1), full_detection=False)
+
+    assert live.live.infer_calls == [False]
+    assert result["detected"] is True
+    assert result["keyframe"] is True
+    assert result["redetect_reason"] == "inner_forced"
+    assert result["negative_evidence_valid"] is True
+    assert result["lost_object_ids"] == []
+    assert live._last_keyframe_time == 10.0
+    assert live._force_keyframe_next is False
+
+
+def test_hybrid_requested_detection_retries_when_inner_did_not_detect(monkeypatch):
+    live = _unified_hybrid([
+        {"object_ids": [], "detected": False},
+        {"object_ids": [4], "detected": True},
+    ])
+    clock = iter((10.0, 10.1))
+    monkeypatch.setattr(hybrid_inference.time, "perf_counter", lambda: next(clock))
+
+    missed = live.infer(_frame(1))
+    retry = live.infer(_frame(2), full_detection=False)
+
+    assert missed["detected"] is False
+    assert missed["keyframe"] is False
+    assert missed["redetect_reason"] is None
+    assert missed["negative_evidence_valid"] is False
+    assert retry["detected"] is True
+    assert retry["keyframe"] is True
+    assert retry["redetect_reason"] == "detection_retry"
+    assert retry["negative_evidence_valid"] is True
+    assert live.live.infer_calls == [True, True]
+
+
+def test_hybrid_object_loss_sticky_forces_next_detection(monkeypatch):
+    live = _unified_hybrid([[2, 9, 5], [5], [5, 11]])
+    clock = iter((10.0, 10.1, 10.2))
+    monkeypatch.setattr(hybrid_inference.time, "perf_counter", lambda: next(clock))
+
+    first = live.infer(_frame(1))
+    lost = live.infer(_frame(2), full_detection=False)
+    recovery = live.infer(_frame(3), full_detection=False)
+
+    assert first["lost_object_ids"] == []
+    assert lost["keyframe"] is False
+    assert lost["lost_object_ids"] == [0, 1]
+    assert lost["redetect_reason"] is None
+    assert recovery["keyframe"] is True
+    assert recovery["redetect_reason"] == "object_loss"
+    assert live.live.infer_calls == [True, False, True]
+
+
+def _hybrid_output(object_ids, prompt_ids, masks, *, detected):
+    return {
+        "object_ids": list(object_ids),
+        "scores": {object_id: 0.9 for object_id in object_ids},
+        "masks": dict(masks),
+        "boxes": {object_id: (0.0, 0.0, 1.0, 1.0) for object_id in object_ids},
+        "prompt_to_obj_ids": {
+            prompt: list(ids) for prompt, ids in prompt_ids.items()
+        },
+        "frame_idx": 0,
+        "detected": detected,
+    }
+
+
+def test_hybrid_clean_keyframes_preserve_public_id_by_prompt_iou(monkeypatch):
+    mask = np.array([[True, True], [False, False]])
+    live = _unified_hybrid([
+        _hybrid_output([10], {"object": [10]}, {10: mask}, detected=True),
+        _hybrid_output([0], {"object": [0]}, {0: mask.copy()}, detected=True),
+    ])
+    clock = iter((10.0, 11.1))
+    monkeypatch.setattr(hybrid_inference.time, "perf_counter", lambda: next(clock))
+
+    first = live.infer(_frame(1))
+    second = live.infer(_frame(2))
+
+    assert first["object_ids"] == [0]
+    assert second["object_ids"] == [0]
+    assert second["prompt_to_obj_ids"] == {"object": [0]}
+    assert live.live.fresh_session_calls == 1
+    assert live.live._infer_calls == 2
+    assert live._next_public_object_id == 1
+
+
+def test_hybrid_clean_keyframe_retires_scene_cut_object(monkeypatch):
+    old_mask = np.array([[True, False], [False, False]])
+    new_mask = np.array([[False, False], [False, True]])
+    live = _unified_hybrid([
+        _hybrid_output([7], {"object": [7]}, {7: old_mask}, detected=True),
+        _hybrid_output([0], {"object": [0]}, {0: new_mask}, detected=True),
+    ])
+    clock = iter((10.0, 11.1))
+    monkeypatch.setattr(hybrid_inference.time, "perf_counter", lambda: next(clock))
+
+    first = live.infer(_frame(1))
+    second = live.infer(_frame(2))
+
+    assert first["object_ids"] == [0]
+    assert second["object_ids"] == [1]
+    assert 0 not in second["scores"]
+    assert 0 not in live._previous_public_masks
+
+
+def test_hybrid_keyframe_matching_never_crosses_prompts(monkeypatch):
+    left = np.array([[True, False], [False, False]])
+    right = np.array([[False, False], [False, True]])
+    live = _unified_hybrid([
+        _hybrid_output(
+            [10, 11],
+            {"floor": [10], "wall": [11]},
+            {10: left, 11: right},
+            detected=True,
+        ),
+        _hybrid_output(
+            [0, 1],
+            {"floor": [0], "wall": [1]},
+            {0: right.copy(), 1: left.copy()},
+            detected=True,
+        ),
+    ])
+    clock = iter((10.0, 11.1))
+    monkeypatch.setattr(hybrid_inference.time, "perf_counter", lambda: next(clock))
+
+    first = live.infer(_frame(1))
+    second = live.infer(_frame(2))
+
+    assert first["prompt_to_obj_ids"] == {"floor": [0], "wall": [1]}
+    assert second["prompt_to_obj_ids"] == {"floor": [2], "wall": [3]}
+
+
+def test_hybrid_propagation_reuses_inner_to_public_mapping(monkeypatch):
+    mask = np.ones((2, 2), dtype=bool)
+    live = _unified_hybrid([
+        _hybrid_output([12], {"object": [12]}, {12: mask}, detected=True),
+        _hybrid_output([12], {"object": [12]}, {12: mask}, detected=False),
+    ])
+    clock = iter((10.0, 10.1))
+    monkeypatch.setattr(hybrid_inference.time, "perf_counter", lambda: next(clock))
+
+    keyframe = live.infer(_frame(1))
+    propagation = live.infer(_frame(2), full_detection=False)
+
+    assert keyframe["object_ids"] == [0]
+    assert propagation["object_ids"] == [0]
+    assert propagation["prompt_to_obj_ids"] == {"object": [0]}
+    assert propagation["lost_object_ids"] == []
+    assert live.live.fresh_session_calls == 0
+
+
+@pytest.mark.parametrize(
+    ("method_name", "reason", "attribute"),
+    [
+        ("reset_prompts", "reset_prompts", "reset_prompts_calls"),
+        ("reset_tracking", "reset_tracking", "reset_tracking_calls"),
+    ],
+)
+def test_hybrid_reset_delegates_and_forces_fresh_detection(
+    monkeypatch,
+    method_name,
+    reason,
+    attribute,
+):
+    live = _unified_hybrid([[1], [2]])
+    clock = iter((10.0, 10.1))
+    monkeypatch.setattr(hybrid_inference.time, "perf_counter", lambda: next(clock))
+    live.infer(_frame(1))
+
+    if method_name == "reset_prompts":
+        live.reset_prompts(["new"])
+        assert getattr(live.live, attribute) == [["new"]]
+    else:
+        live.reset_tracking()
+        assert getattr(live.live, attribute) == 1
+
+    result = live.infer(_frame(2), full_detection=False)
+    assert result["keyframe"] is True
+    assert result["redetect_reason"] == reason
+    assert result["lost_object_ids"] == []
+
+
+def test_hybrid_close_delegates():
+    live = _unified_hybrid([])
+    live.close()
+    assert live.live.close_calls == 1
+
+
+def test_hybrid_pipeline_owner_may_infer(monkeypatch):
+    live = _unified_hybrid([[1]])
+    pipeline = SimpleNamespace(_is_inference_owner_thread=lambda: True)
+    live._latest_frame_pipeline_active = pipeline
+    live.live._latest_frame_pipeline_active = pipeline
+    monkeypatch.setattr(hybrid_inference.time, "perf_counter", lambda: 10.0)
+
+    result = live.infer(_frame(1))
+
+    assert result["keyframe"] is True
+    assert live.live.infer_calls == [True]
+
+
+def test_hybrid_rejects_inner_only_foreign_pipeline_before_session_reset():
+    live = _unified_hybrid([[1]])
+    live._force_keyframe_next = True
+    live._inner_session_fresh = False
+    live.live._latest_frame_pipeline_active = SimpleNamespace(
+        _is_inference_owner_thread=lambda: False
+    )
+
+    with pytest.raises(RuntimeError, match="LatestFramePipeline"):
+        live.infer(_frame(1))
+
+    assert live.live.fresh_session_calls == 0
+    assert live.live.infer_calls == []
 
 
 def test_nested_live_session_is_claimed_and_released():

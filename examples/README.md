@@ -20,6 +20,15 @@ There is no live N+1 preprocessing or backbone lookahead. While inference is
 busy, newer camera arrivals replace the one waiting frame before any model
 state is touched.
 
+The default robotics policy still runs full text detection on every consumed
+frame. `demo_live.py --redetect-interval-ms N`, with `N > 0`, is an opt-in
+unified hybrid: one `SAM3Live` model performs full detection on
+wall-clock keyframes and native detector-skip tracking between them. Before a
+keyframe it replaces the inner session with a fresh one, reuses encoded prompt
+tensors, and maps the new detections to stable public IDs by same-prompt mask
+IoU. There is only one active session at a time. It does not create a second
+tracker backbone or load legacy MIGraphX 2.16 tracker artifacts.
+
 ## 1. Required threading and ownership rules
 
 1. The subscription callback must not call SAM3Live.infer. It should call
@@ -101,6 +110,22 @@ observation can create obstacle ghosts; stale negative/free-space evidence can
 incorrectly clear a current obstacle. Publish and handle empty observations
 explicitly rather than silently omitting them.
 
+Tracker-only output must also be treated asymmetrically even when it is fresh:
+
+- `detected=False`: masks that are present may add positive occupied evidence;
+  an absent/lost mask is unknown and must not clear free space.
+- `detected=True`: negative/free-space clearing is permitted after the normal
+  timestamp and result-age checks.
+
+The unified hybrid reports lost IDs in `lost_object_ids` and makes the recovery
+detection request sticky until the next consumed frame. Latest-frame dropping
+means that recovery frame need not be the next source sequence. Use
+`redetect_reason == "object_loss"` to identify that recovery keyframe, and use
+`negative_evidence_valid` as the direct gate for clearing operations.
+Other `redetect_reason` values are `first_frame`, `interval`,
+`caller_override`, `inner_forced`, `reset_prompts`, `reset_tracking`,
+`detection_retry`, and `None`.
+
 The previously measured single-prompt full-detection reference on the target
 machine was roughly 8.1-8.4 Hz with about 139 ms mean frame age. Treat that as a
 reference, not a deadline guarantee. Re-measure p50, p95, and p99 age with the
@@ -131,6 +156,36 @@ particular camera frame that carried a trigger does not lose the trigger.
 AlwaysFull is the recommended default for the full-text occupancy workload.
 Tracker-heavy policies need their own map-quality regression because source
 frames can be skipped.
+
+For reference, the clean-keyframe unified hybrid measured
+10.4719/10.4724/10.4749 Hz across three runs on the canonical
+`blackswan.mp4`/`swan` one-object headless workload (110 outputs from 250
+arrivals per run at 24 FPS). Mean service time was approximately 95.45 ms and
+frame-age p95 ranged from 135.63 to 137.76 ms.
+On `two_person_dog_lawn.mp4` with 300 arrivals at 25 FPS and no rendering, the
+measured rates were:
+
+| Prompts | Representative objects/output | Output rate | Service mean | Age p50/p95 |
+|---|---:|---:|---:|---:|
+| `people` | 2 | 9.4621 Hz | 105.60 ms | 126.91/150.74 ms |
+| `people,dog` | 3 | 8.3682 Hz | 119.44 ms | 139.49/172.52 ms |
+| `people,dog,lawn,sidewalk` | 6–7 | 6.2287 Hz | 160.47 ms | 178.26/237.65 ms |
+
+These workloads are not interchangeable: active object count, not prompt count
+alone, drives much of the tracker cost. None changes the default AlwaysFull
+freshness policy.
+
+On a separate 50-frame `office_hallway_two_way` comparison with full SAM3 on
+every frame, clean-hybrid propagation produced floor union IoU mean/min
+0.981233/0.949965 and wall 0.963659/0.933420. False-free rates were 1.4169% and
+1.7963%, respectively. Treat these as workload-specific bounds; they do not
+make negative evidence valid on tracker-only frames.
+
+A 120-keyframe no-GC fresh-session soak found no sustained memory growth:
+Torch allocated memory increased by about 508 KB, reserved memory by 4 MiB,
+and process RSS by 72 KiB, with all three plateauing after iteration 10. The
+full record is
+`/home/amd/project/sam3-artifacts/gpu/experiments/unified-reset-soak/REPORT.md`.
 
 ## 5. Prompt reset and generations
 
@@ -205,7 +260,18 @@ The result carried by LatestFrameResult.output has the normal SAM3Live schema:
         "prompt_to_obj_ids":  {"person": [3, 7], "car": [12]},
         "frame_idx":          42,
         "detected":           True,
+        "keyframe":           True,
+        "lost_object_ids":    [],
+        "redetect_reason":    "interval",
+        "negative_evidence_valid": True,
     }
+
+`keyframe`, `lost_object_ids`, and `redetect_reason` are supplied by
+`SAM3HybridLive`. Both direct `SAM3Live` and hybrid callers always receive
+`detected` and `negative_evidence_valid`; the latter is true exactly when the
+detector actually ran. Costmap integrations should read
+`negative_evidence_valid` directly, not infer clearing permission from an
+empty mask.
 
 For long-running streams, model/session history still needs a bounded reset
 policy. Perform any tracking reset with the same stop/join/reset/new-generation

@@ -48,7 +48,7 @@ SAM3 detection re-runs after frame 0**:
 
 ```
 demo_live.py             latest frame → full SAM3             ──────► streaming mask output
-                         optional >0ms redetect interval → hybrid tracker propagation
+                         optional >0ms interval → clean keyframe + detector-skip propagation
 tools/text_baseline.py   text → full SAM3 every frame          ──────► offline batch output
 demo_box.py              [box] (frame 0 only)                  ──────► fastest, single-object
 ```
@@ -59,9 +59,15 @@ The deployment shape used by robotics / ROS consumers. A capture producer contin
 drains the source into a capacity-one latest-frame slot. Once the current inference
 finishes, the consumer starts all preprocessing and model work on the newest available
 frame. Full text detection runs on every consumed frame by default
-(`--redetect-interval-ms 0`). A positive interval explicitly enables the hybrid
-SAM3-keyframe plus lightweight-tracker path. The live scheduler never performs N+1 GPU
-preprocessing or backbone lookahead.
+(`--redetect-interval-ms 0`). A positive interval explicitly enables unified
+hybrid scheduling with one `SAM3Live` model. Before each full-detection
+keyframe, the wrapper replaces the inner inference session with a fresh one,
+reuses the already encoded prompt tensors, and maps fresh detections back to
+stable public IDs by same-prompt mask IoU. Native detector-skip tracking then
+continues in that new session between keyframes. Only one session is active at
+a time. The path does not construct a second tracker backbone and does not load
+legacy MIGraphX 2.16 tracker artifacts. The live scheduler never performs N+1
+GPU preprocessing or backbone lookahead.
 
 ### Offline batch text-prompt (`tools/text_baseline.py`)
 
@@ -260,7 +266,7 @@ mask for each frame selected by the bounded latest-frame scheduler.
     --checkpoint /models/sam3 \
     --video assets/blackswan.mp4 --text swan
 
-# Optional hybrid keyframes; all other optimized defaults remain enabled
+# Optional unified hybrid; all other optimized defaults remain enabled
 ./docker/rocm714/run.sh python demo_live.py \
     --checkpoint /models/sam3 \
     --video assets/blackswan.mp4 --text swan \
@@ -268,7 +274,8 @@ mask for each frame selected by the bounded latest-frame scheduler.
 ```
 
 Key flags: live defaults to MIG; use `--no-mig` only for pure-PyTorch diagnosis;
-`--redetect-interval-ms` selects full detection (0) or hybrid keyframes (>0);
+`--redetect-interval-ms` selects full detection on every consumed frame (0,
+the default) or unified clean-keyframe plus detector-skip propagation (>0);
 MIG live runs enable detector/tracker `parallel-tail` by default;
 use `--no-parallel-tail` only for diagnosis or compatibility;
 504px MIG live also auto-loads `detr_decoder_fixed/direct_gpuio.mxr`; use
@@ -286,6 +293,25 @@ camera/ROS adapter should submit frames immediately and configure its upstream q
 for latest-frame semantics. `captured_at` must use a host monotonic clock; preserve the
 sensor exposure timestamp separately for pose/TF alignment. Runtime prompt changes
 must close the pipeline, reset the session, and start a new pipeline generation.
+
+The unified hybrid preserves SAM3's native no-object gate. Each scheduled full
+detection runs from a fresh inner session; same-prompt mask-IoU association
+retains public IDs while preventing stale inner tracks from contaminating the
+keyframe. If a tracker-only
+result loses one or more object IDs, `lost_object_ids` reports them and a sticky
+request forces full detection on the next consumed frame; because the input
+queue is latest-only, that may be several source sequence numbers later.
+`redetect_reason` records `first_frame`, `interval`, `caller_override`,
+`inner_forced`, `object_loss`, `reset_prompts`, `reset_tracking`,
+`detection_retry`, or `None` as applicable. Consumers should use
+`negative_evidence_valid` as the authoritative clearing gate.
+
+For occupancy-grid integration, a tracker-only result (`detected=False`) may
+add **positive occupied evidence** from masks that are present, but it must not
+clear free space or infer absence from a missing mask. Negative/free-space
+clearing is valid only on a fresh full-detection keyframe (`detected=True`),
+after applying the normal timestamp and result-age checks. This is especially
+important on a frame that reports `lost_object_ids`.
 See `python demo_live.py --help` for the full set.
 
 ### Offline batch text-prompt (`tools/text_baseline.py`) — reference / debugging
@@ -421,12 +447,36 @@ section.*
 |---|---|---|
 | **`demo_live.py` (integrated default)** | Full SAM3, accepted FC1 sink, fixed decoder, no N+1 lookahead | **9.1275 Hz / 250 arrivals** |
 | Fixed-decoder eight-arm A/B | Same latest-frame workload, position-balanced control/candidate | **8.193 → 8.743 Hz (+6.72%)** |
-| `demo_live.py --redetect-interval-ms 1000` | Opt-in hybrid keyframe + tracker propagation | **~5 FPS multi-prompt** |
+| `demo_live.py --redetect-interval-ms 1000`, `blackswan.mp4`, `swan` (1 object) | Clean-keyframe unified hybrid, 250 arrivals at 24 FPS, headless | **10.4719 / 10.4724 / 10.4749 Hz** (3 runs) |
+| Clean-keyframe hybrid P1 `people` (2 objects) | `two_person_dog_lawn.mp4`, 300 arrivals at 25 FPS, headless | **9.4621 Hz** |
+| Clean-keyframe hybrid P2 `people,dog` (3 objects) | Same 300-arrival workload | **8.3682 Hz** |
+| Clean-keyframe hybrid P4 `people,dog,lawn,sidewalk` (6–7 objects) | Same 300-arrival workload | **6.2287 Hz** |
 | `tools/text_baseline.py --mig --parallel-tail --pipeline-backbone` | Full SAM3 every frame, one-frame backbone lookahead | **10.78** (1 obj, 3-run median) |
 | `tools/text_baseline.py --mig --parallel-tail` (ROCm 7.14 Docker) | SAM3 every frame, detector/tracker overlap | **9.03** (1 obj, 3-run median) |
 | `tools/text_baseline.py --mig` (ROCm 7.14 Docker) | SAM3 every frame (offline batch) | **8.51** (1 obj) |
 | `tools/text_baseline.py --mig` (native compatibility stack) | SAM3 every frame (offline batch) | **7.06** (1 obj) |
 | `tools/text_baseline.py` (no MIG) | Pure PyTorch baseline | ~2.6 |
+
+The canonical clean-keyframe runs each emitted 110 of 250 arrivals, with
+approximately 95.45 ms mean service time and 135.63-137.76 ms frame-age p95.
+For the 300-arrival P1/P2/P4 matrix, mean service times were
+105.60/119.44/160.47 ms and frame-age p50/p95 values were respectively
+126.91/150.74, 139.49/172.52, and 178.26/237.65 ms. Prompt count alone is not
+the scaling variable; those cells retained 2, 3, and typically 6 objects per
+output, with 7 objects on 15 of 76 P4 outputs.
+
+On a separate 50-frame `office_hallway_two_way` comparison against full SAM3
+on every frame, clean-hybrid propagation achieved floor union IoU mean/min
+`0.981233/0.949965` and wall `0.963659/0.933420`. False-free rates were
+`1.4169%` for floor and `1.7963%` for wall. These are workload-specific quality
+bounds, not permission to clear occupancy from tracker-only output: negative
+evidence remains valid only on a full-detection keyframe.
+
+A 120-keyframe no-GC fresh-session soak showed no sustained memory growth:
+Torch allocated increased by about 508 KB, reserved memory by 4 MiB, and
+process RSS by 72 KiB, with all three metrics plateauing after iteration 10.
+Evidence is under
+`/home/amd/project/sam3-artifacts/gpu/experiments/unified-reset-soak/REPORT.md`.
 
 Mask quality: PT vs MIG mean IoU = **0.994** @504px (verified frame-by-frame on 20-30 frames).
 Detection score: truck 0.95, swan 0.93-0.96.

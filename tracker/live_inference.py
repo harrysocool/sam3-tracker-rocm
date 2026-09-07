@@ -169,6 +169,7 @@ class SAM3Live:
         self.dtype = dtype
         self.imgsz = imgsz
         self.keep_recent_frames = keep_recent_frames
+        self.max_vision_features_cache_size = max_vision_features_cache_size
         self.redetect_every = max(1, int(redetect_every))
         self.max_objects_per_prompt = max_objects_per_prompt
         if mig:
@@ -315,7 +316,7 @@ class SAM3Live:
             video=None,
             inference_device=device,
             dtype=dtype,
-            max_vision_features_cache_size=max_vision_features_cache_size,
+            max_vision_features_cache_size=self.max_vision_features_cache_size,
         )
 
         # Bootstrap hook on detector_model — captures decoder_hidden_states
@@ -698,6 +699,50 @@ class SAM3Live:
                 self._bootstrap_remaining.setdefault(pid, self.bootstrap_frames)
                 self._exemplar_box_pool.setdefault(pid, [])
 
+    def _new_empty_session(self):
+        """Construct an empty streaming session without mutating the live one."""
+        return self.processor.init_video_session(
+            video=None,
+            inference_device=self.device,
+            dtype=self.dtype,
+            max_vision_features_cache_size=self.max_vision_features_cache_size,
+        )
+
+    @staticmethod
+    def _copy_prompt_state(source, destination) -> None:
+        """Copy prompt mappings while sharing their immutable tensor values."""
+        for name in (
+            "prompts",
+            "prompt_input_ids",
+            "prompt_embeddings",
+            "prompt_attention_masks",
+        ):
+            setattr(destination, name, dict(getattr(source, name)))
+
+    def _reset_session_counters(self) -> None:
+        self._next_frame_idx = 0
+        self._infer_calls = 0
+        self._force_detect_next = True
+        self._detector_call_counter = 0
+        self.model._skip_detection = False
+        self.session._parallel_tail_failed = False
+
+    def _replace_tracking_session_preserving_prompts(self) -> None:
+        """Atomically install an empty session with the current prompt state.
+
+        This private helper intentionally has no public pipeline guard. It may
+        be used by the single inference owner at an internal keyframe boundary.
+        Public callers must use ``reset_tracking()``, which enforces the guard.
+        """
+        old_session = self.session
+        replacement = self._new_empty_session()
+        self._copy_prompt_state(old_session, replacement)
+
+        # Construction and prompt-state copying can fail; do not publish the
+        # replacement or reset counters until both have completed.
+        self.session = replacement
+        self._reset_session_counters()
+
     def reset_prompts(self, prompts: Sequence[str]) -> None:
         """Drop ALL existing prompts + tracked objects + cache, install new
         prompt set. Use when the operating context changes (e.g. user
@@ -707,18 +752,19 @@ class SAM3Live:
             raise RuntimeError(
                 "close the active LatestFramePipeline before reset_prompts()"
             )
-        # reset_state() clears prompts, tracking, and vision cache.
-        # processed_frames is preserved (raw pixel tensors stay), but we
-        # don't reuse old frame_idx so this is OK.
-        self.session.reset_state()
-        if self.parallel_tail:
-            self.session._parallel_tail_failed = False
-        # reset_state() does NOT clear processed_frames — drop the stale
-        # raw pixel buffers ourselves so memory doesn't leak and our reset
-        # counter doesn't collide with old indices on the next infer().
-        if self.session.processed_frames is not None:
-            self.session.processed_frames.clear()
-        self._next_frame_idx = 0
+        prompts = [prompt for prompt in prompts if prompt]
+
+        # Prepare the complete replacement before publishing it. If session
+        # construction, tokenization, a prompt-device transfer, or the device
+        # fence fails, the old session remains fully usable.
+        replacement = self._new_empty_session()
+        if prompts:
+            self.processor.add_text_prompt(replacement, list(prompts))
+        if self.device.type == "cuda":
+            torch.cuda.synchronize(device=self.device)
+
+        self.session = replacement
+        self._reset_session_counters()
         # Reset bootstrap state — new prompts get a fresh bootstrap cycle.
         self._bootstrap_remaining.clear()
         self._exemplar_box_pool.clear()
@@ -729,9 +775,10 @@ class SAM3Live:
         self._drift_frames_since_bootstrap.clear()
         self._drift_pending_rebootstrap = False
         self._last_bootstrap_complete_time = 0.0
-        self.set_prompts(prompts)
-        # Force detection on next frame — no tracked objects to propagate.
-        self._force_detect_next = True
+        if self.bootstrap_frames > 0:
+            for prompt_id in self.session.prompts:
+                self._bootstrap_remaining[prompt_id] = self.bootstrap_frames
+                self._exemplar_box_pool[prompt_id] = []
 
     def close(self) -> None:
         """Release resources owned by optional inference schedulers."""
@@ -754,13 +801,7 @@ class SAM3Live:
             raise RuntimeError(
                 "close the active LatestFramePipeline before reset_tracking()"
             )
-        self.session.reset_inference_session()
-        if self.parallel_tail:
-            self.session._parallel_tail_failed = False
-        if self.session.processed_frames is not None:
-            self.session.processed_frames.clear()
-        self._next_frame_idx = 0
-        self._force_detect_next = True
+        self._replace_tracking_session_preserving_prompts()
 
     def infer(
         self,
@@ -794,6 +835,8 @@ class SAM3Live:
                 prompt_to_obj_ids:  dict[str, list[int]] grouping by prompt text
                 frame_idx:          int                  session-internal frame counter
                 detected:           bool                 True if detector ran this frame
+                negative_evidence_valid: bool             same as ``detected``;
+                                                          authoritative clearing gate
         """
         active_pipeline = getattr(self, "_latest_frame_pipeline_active", None)
         if active_pipeline is not None and not getattr(
@@ -907,6 +950,7 @@ class SAM3Live:
             "prompt_to_obj_ids": pp["prompt_to_obj_ids"],
             "frame_idx": frame_idx,
             "detected": not skip_detection,
+            "negative_evidence_valid": not skip_detection,
         }
         # Drift detection: record this frame's per-prompt avg score, and
         # throttled-check whether any prompt has dropped enough from its
