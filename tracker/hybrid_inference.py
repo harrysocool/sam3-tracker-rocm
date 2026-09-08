@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 from typing import Sequence
 
-from tracker.rocm_env import apply as _apply_rocm_env
+from .rocm_env import apply as _apply_rocm_env
 
 _apply_rocm_env()
 

@@ -30,35 +30,15 @@ os.environ.setdefault("MIGRAPHX_SKIP_BENCHMARKING", "1")
 # Suppress clang -Werror on lifetimebound warnings in MIGraphX JIT kernel compilation.
 # Without this flag, newer comgr/clang versions fail with:
 #   "parameter ... should be marked [[clang::lifetimebound]] [-Werror,-Wlifetime-safety-intra-tu-suggestions]"
-from tracker.rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
+from .rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
 
 
 # ---------------------------------------------------------------------------
 # MIGraphX direct-API helpers (backbone + memory_attention)
 # ---------------------------------------------------------------------------
 
-_MXR_BUILD_LIB = os.environ.get("MIGRAPHX_BUILD_LIB")
-
-
 def _load_migraphx_module():
-    """Import the patched MIGraphX 2.16.0 Python binding."""
-    import sys
-    import glob as _g, os as _o
-    _mxr_py_dir = (
-        (_o.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
-        if _o.environ.get("ROCM_PATH", "").rstrip("/") and _o.path.isdir(_o.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
-        else next(
-            (p for p in sorted(_g.glob("/opt/rocm-7.2.*/lib"), reverse=True)
-             if _o.path.isdir(p)),
-            "/opt/rocm-7.2.0/lib"
-        )
-    )
-    if _mxr_py_dir not in sys.path:
-        sys.path.insert(0, _mxr_py_dir)
-    if (_MXR_BUILD_LIB
-            and _o.path.isdir(_MXR_BUILD_LIB)
-            and _MXR_BUILD_LIB not in sys.path):
-        sys.path.append(_MXR_BUILD_LIB)
+    """Import MIGraphX from the selected container environment."""
     import migraphx
     return migraphx
 
@@ -134,25 +114,7 @@ class MIGraphXBackbone:
         cache_path: str | Path,
         gpu_io_cache_path: str | Path | None = None,
     ) -> None:
-        import sys
-        # Prefer the ROCm lib dir where the Python binding lives; fall back to build dir.
-        import glob as _g2, os as _o2
-        _mxr_py_dir = (
-            (_o2.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
-            if _o2.environ.get("ROCM_PATH", "").rstrip("/") and _o2.path.isdir(_o2.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
-            else next(
-                (p for p in sorted(_g2.glob("/opt/rocm-7.2.*/lib"), reverse=True)
-                 if _o2.path.isdir(p)), "/opt/rocm-7.2.0/lib"
-            )
-        )
-        if _mxr_py_dir not in sys.path:
-            sys.path.insert(0, _mxr_py_dir)
-        if (_MXR_BUILD_LIB
-                and _o2.path.isdir(_MXR_BUILD_LIB)
-                and _MXR_BUILD_LIB not in sys.path):
-            sys.path.append(_MXR_BUILD_LIB)
-
-        import migraphx as _mxr
+        _mxr = _load_migraphx_module()
         self._mxr = _mxr
 
         cache_path = Path(cache_path)

@@ -60,7 +60,7 @@ class MIGDetrEncoder(nn.Module):
             }),
             "CPUExecutionProvider",
         ]
-        print(f"  detr_encoder (ORT MIG EP, fp16): compiling from {Path(onnx_path).name} ...")
+        print(f"  detr_encoder (ORT MIG EP, fp16): opening {Path(onnx_path).name} with cache ...")
         import time
         t0 = time.perf_counter()
         self.session = ort.InferenceSession(str(onnx_path), sess_options=opts, providers=providers)
