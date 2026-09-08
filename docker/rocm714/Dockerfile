@@ -1,52 +1,73 @@
 # syntax=docker/dockerfile:1
 
-ARG BASE_IMAGE=sam3-migraphx-builder:9f1a138-gfx1151
-FROM ${BASE_IMAGE}
+FROM ubuntu:24.04@sha256:1e0a86e57d247923571b75e0aaf48a1449cf8c543d51fb3e07a4a7d7bfa79316
+SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 
+ARG ROCM_VERSION=7.14
+ARG ROCM_PACKAGE_VERSION=7.14.1-0
 ARG TORCH_INDEX=https://repo.amd.com/rocm/whl/gfx1151/
 ARG TORCH_VERSION=2.11.0+rocm7.13.0
 ARG TORCHVISION_VERSION=0.26.0+rocm7.13.0
 ARG TRITON_VERSION=3.6.0+rocm7.13.0
+ARG PYPI_INDEX=https://pypi.org/simple
 
-# The MIGraphX builder image contains the ROCm components needed by MIGraphX,
-# but PyTorch links additional FFT, RNG and collective libraries. Install the
-# ROCm 7.14 gfx1151 variants plus OpenCV's headless runtime dependencies.
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        amdrocm-fft-host7.14 \
-        amdrocm-fft7.14-gfx1151 \
-        amdrocm-rand-host7.14 \
-        amdrocm-rand7.14-gfx1151 \
-        amdrocm-rccl-host7.14 \
-        amdrocm-rccl7.14-gfx1151 \
-        libgl1 \
-        libglib2.0-0 \
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates curl gnupg libgl1 libglib2.0-0 libnuma1 libssl3 \
+        python3 python3-dev python3-pip python3-venv \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://repo.amd.com/rocm/packages/gpg/rocm.gpg \
+        | gpg --dearmor -o /etc/apt/keyrings/amdrocm.gpg \
+    && printf '%s\n' \
+        'deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://repo.amd.com/rocm/packages-multi-arch/ubuntu2404 stable main' \
+        > /etc/apt/sources.list.d/rocm.list \
+    && apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        "amdrocm-runtime-dev${ROCM_VERSION}=${ROCM_PACKAGE_VERSION}" \
+        "amdrocm-blas-dev${ROCM_VERSION}=${ROCM_PACKAGE_VERSION}" \
+        "amdrocm-blas-host${ROCM_VERSION}=${ROCM_PACKAGE_VERSION}" \
+        "amdrocm-dnn-dev${ROCM_VERSION}=${ROCM_PACKAGE_VERSION}" \
+        "amdrocm-dnn-host${ROCM_VERSION}=${ROCM_PACKAGE_VERSION}" \
+        "amdrocm-hipblas-common-dev${ROCM_VERSION}=${ROCM_PACKAGE_VERSION}" \
+        "amdrocm-blas${ROCM_VERSION}-gfx1151=${ROCM_PACKAGE_VERSION}" \
+        "amdrocm-dnn${ROCM_VERSION}-gfx1151=${ROCM_PACKAGE_VERSION}" \
+        "amdrocm-fft-host${ROCM_VERSION}=${ROCM_PACKAGE_VERSION}" \
+        "amdrocm-fft${ROCM_VERSION}-gfx1151=${ROCM_PACKAGE_VERSION}" \
+        "amdrocm-rand-host${ROCM_VERSION}=${ROCM_PACKAGE_VERSION}" \
+        "amdrocm-rand${ROCM_VERSION}-gfx1151=${ROCM_PACKAGE_VERSION}" \
+        "amdrocm-rccl-host${ROCM_VERSION}=${ROCM_PACKAGE_VERSION}" \
+        "amdrocm-rccl${ROCM_VERSION}-gfx1151=${ROCM_PACKAGE_VERSION}" \
+    && mkdir -p /opt/rocm \
+    && for directory in bin lib libexec include share llvm amdgcn; do \
+        ln -snf "core-${ROCM_VERSION}/${directory}" "/opt/rocm/${directory}"; \
+    done \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=migraphx /install/ /opt/migraphx-develop/
-COPY --from=ort /wheels/onnxruntime_migraphx-1.24.2-cp312-cp312-linux_x86_64.whl /tmp/onnxruntime_migraphx.whl
+# These named contexts contain downloaded, checksum-verified binaries. No
+# compiler source or compiler output directory is part of this Docker build.
+COPY --from=migraphx /migraphx/ /opt/migraphx-develop/
+COPY --from=ort /onnxruntime_migraphx-1.24.2-cp312-cp312-linux_x86_64.whl \
+    /tmp/onnxruntime_migraphx-1.24.2-cp312-cp312-linux_x86_64.whl
 COPY requirements.txt /tmp/sam3-requirements.txt
+COPY docker/rocm714/runtime-constraints.txt /tmp/sam3-runtime-constraints.txt
 
-RUN python3 -m venv --system-site-packages /opt/sam3-runtime \
-    && /opt/sam3-runtime/bin/python -m pip install --no-cache-dir /tmp/onnxruntime_migraphx.whl \
-    && /opt/sam3-runtime/bin/python -m pip install --no-cache-dir --no-deps \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m venv --system-site-packages /opt/sam3-runtime \
+    && /opt/sam3-runtime/bin/python -m pip install --only-binary=:all: \
+        --index-url "${PYPI_INDEX}" --constraint /tmp/sam3-runtime-constraints.txt \
+        /tmp/onnxruntime_migraphx-1.24.2-cp312-cp312-linux_x86_64.whl \
+    && /opt/sam3-runtime/bin/python -m pip install --only-binary=:all: --no-deps \
         --index-url "${TORCH_INDEX}" \
-        "torch==${TORCH_VERSION}" \
-        "torchvision==${TORCHVISION_VERSION}" \
-        "triton==${TRITON_VERSION}" \
-    && /opt/sam3-runtime/bin/python -m pip install --no-cache-dir \
-        transformers==5.8.1 \
-        safetensors==0.7.0 \
-        opencv-python==4.11.0.86 \
-    && /opt/sam3-runtime/bin/python -m pip install --no-cache-dir -r /tmp/sam3-requirements.txt \
-    && rm /tmp/onnxruntime_migraphx.whl /tmp/sam3-requirements.txt
+        "torch==${TORCH_VERSION}" "torchvision==${TORCHVISION_VERSION}" "triton==${TRITON_VERSION}" \
+    && /opt/sam3-runtime/bin/python -m pip install --only-binary=:all: \
+        --index-url "${PYPI_INDEX}" --constraint /tmp/sam3-runtime-constraints.txt \
+        transformers==5.8.1 safetensors==0.7.0 opencv-python==4.11.0.86 \
+        networkx jinja2 filelock fsspec sympy -r /tmp/sam3-requirements.txt \
+    && rm /tmp/onnxruntime_migraphx-1.24.2-cp312-cp312-linux_x86_64.whl \
+        /tmp/sam3-requirements.txt /tmp/sam3-runtime-constraints.txt
 
-# The published gfx1151 Torch wheel currently targets ROCm 7.13. Its Python
-# bootstrap would otherwise preload ROCm wheel libraries over the ROCm 7.14
-# system installation. This compatibility module keeps the gfx1151 code
-# objects while resolving the ABI-compatible runtime from /opt/rocm.
 RUN mkdir -p /opt/sam3-runtime/lib/python3.12/site-packages/rocm_sdk
 COPY docker/rocm714/rocm_sdk_system.py /opt/sam3-runtime/lib/python3.12/site-packages/rocm_sdk/__init__.py
-COPY docker/rocm714/smoke_test.py /opt/sam3-tools/smoke_test.py
 
 ENV PATH=/opt/sam3-runtime/bin:/opt/migraphx-develop/bin:/opt/rocm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ENV PYTHONPATH=/opt/migraphx-develop/lib
@@ -54,8 +75,7 @@ ENV LD_LIBRARY_PATH=/opt/migraphx-develop/lib:/opt/migraphx-develop/lib/migraphx
 ENV HSA_OVERRIDE_GFX_VERSION=11.5.1
 ENV MIGRAPHX_GPU_HIP_FLAGS="-Wno-error -Wno-lifetime-safety-intra-tu-suggestions"
 
-LABEL org.opencontainers.image.title="SAM3 ROCm 7.14 gfx1151 runtime" \
-      org.opencontainers.image.description="PyTorch + ONNX Runtime MIGraphX + MIGraphX for SAM3 on gfx1151" \
-      org.opencontainers.image.source="https://github.com/harrysocool/sam3-tracker-rocm"
+LABEL org.opencontainers.image.title="SAM3 binary-assembled ROCm 7.14 runtime" \
+      org.opencontainers.image.description="Precompiled MIGraphX and ORT; no runtime source compilation"
 
 CMD ["bash"]

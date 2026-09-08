@@ -2,9 +2,16 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-IMAGE="${SAM3_DOCKER_IMAGE:-sam3-gpu714-ort1242-mgx217-gfx1151:torch211}"
+IMAGE="${SAM3_DOCKER_IMAGE:-sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc3-local}"
 MODEL_DIR="${SAM3_MODEL_DIR:-${ROOT}/model/sam3}"
 ONNX_DIR="${SAM3_ONNX_DIR:-${ROOT}/onnx_files_504_mgx217}"
+OUTPUT_DIR="${SAM3_OUTPUT_DIR:-}"
+STRICT="${SAM3_DOCKER_STRICT:-0}"
+
+case "${STRICT}" in
+    0|1) ;;
+    *) echo "SAM3_DOCKER_STRICT must be 0 or 1" >&2; exit 2 ;;
+esac
 
 if [[ ! -e /dev/kfd || ! -d /dev/dri ]]; then
     echo "ROCm devices /dev/kfd and /dev/dri are required" >&2
@@ -18,17 +25,33 @@ if [[ ! -d "${ONNX_DIR}" ]]; then
     echo "Set SAM3_ONNX_DIR to the MIGraphX 2.17 artifact root" >&2
     exit 1
 fi
+if [[ -n "${OUTPUT_DIR}" && ! -d "${OUTPUT_DIR}" ]]; then
+    echo "SAM3_OUTPUT_DIR must be an existing directory" >&2
+    exit 1
+fi
 
 gpu_args=(--device=/dev/kfd --device=/dev/dri --group-add "$(stat -c '%g' /dev/kfd)")
 if [[ -e /dev/dri/renderD128 ]]; then
     gpu_args+=(--group-add "$(stat -c '%g' /dev/dri/renderD128)")
 fi
 
+mount_mode=""
+network="host"
+strict_args=()
+if [[ "${STRICT}" == 1 ]]; then
+    mount_mode=":ro"
+    network="none"
+    strict_args+=(--read-only --tmpfs /tmp:rw,exec,nosuid,size=4g)
+fi
+
 mount_args=(
-    -v "${ROOT}:/workspace"
+    -v "${ROOT}:/workspace${mount_mode}"
     -v "${MODEL_DIR}:/models/sam3:ro"
-    -v "${ONNX_DIR}:/models/onnx_files_504"
+    -v "${ONNX_DIR}:/models/onnx_files_504${mount_mode}"
 )
+if [[ -n "${OUTPUT_DIR}" ]]; then
+    mount_args+=(-v "${OUTPUT_DIR}:/output")
+fi
 
 # Preserve the repository's supported external-artifact layout. Docker does
 # not follow absolute symlinks inside a bind mount, so bind their resolved
@@ -54,7 +77,7 @@ for subdir in \
         raw_target="$(readlink "${link_path}")"
         resolved_target="$(readlink -f "${link_path}" 2>/dev/null || true)"
         if [[ "${raw_target}" = /* && -d "${resolved_target}" ]]; then
-            mount_args+=(-v "${resolved_target}:${raw_target}")
+            mount_args+=(-v "${resolved_target}:${raw_target}${mount_mode}")
         fi
     fi
 done
@@ -68,7 +91,8 @@ if [[ $# -eq 0 ]]; then
     set -- bash
 fi
 
-exec docker run --rm "${tty_args[@]}" --network host --ipc=host \
+exec docker run --pull=never --rm "${tty_args[@]}" \
+    --network "${network}" --ipc=host "${strict_args[@]}" \
     "${gpu_args[@]}" \
     --user "$(id -u):$(id -g)" \
     -e HOME=/tmp \

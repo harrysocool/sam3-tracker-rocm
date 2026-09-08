@@ -1,102 +1,95 @@
 #!/usr/bin/env bash
+# Assemble the SAM3 image from published binaries. This script never compiles
+# rocMLIR, MIGraphX, ONNX Runtime, or PyTorch.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BUILD_ROOT="${SAM3_DOCKER_BUILD_ROOT:-${HOME}/.cache/sam3-rocm714-build}"
-GPU_ARCH="${GPU_ARCH:-gfx1151}"
-ROCM_VERSION="${ROCM_VERSION:-7.14}"
-JOBS="${JOBS:-16}"
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+CACHE="${SAM3_BINARY_CACHE:-${HOME}/.cache/sam3-runtime-binaries/0.2.0-rc3}"
+RUNTIME_IMAGE="${RUNTIME_IMAGE:-sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc3-local}"
 
-MIGRAPHX_REPO="${MIGRAPHX_REPO:-https://github.com/ROCm/AMDMIGraphX.git}"
-MIGRAPHX_COMMIT="${MIGRAPHX_COMMIT:-9f1a138e77f4738d82a065d225836b3b337950ce}"
-ORT_REPO="${ORT_REPO:-https://github.com/microsoft/onnxruntime.git}"
-ORT_COMMIT="${ORT_COMMIT:-058787ceead760166e3c50a0a4cba8a833a6f53f}"
+MGX_NAME=migraphx-2.17.0-dev-9f1a138-sam3-fc1sink-rocm7.14-gfx1151-cp312.tar.gz
+MGX_URL="${MIGRAPHX_URL:-https://github.com/harrysocool/sam3-tracker-rocm/releases/download/v0.2.0-rc3/${MGX_NAME}}"
+MGX_SHA256=00c1823e540c33f0ce658f87ed0e1d71dda75c830b8be380accd8531b82f1624
+ORT_NAME=onnxruntime_migraphx-1.24.2-cp312-cp312-linux_x86_64.whl
+ORT_URL="${ORT_URL:-https://github.com/harrysocool/sam3-tracker-rocm/releases/download/v0.2.0-rc3/${ORT_NAME}}"
+ORT_SHA256=ef10e3e808e8805c26cc27f47572a53e385463f29d578e1ea2fe13d00e6f5ee0
 
-BUILDER_IMAGE="${BUILDER_IMAGE:-sam3-migraphx-builder:${MIGRAPHX_COMMIT:0:7}-${GPU_ARCH}}"
-RUNTIME_IMAGE="${RUNTIME_IMAGE:-sam3-gpu714-ort1242-mgx217-gfx1151:torch211}"
+usage() {
+    cat <<'EOF'
+Usage: docker/rocm714/build.sh [--no-cache] [--no-smoke]
 
-MGX_SRC="${BUILD_ROOT}/AMDMIGraphX"
-MGX_OUT="${BUILD_ROOT}/migraphx-out"
-ORT_SRC="${BUILD_ROOT}/onnxruntime"
-ORT_OUT="${BUILD_ROOT}/onnxruntime-out"
+Downloads checksum-pinned MIGraphX and ORT binaries, then assembles the local
+Docker image. It does not clone or compile runtime sources.
 
-checkout_commit() {
-    local repo="$1" dst="$2" commit="$3"
-    if [[ ! -d "${dst}/.git" ]]; then
-        git clone --filter=blob:none --no-checkout "${repo}" "${dst}"
-    fi
-    git -C "${dst}" fetch --depth 1 origin "${commit}"
-    git -C "${dst}" checkout --detach FETCH_HEAD
+Overrides:
+  MIGRAPHX_ARCHIVE=/local/file.tar.gz
+  ORT_WHEEL_PATH=/local/file.whl
+  MIGRAPHX_URL=https://...
+  ORT_URL=https://...
+  RUNTIME_IMAGE=name:tag
+  SAM3_BINARY_CACHE=/path
+EOF
 }
 
-gpu_args=()
-if [[ -e /dev/kfd && -d /dev/dri ]]; then
-    gpu_args+=(--device=/dev/kfd --device=/dev/dri)
-    gpu_args+=(--group-add "$(stat -c '%g' /dev/kfd)")
-    if [[ -e /dev/dri/renderD128 ]]; then
-        gpu_args+=(--group-add "$(stat -c '%g' /dev/dri/renderD128)")
+NO_SMOKE=false
+NO_CACHE=false
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --no-cache) NO_CACHE=true ;;
+        --no-smoke) NO_SMOKE=true ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "binary runtime build: unknown argument: $1" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+for command in curl docker readlink sha256sum tar; do
+    command -v "${command}" >/dev/null || { echo "missing command: ${command}" >&2; exit 2; }
+done
+
+mkdir -p "${CACHE}"
+fetch() {
+    local override="$1" url="$2" destination="$3" expected="$4" actual
+    if [[ -n "${override}" ]]; then
+        destination="$(readlink -f -- "${override}")"
+    elif [[ ! -f "${destination}" ]]; then
+        curl --fail --location --retry 3 --output "${destination}.part" -- "${url}"
+        mv -- "${destination}.part" "${destination}"
     fi
+    actual="$(sha256sum -- "${destination}")"; actual="${actual%% *}"
+    [[ "${actual}" == "${expected}" ]] || {
+        echo "SHA256 mismatch: ${destination}" >&2; return 2;
+    }
+    printf '%s\n' "${destination}"
+}
+
+mgx="$(fetch "${MIGRAPHX_ARCHIVE:-}" "${MGX_URL}" "${CACHE}/${MGX_NAME}" "${MGX_SHA256}")"
+ort="$(fetch "${ORT_WHEEL_PATH:-}" "${ORT_URL}" "${CACHE}/${ORT_NAME}" "${ORT_SHA256}")"
+
+work="$(mktemp -d "${TMPDIR:-/tmp}/sam3-binary-image.XXXXXXXX")"
+trap 'rm -rf -- "${work}"' EXIT
+mkdir "${work}/migraphx" "${work}/ort"
+tar -xzf "${mgx}" -C "${work}/migraphx"
+[[ -f "${work}/migraphx/migraphx/lib/migraphx/lib/libmigraphx_gpu.so.2017000.0" ]] || {
+    echo "invalid MIGraphX binary archive" >&2; exit 2;
+}
+cp "${ort}" "${work}/ort/${ORT_NAME}"
+
+docker_args=()
+if "${NO_CACHE}"; then
+    docker_args+=(--no-cache)
 fi
-
-mkdir -p "${BUILD_ROOT}" "${MGX_OUT}" "${ORT_OUT}/wheels"
-checkout_commit "${MIGRAPHX_REPO}" "${MGX_SRC}" "${MIGRAPHX_COMMIT}"
-checkout_commit "${ORT_REPO}" "${ORT_SRC}" "${ORT_COMMIT}"
-
-DOCKER_BUILDKIT=1 docker build \
-    --build-arg "ROCM_VERSION=${ROCM_VERSION}" \
-    --build-arg "GPU_ARCH=${GPU_ARCH}" \
-    -t "${BUILDER_IMAGE}" "${MGX_SRC}"
-
-docker run --rm "${gpu_args[@]}" --ipc=host \
-    --user "$(id -u):$(id -g)" -e HOME=/tmp \
-    -v "${MGX_SRC}:/src:ro" -v "${MGX_OUT}:/work" -w /work \
-    "${BUILDER_IMAGE}" bash -lc "
-        cmake -S /src -B /work/build \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_C_COMPILER=/opt/rocm/llvm/bin/clang \
-          -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ \
-          -DCMAKE_INSTALL_PREFIX=/work/install \
-          -DCMAKE_PREFIX_PATH='/usr/local;/opt/rocm' \
-          -DBUILD_SHARED_LIBS=ON \
-          -DMIGRAPHX_ENABLE_MLIR=ON \
-          -DMIGRAPHX_USE_HIPBLASLT=ON \
-          -DGPU_TARGETS=${GPU_ARCH}
-        cmake --build /work/build --target install -j${JOBS}
-    "
-
-docker run --rm "${gpu_args[@]}" --ipc=host \
-    --user "$(id -u):$(id -g)" -e HOME=/tmp \
-    -e CC=/usr/bin/gcc -e CXX=/usr/bin/g++ \
-    -e CMAKE_PREFIX_PATH=/mgx/install:/usr/local:/opt/rocm \
-    -e LD_LIBRARY_PATH=/mgx/install/lib:/mgx/install/lib/migraphx/lib:/usr/local/lib:/opt/rocm/lib \
-    -v "${ORT_SRC}:/src:ro" -v "${ORT_OUT}:/work" -v "${MGX_OUT}:/mgx:ro" -w /src \
-    "${BUILDER_IMAGE}" python3 tools/ci_build/build.py \
-      --build_dir /work/build --config Release --update --build \
-      --skip_tests --skip_submodule_sync --build_wheel --parallel "${JOBS}" \
-      --use_migraphx --migraphx_home /mgx/install \
-      --compile_no_warning_as_error \
-      --cmake_extra_defines \
-        CMAKE_C_COMPILER=/usr/bin/gcc \
-        CMAKE_CXX_COMPILER=/usr/bin/g++ \
-        'CMAKE_PREFIX_PATH=/mgx/install;/usr/local;/opt/rocm' \
-        FETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER \
-        "GPU_TARGETS=${GPU_ARCH}" \
-        "CMAKE_HIP_ARCHITECTURES=${GPU_ARCH}" \
-        'CMAKE_INSTALL_RPATH=/mgx/install/lib;/mgx/install/lib/migraphx/lib;/opt/rocm/lib'
-
-cp -f "${ORT_OUT}"/build/Release/dist/onnxruntime_migraphx-1.24.2-cp312-cp312-linux_x86_64.whl \
-    "${ORT_OUT}/wheels/"
-
-DOCKER_BUILDKIT=1 docker build \
-    --build-arg "BASE_IMAGE=${BUILDER_IMAGE}" \
-    --build-context "migraphx=${MGX_OUT}" \
-    --build-context "ort=${ORT_OUT}" \
+DOCKER_BUILDKIT=1 docker build "${docker_args[@]}" \
+    --build-context "migraphx=${work}/migraphx" \
+    --build-context "ort=${work}/ort" \
     -f "${ROOT}/docker/rocm714/Dockerfile" \
     -t "${RUNTIME_IMAGE}" "${ROOT}"
 
-if [[ -e /dev/kfd && -d /dev/dri ]]; then
-    docker run --rm "${gpu_args[@]}" --ipc=host \
-        "${RUNTIME_IMAGE}" python /opt/sam3-tools/smoke_test.py
-else
-    echo "Built ${RUNTIME_IMAGE}; skipping GPU smoke test because /dev/kfd is unavailable."
+if ! "${NO_SMOKE}"; then
+    gpu=(--device=/dev/kfd --device=/dev/dri --group-add "$(stat -c '%g' /dev/kfd)")
+    [[ ! -e /dev/dri/renderD128 ]] || gpu+=(--group-add "$(stat -c '%g' /dev/dri/renderD128)")
+    docker run --rm --pull=never "${gpu[@]}" "${RUNTIME_IMAGE}" python -c \
+        'import torch, migraphx, onnxruntime as o; assert torch.cuda.is_available(); assert str(migraphx.__version__).startswith("2.17"); assert o.__version__ == "1.24.2"; assert "MIGraphXExecutionProvider" in o.get_available_providers()'
 fi
+
+echo "Binary runtime ready: ${RUNTIME_IMAGE}"
