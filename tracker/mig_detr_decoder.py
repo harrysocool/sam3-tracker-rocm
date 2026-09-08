@@ -62,10 +62,17 @@ class MIGFixedDetrDecoder(nn.Module):
         self.mxr_path = Path(mxr_path)
         if verify_sha256:
             actual = _sha256(self.mxr_path)
-            if actual != FIXED_DETR_DECODER_SHA256:
+            checksum = self.mxr_path.with_suffix(self.mxr_path.suffix + ".sha256")
+            expected = FIXED_DETR_DECODER_SHA256
+            if checksum.is_file():
+                fields = checksum.read_text(encoding="ascii").split()
+                if len(fields) != 2 or fields[1] != self.mxr_path.name:
+                    raise RuntimeError(f"invalid fixed decoder checksum file: {checksum}")
+                expected = fields[0]
+            if actual != expected:
                 raise RuntimeError(
                     "fixed DETR decoder MXR hash mismatch: "
-                    f"{actual} != {FIXED_DETR_DECODER_SHA256}"
+                    f"{actual} != {expected}"
                 )
 
         self.config = original_decoder.config
@@ -89,24 +96,28 @@ class MIGFixedDetrDecoder(nn.Module):
                     f"{shape.type_string()} {tuple(shape.lens())}"
                 )
 
-        self.output_names = tuple(
+        self.all_output_names = tuple(
             sorted(
                 (name for name in self.parameter_shapes if "#output_" in name),
                 key=lambda name: int(name.rsplit("_", 1)[1]),
             )
         )
-        if len(self.output_names) != 3:
-            raise RuntimeError(
-                "fixed decoder MXR requires three GPU output parameters, got "
-                f"{self.output_names}"
-            )
-        for name, expected in zip(self.output_names, self._OUTPUT_LENS):
-            shape = self.parameter_shapes[name]
-            if tuple(shape.lens()) != expected or shape.type_string() != "float_type":
+        selected = []
+        for expected in self._OUTPUT_LENS:
+            matches = [
+                name for name in self.all_output_names
+                if tuple(self.parameter_shapes[name].lens()) == expected
+                and self.parameter_shapes[name].type_string() == "float_type"
+            ]
+            if len(matches) != 1:
                 raise RuntimeError(
-                    f"unexpected fixed decoder output {name}: "
-                    f"{shape.type_string()} {tuple(shape.lens())}"
+                    f"fixed decoder requires one output shaped {expected}, got {matches}"
                 )
+            selected.append(matches[0])
+        self.output_names = tuple(selected)
+        self._output_indices = tuple(
+            self.all_output_names.index(name) for name in self.output_names
+        )
 
         self._buffers_device: torch.device | None = None
         self._fp32_inputs: tuple[torch.Tensor, ...] | None = None
@@ -141,7 +152,7 @@ class MIGFixedDetrDecoder(nn.Module):
                 dtype=torch.float32,
                 device=inputs[0].device,
             )
-            for name in self.output_names
+            for name in self.all_output_names
         )
         self._arguments = {
             name: self._argument(tensor)
@@ -150,7 +161,7 @@ class MIGFixedDetrDecoder(nn.Module):
         self._arguments.update(
             {
                 name: self._argument(tensor)
-                for name, tensor in zip(self.output_names, self._fp32_outputs)
+                for name, tensor in zip(self.all_output_names, self._fp32_outputs)
             }
         )
 
@@ -233,7 +244,10 @@ class MIGFixedDetrDecoder(nn.Module):
             torch.cuda.synchronize(device=vision_features.device)
             raise
 
-        outputs = tuple(output.to(dtype=dtype) for output in self._fp32_outputs)
+        outputs = tuple(
+            self._fp32_outputs[index].to(dtype=dtype)
+            for index in self._output_indices
+        )
         return Sam3DETRDecoderOutput(
             intermediate_hidden_states=outputs[0],
             reference_boxes=outputs[1],
