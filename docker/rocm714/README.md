@@ -5,8 +5,9 @@ The host ROCm 7.2/MIGraphX 2.16 environment may remain installed for unrelated
 projects, but it is not a supported SAM3 performance or deployment target and
 cannot load the default fixed-decoder MXR.
 
-This directory builds the tested gfx1151 stack entirely from source or pinned
-public wheels without modifying the host ROCm installation.
+The supported path assembles the runtime from published binaries: AMD ROCm and
+Torch packages, the release's MIGraphX tar, and its ORT wheel. It does not
+compile rocMLIR, MIGraphX, ORT, or PyTorch and does not modify host ROCm.
 
 ## Pinned stack
 
@@ -29,24 +30,25 @@ covered by the smoke test and the SAM3 regression described below.
 
 - Linux x86-64 host with Docker and BuildKit
 - AMD gfx1151 GPU exposed as `/dev/kfd` and `/dev/dri`
-- Approximately 45 GB free disk during a clean build
-- Network access to GitHub and `repo.amd.com`
+- Network access to the release assets and AMD package repositories
 
-## Build from zero
+## Assemble from precompiled dependencies
 
 ```bash
 ./docker/rocm714/build.sh
 ```
 
-The first build compiles rocMLIR, MIGraphX and ONNX Runtime and can take tens
-of minutes. Intermediate source and build files default to:
+`build.sh` downloads and verifies the pinned MIGraphX and ORT binaries, then
+installs them into an Ubuntu/ROCm image. Override the release downloads while
+testing local files with:
 
-```text
-~/.cache/sam3-rocm714-build/
+```bash
+MIGRAPHX_ARCHIVE=/path/to/migraphx.tar.gz \
+ORT_WHEEL_PATH=/path/to/onnxruntime_migraphx.whl \
+./docker/rocm714/build.sh
 ```
 
-Override this with `SAM3_DOCKER_BUILD_ROOT`. Other useful overrides are
-`JOBS`, `GPU_ARCH`, `BUILDER_IMAGE`, and `RUNTIME_IMAGE`.
+The binary download cache defaults to `~/.cache/sam3-runtime-binaries/`.
 
 The final image defaults to:
 
@@ -56,20 +58,15 @@ sam3-gpu714-ort1242-mgx217-gfx1151:torch211
 
 ## Smoke test
 
-`build.sh` runs this automatically when a GPU is present:
+`build.sh` checks GPU visibility and the imported runtime versions after image
+assembly. Model ONNX/MXR compilation is a separate local step:
 
 ```bash
-docker run --rm \
-  --device=/dev/kfd --device=/dev/dri \
-  --group-add "$(stat -c '%g' /dev/kfd)" \
-  --group-add "$(stat -c '%g' /dev/dri/renderD128)" \
-  --ipc=host \
-  sam3-gpu714-ort1242-mgx217-gfx1151:torch211 \
-  python /opt/sam3-tools/smoke_test.py
+./setup.sh --models /path/to/model/sam3
 ```
 
-The test executes a Torch GPU kernel and passes Torch GPU allocations directly
-through ONNX Runtime's MIGraphX execution provider.
+The clean-environment runner assembles the image, builds model artifacts in a
+new directory, prewarms ORT caches, and runs full/hybrid smoke tests.
 
 ## Run SAM3
 
@@ -90,15 +87,10 @@ Open a shell:
 ./docker/rocm714/run.sh
 ```
 
-For a fresh checkout, create the 504 px artifacts inside the container:
+For a fresh checkout, create the 504px artifacts inside the assembled container:
 
 ```bash
-mkdir -p onnx_files_504
-SAM3_ONNX_DIR="$PWD/onnx_files_504" \
-./docker/rocm714/run.sh python export/build.py \
-  --pipeline text \
-  --imgsz 504 \
-  --checkpoint /models/sam3
+./setup.sh --models /path/to/model/sam3
 ```
 
 Run the text pipeline:
@@ -118,8 +110,8 @@ Run the text pipeline:
 ```
 
 MIGraphX `.mxr` files and ORT caches are ABI-specific. Do not reuse artifacts
-built by the legacy ROCm 7.2/MIGraphX stack in this image. Build them inside
-this image or download artifacts published for the exact stack.
+built by the legacy ROCm 7.2/MIGraphX stack. Build them locally inside this
+image with the checked-in export pipeline.
 
 Run the default freshness-oriented live path:
 

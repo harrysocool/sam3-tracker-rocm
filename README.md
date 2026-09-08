@@ -29,7 +29,6 @@ DAVIS 2017 val Mean J: **81.6%** (504px box-prompt).
 
 - [How it works](#how-it-works)
 - [Setup](#setup)
-- [Reproducible ROCm 7.14 Docker build](#reproducible-rocm-714-docker-build)
 - [Run the demos](#run-the-demos)
 - [Results](#results)
 - [Performance](#performance)
@@ -97,6 +96,42 @@ pixel_values ──► backbone.mxr ──► memory_attention (ORT MIG EP) ─�
 ---
 
 ## Setup
+
+The current release follows the original installation model:
+
+1. Download checksum-pinned **precompiled runtime dependencies** (MIGraphX
+   2.17 and the ORT 1.24.2 wheel). ROCm and gfx1151 Torch packages come from
+   AMD's package repositories.
+2. Assemble the local Docker image. This is a binary installation; it does not
+   compile rocMLIR, MIGraphX, ORT, or PyTorch.
+3. Obtain the SAM3 checkpoint separately under the SAM license.
+4. Export ONNX and compile the 504px SAM3 model artifacts locally.
+
+```bash
+./setup.sh --runtime
+./setup.sh --models /path/to/model/sam3
+```
+
+The model step builds the FC1-sink GPU-I/O backbone, DETR encoder, S1–S10
+memory-attention graphs, and fixed decoder. A complete clean-environment test
+is also available:
+
+```bash
+./tools/docker_test_runner.sh \
+  --checkpoint /path/to/model/sam3 \
+  --output /path/to/new/test-output
+```
+
+Use `MIGRAPHX_ARCHIVE` and `ORT_WHEEL_PATH` to test local release files before
+publication. Otherwise the runtime builder downloads the pinned release URLs.
+No complete Docker image or compiled SAM3 model bundle is required from the
+release.
+
+<details>
+<summary><b>Historical ROCm 7.2 host-install notes (unsupported)</b></summary>
+
+The material below documents the original implementation. Its commands no
+longer describe the current `setup.sh` and are not a supported fallback.
 
 ### Prerequisites
 
@@ -230,6 +265,8 @@ hf download facebook/sam3 model.safetensors --local-dir model/sam3
 
 For full control over each step (APT, conda, pip, ONNX export, backbone compile)
 see [`docs/manual_setup.md`](docs/manual_setup.md).
+
+</details>
 
 </details>
 
@@ -631,7 +668,7 @@ sam3-tracker-rocm/
 ├── demo_live.py            # ← Streaming live API (primary entry point)
 ├── tools/text_baseline.py  # ← Offline batch text-prompt (reference / debugging)
 ├── demo_box.py             # ← Specialized box-prompt (max single-object FPS)
-├── setup.sh                # ← One-command environment setup
+├── setup.sh                # Prebuilt runtime assembly / local model build
 ├── tracker/                # Inference: SAM3Live, SAM3HybridLive, SAM3OnnxTracker, MIG shims
 │   ├── latest_frame.py     # Default bounded latest-frame live scheduler
 │   ├── mig_detr_decoder.py # Fixed 504px direct-MXR DETR decoder
