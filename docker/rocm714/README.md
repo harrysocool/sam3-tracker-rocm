@@ -6,14 +6,21 @@ projects, but it is not a supported SAM3 performance or deployment target and
 cannot load the default fixed-decoder MXR.
 
 The supported path assembles the runtime from published binaries: AMD ROCm and
-Torch packages, the release's MIGraphX tar, and its ORT wheel. It does not
-compile rocMLIR, MIGraphX, ORT, or PyTorch and does not modify host ROCm.
+Torch packages, the SAM3-specific MIGraphX tar from the
+[`harrysocool/AMDMIGraphX` release](https://github.com/harrysocool/AMDMIGraphX/releases/tag/v2.17.0%2Bsam3-fc1sink.20260908.1),
+and the pinned ORT wheel. It does not compile rocMLIR, MIGraphX, ORT, or
+PyTorch and does not modify host ROCm.
 
 ## Pinned stack
 
 - Ubuntu 24.04
 - ROCm 7.14, gfx1151 APT packages
-- MIGraphX commit `9f1a138e77f4738d82a065d225836b3b337950ce`
+- MIGraphX release commit `2e9924db6e6c0c9ff5dcbd61f59b97132598731a`,
+  based on upstream `9f1a138e77f4738d82a065d225836b3b337950ce`
+- rocMLIR FC1-sink commit `f3404d59b581fdf9d8cd7c1be9aeeb267851af93`,
+  tag `sam3-fc1-sink-rocm714-v2`
+- MIGraphX archive SHA256
+  `ed1458c632eb2f0e2cab3c457aee93e39196cbb77d2180e47525e0009563dac1`
 - ONNX Runtime v1.24.2 commit `058787ceead760166e3c50a0a4cba8a833a6f53f`
 - PyTorch `2.11.0+rocm7.13.0` gfx1151 wheel, using the system ROCm 7.14 ABI
 - torchvision `0.26.0+rocm7.13.0`
@@ -53,7 +60,7 @@ The binary download cache defaults to `~/.cache/sam3-runtime-binaries/`.
 The final image defaults to:
 
 ```text
-sam3-gpu714-ort1242-mgx217-gfx1151:torch211
+sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc3-local
 ```
 
 ## Smoke test

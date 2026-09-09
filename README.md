@@ -99,9 +99,10 @@ pixel_values ──► backbone.mxr ──► memory_attention (ORT MIG EP) ─�
 
 The current release follows the original installation model:
 
-1. Download checksum-pinned **precompiled runtime dependencies** (MIGraphX
-   2.17 and the ORT 1.24.2 wheel). ROCm and gfx1151 Torch packages come from
-   AMD's package repositories.
+1. Download checksum-pinned **precompiled runtime dependencies** (the
+   [SAM3-specific MIGraphX 2.17 archive](https://github.com/harrysocool/AMDMIGraphX/releases/tag/v2.17.0%2Bsam3-fc1sink.20260908.1)
+   and the ORT 1.24.2 wheel). ROCm and gfx1151 Torch packages come from AMD's
+   package repositories.
 2. Assemble the local Docker image. This is a binary installation; it does not
    compile rocMLIR, MIGraphX, ORT, or PyTorch.
 3. Obtain the SAM3 checkpoint separately under the SAM license.
@@ -169,24 +170,6 @@ What it does:
 5. ONNX Runtime MIGraphX EP wheel (1.24.2)
 6. Python dependencies from `requirements.txt`
 7. Model weights from community mirror `1038lab/sam3` (no HF account needed)
-
-### Reproducible ROCm 7.14 Docker build
-
-The native setup above remains the compatibility path. For an isolated,
-from-source gfx1151 build of ROCm 7.14 + MIGraphX 2.17 + ONNX Runtime 1.24.2,
-use:
-
-```bash
-./docker/rocm714/build.sh
-```
-
-This pins the MIGraphX and ONNX Runtime source commits, builds both inside
-Docker, installs the gfx1151 PyTorch wheel, and runs a Torch-to-ORT-to-MIGraphX
-GPU smoke test. It does not modify the host ROCm installation. A clean build
-requires approximately 45 GB of free disk space.
-
-See [`docker/rocm714/README.md`](docker/rocm714/README.md) for artifact mounts,
-runtime commands, version pins, and the gfx1151 PyTorch compatibility detail.
 
 ### Stage 2 — Build model artefacts (`export/build.py`)
 

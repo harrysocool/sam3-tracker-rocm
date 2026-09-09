@@ -8,8 +8,8 @@ CACHE="${SAM3_BINARY_CACHE:-${HOME}/.cache/sam3-runtime-binaries/0.2.0-rc3}"
 RUNTIME_IMAGE="${RUNTIME_IMAGE:-sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc3-local}"
 
 MGX_NAME=migraphx-2.17.0-dev-9f1a138-sam3-fc1sink-rocm7.14-gfx1151-cp312.tar.gz
-MGX_URL="${MIGRAPHX_URL:-https://github.com/harrysocool/sam3-tracker-rocm/releases/download/v0.2.0-rc3/${MGX_NAME}}"
-MGX_SHA256=00c1823e540c33f0ce658f87ed0e1d71dda75c830b8be380accd8531b82f1624
+MGX_URL="${MIGRAPHX_URL:-https://github.com/harrysocool/AMDMIGraphX/releases/download/v2.17.0%2Bsam3-fc1sink.20260908.1/${MGX_NAME}}"
+MGX_SHA256=ed1458c632eb2f0e2cab3c457aee93e39196cbb77d2180e47525e0009563dac1
 ORT_NAME=onnxruntime_migraphx-1.24.2-cp312-cp312-linux_x86_64.whl
 ORT_URL="${ORT_URL:-https://github.com/harrysocool/sam3-tracker-rocm/releases/download/v0.2.0-rc3/${ORT_NAME}}"
 ORT_SHA256=ef10e3e808e8805c26cc27f47572a53e385463f29d578e1ea2fe13d00e6f5ee0

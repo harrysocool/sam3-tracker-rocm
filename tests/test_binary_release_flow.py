@@ -1,6 +1,7 @@
 """CPU-only guards for the download-binaries/build-models release flow."""
 
 from pathlib import Path
+import re
 import shutil
 import subprocess
 
@@ -46,10 +47,28 @@ def test_runtime_assembly_contains_no_source_build_commands():
     ).read_text()
 
 
-def test_runtime_binary_hashes_are_pinned():
+def test_runtime_binary_locations_and_hashes_are_pinned():
     script = (ROOT / "docker/rocm714/build.sh").read_text()
-    assert "00c1823e540c33f0ce658f87ed0e1d71dda75c830b8be380accd8531b82f1624" in script
+    assert (
+        "https://github.com/harrysocool/AMDMIGraphX/releases/download/"
+        "v2.17.0%2Bsam3-fc1sink.20260908.1/${MGX_NAME}"
+    ) in script
+    mgx_sha = re.search(r"^MGX_SHA256=([0-9a-f]+)$", script, re.MULTILINE)
+    assert mgx_sha is not None
+    assert len(mgx_sha.group(1)) == 64
+    assert mgx_sha.group(1) == (
+        "ed1458c632eb2f0e2cab3c457aee93e39196cbb77d2180e47525e0009563dac1"
+    )
     assert "ef10e3e808e8805c26cc27f47572a53e385463f29d578e1ea2fe13d00e6f5ee0" in script
+    assert (
+        "https://github.com/harrysocool/sam3-tracker-rocm/releases/download/"
+        "v0.2.0-rc3/${ORT_NAME}"
+    ) in script
+
+    runtime_readme = (ROOT / "docker/rocm714/README.md").read_text()
+    assert "v2.17.0%2Bsam3-fc1sink.20260908.1" in runtime_readme
+    assert "sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc3-local" in runtime_readme
+    assert "sam3-gpu714-ort1242-mgx217-gfx1151:torch211" not in runtime_readme
 
 
 def test_model_build_enables_current_optimizations():
