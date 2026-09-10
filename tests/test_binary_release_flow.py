@@ -1,5 +1,6 @@
 """CPU-only guards for the download-binaries/build-models release flow."""
 
+import hashlib
 from pathlib import Path
 import re
 import shutil
@@ -62,13 +63,37 @@ def test_runtime_binary_locations_and_hashes_are_pinned():
     assert "ef10e3e808e8805c26cc27f47572a53e385463f29d578e1ea2fe13d00e6f5ee0" in script
     assert (
         "https://github.com/harrysocool/sam3-tracker-rocm/releases/download/"
-        "v0.2.0-rc3/${ORT_NAME}"
+        "v0.2.0-rc4/${ORT_NAME}"
     ) in script
 
     runtime_readme = (ROOT / "docker/rocm714/README.md").read_text()
     assert "v2.17.0%2Bsam3-fc1sink.20260908.1" in runtime_readme
-    assert "sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc3-local" in runtime_readme
+    assert "sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc4-local" in runtime_readme
     assert "sam3-gpu714-ort1242-mgx217-gfx1151:torch211" not in runtime_readme
+
+
+def test_repository_license_scope_is_explicit():
+    license_path = ROOT / "LICENSE"
+    assert hashlib.sha256(license_path.read_bytes()).hexdigest() == (
+        "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    )
+    assert "Hugging Face Transformers" in (ROOT / "NOTICE").read_text()
+    readme = (ROOT / "README.md").read_text()
+    assert "project-authored source code and documentation" in readme
+    assert "not licensed under Apache-2.0" in readme
+    assert "SAM License" in (ROOT / "model/sam3/LICENSE").read_text()
+
+
+def test_release_version_is_consistent():
+    version = "0.2.0-rc4"
+    assert (ROOT / "VERSION").read_text().strip() == version
+    for path in (
+        ROOT / "docker/rocm714/build.sh",
+        ROOT / "docker/rocm714/run.sh",
+        ROOT / "docker/rocm714/README.md",
+        ROOT / "tools/docker_test_runner.sh",
+    ):
+        assert version in path.read_text()
 
 
 def test_model_build_enables_current_optimizations():

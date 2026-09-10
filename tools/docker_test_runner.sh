@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 CHECKPOINT=""
 OUTPUT=""
-IMAGE="sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc3-local"
+IMAGE="sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc4-local"
 FRAMES=12
 MGX_ARCHIVE=""
 ORT_WHEEL=""

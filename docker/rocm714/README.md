@@ -60,7 +60,7 @@ The binary download cache defaults to `~/.cache/sam3-runtime-binaries/`.
 The final image defaults to:
 
 ```text
-sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc3-local
+sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc4-local
 ```
 
 ## Smoke test

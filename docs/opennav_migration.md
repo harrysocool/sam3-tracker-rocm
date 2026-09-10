@@ -3,6 +3,11 @@
 Reference upstream snapshot:
 `open-navigation/opennav_amd_semantic_navigation@5e82f4a458f9e97ddd92e2cf10feb2c3552295d3`.
 
+Licensed SAM3 source baseline: `v0.2.0-rc4`. Project-authored source and
+documentation are Apache-2.0; SAM Materials and third-party content retain
+their separately documented licenses. OpenNav should vendor code only from
+this license-bearing tag or a later one.
+
 ## Runtime and model setup
 
 OpenNav should use the same flow as this repository:

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-IMAGE="${SAM3_DOCKER_IMAGE:-sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc3-local}"
+IMAGE="${SAM3_DOCKER_IMAGE:-sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc4-local}"
 MODEL_DIR="${SAM3_MODEL_DIR:-${ROOT}/model/sam3}"
 ONNX_DIR="${SAM3_ONNX_DIR:-${ROOT}/onnx_files_504_mgx217}"
 OUTPUT_DIR="${SAM3_OUTPUT_DIR:-}"
