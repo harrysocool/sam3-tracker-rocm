@@ -1,34 +1,26 @@
-# SAM3 Video Tracker — ROCm / AMD
+# SAM3 Video Tracking on AMD GPUs
 
-Open-vocabulary video tracking and segmentation built on [SAM3](https://github.com/facebookresearch/sam3),
-optimized for AMD ROCm hardware. A **text prompt** like `"floor"` or `"person on a bike"`
-finds the target on frame 0 (or every Nth keyframe in streaming mode); SAM3 propagates
-the masks through subsequent frames.
+Text-prompted video segmentation and tracking on AMD ROCm, built on
+[Meta's SAM3](https://github.com/facebookresearch/sam3) and accelerated with
+MIGraphX. Describe a target, such as `"swan"` or `"person on a bike"`, to detect
+and track its masks through video.
 
-**Primary path** — streaming live API (`demo_live.py`), the deployment shape used by ROS / robotics
-consumers. It continuously drains the source, retains one newest frame, and runs full text detection
-on every consumed frame by default. No next-frame GPU work is launched ahead of the current result.
+The **streaming API prioritizes fresh observations**: it processes the newest
+available frame and runs full text detection on every consumed frame by
+default. Includes a video demo, a [ROS 2 integration skeleton](examples/README.md),
+and offline text- and box-prompt reference tools.
 
-Reference paths:
-- `tools/text_baseline.py` — offline batch text-prompt via HF `Sam3VideoModel` (debugging / regression)
-- `demo_box.py` — specialized: bounding-box prompt, skips detection, **12.21 FPS** propagation (single-object benchmark / interactive UI)
+<img src="docs/images/demo_swan_text_mig.gif" width="480" alt="Text-prompted swan segmentation across video frames">
 
-DAVIS 2017 val Mean J: **81.6%** (504px box-prompt).
-
-> **Hardware requirement**: AMD gfx1151 (Radeon 8060S / Ryzen AI Max+ 395) with ROCm 7.x.
-> Other AMD GPUs supporting ROCm may work but are untested.
->
-> **Supported optimized runtime**: `docker/rocm714/run.sh` with ROCm 7.14,
-> MIGraphX 2.17, and ORT 1.24.2. The host MIGraphX 2.16 environment is not a
-> supported performance/deployment path and cannot load the default fixed
-> decoder artifact.
-> The launcher defaults to `onnx_files_504_mgx217`, which combines the accepted
-> FC1-sink backbone and fixed DETR decoder without modifying legacy baselines.
+*Prompt: `"swan"`. Qualitative example from the offline text-prompt path, not a
+recording of the live performance benchmark.*
 
 ## Contents
 
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
 - [How it works](#how-it-works)
-- [Setup](#setup)
+- [Build reference](#build-reference)
 - [Run the demos](#run-the-demos)
 - [Results](#results)
 - [Performance](#performance)
@@ -36,6 +28,123 @@ DAVIS 2017 val Mean J: **81.6%** (504px box-prompt).
 - [Project structure](#project-structure)
 - [Known limitations](#known-limitations)
 - [Acknowledgements](#acknowledgements)
+- [License](#license)
+
+## Requirements
+
+| Component | Supported / required |
+|---|---|
+| Validated GPU | AMD Ryzen AI Max+ 395 / Radeon 8060S (`gfx1151`); other AMD GPUs are untested |
+| Host | Linux x86-64, with an AMDGPU driver exposing `/dev/kfd` and `/dev/dri` |
+| Tools | Docker with BuildKit, permission to run Docker, Git, and `curl` |
+| Network | Access to GitHub release assets, AMD package repositories, and Hugging Face for the checkpoint |
+| Runtime | ROCm **7.14**, MIGraphX **2.17**, ONNX Runtime **1.24.2**, installed inside the container |
+
+Use `docker/rocm714/run.sh` for the optimized GPU path. No host conda environment
+is needed. The host MIGraphX 2.16 stack is not supported for deployment and
+cannot load the current fixed-decoder artifact. See the
+[container guide](docker/rocm714/README.md) for exact dependency versions.
+
+## Quick start
+
+These steps use release **v0.2.0-rc4** and build the recommended **504px text / live
+pipeline**. Run the commands in Bash, in order, from the same shell. An existing
+checkout of this release or a compatible development branch can skip the clone.
+
+### 1. Get the source and checkpoint
+
+```bash
+git clone --branch v0.2.0-rc4 --depth 1 https://github.com/harrysocool/sam3-tracker-rocm.git
+cd sam3-tracker-rocm
+export SAM3_MODEL_DIR="$PWD/model/sam3"
+```
+
+The checkout includes model configuration and tokenizer files, **not weights**.
+Request access and accept the terms at
+[facebook/sam3](https://huggingface.co/facebook/sam3). With the
+[Hugging Face CLI](https://huggingface.co/docs/huggingface_hub/guides/cli) installed
+on the host, download the checkpoint separately:
+
+```bash
+hf auth login
+hf download facebook/sam3 model.safetensors --local-dir "$SAM3_MODEL_DIR"
+```
+
+Already have the checkpoint? Skip the download and set `SAM3_MODEL_DIR` to the
+absolute path of your complete model directory, containing `model.safetensors`
+alongside the config and tokenizer files. Do not redownload over an existing
+weight symlink. The weights remain subject to the separate SAM License.
+
+### 2. Assemble the runtime
+
+```bash
+./setup.sh --runtime
+```
+
+This downloads checksum-pinned MIGraphX and ORT binaries, installs AMD ROCm and
+Torch packages, and assembles a local Docker image. It does **not** compile the
+runtime stack or install ROCm on the host. The script checks GPU visibility and
+runtime versions after assembly.
+
+### 3. Build the model artifacts
+
+Choose a new artifact directory outside the checkout. To resume an interrupted
+build, reuse that same directory; do not point it at older runtime artifacts.
+
+```bash
+export SAM3_MODEL_BUILD_ROOT="$HOME/sam3-artifacts/gpu/build-0.2.0-rc4"
+export SAM3_ONNX_DIR="$SAM3_MODEL_BUILD_ROOT/onnx_files_504"
+./setup.sh --models "$SAM3_MODEL_DIR"
+```
+
+This exports ONNX and builds the 504px model artifacts inside the container,
+including the GPU-I/O backbone and fixed DETR decoder. The initial build is a
+one-time compilation step; completed export / compile steps are skipped on
+rerun. ORT modules also compile and cache graphs on first use, so the first demo
+startup can take longer than later runs.
+
+**Keep both runtime directory variables set when running demos.** The wrapper
+mounts host `SAM3_MODEL_DIR` at `/models/sam3` and host `SAM3_ONNX_DIR` at
+`/models/onnx_files_504`. In a new shell, re-export those two absolute paths.
+This explicit configuration does not depend on the development machine's
+`onnx_files_504_mgx217` symlink. ONNX/MXR artifacts and caches are built locally;
+no compiled SAM3 model bundle is downloaded.
+
+### 4. Verify the provider and run the demo
+
+```bash
+./docker/rocm714/run.sh python -c \
+  "import onnxruntime as o; print(o.__version__, o.get_available_providers())"
+```
+
+Expect **1.24.2** and **MIGraphXExecutionProvider** in the provider list. A
+VitisAI-only provider list is the NPU environment, not this GPU runtime.
+
+```bash
+./docker/rocm714/run.sh python demo_live.py \
+  --checkpoint /models/sam3 \
+  --video assets/blackswan.mp4 --text swan \
+  --max-frames 60
+```
+
+The bundled video simulates live arrivals. Output is saved on the host as
+`results/blackswan_live_<timestamp>.mp4`. By default, inference uses MIG,
+same-frame detector/tracker overlap, and the fixed decoder, with full detection
+on every consumed frame. **This command is a demo, not a benchmark.**
+
+`--max-frames` counts source frames, not output masks: stale waiting frames are
+replaced by newer arrivals. The output video contains emitted frames only and
+therefore plays faster than wall clock when frames are dropped. There is no
+next-frame GPU preprocessing or backbone lookahead in the live path.
+
+For camera / ROS input, use the [integration guide](examples/README.md);
+`demo_live.py` itself accepts a video file. See [Run the demos](#run-the-demos)
+for optional hybrid detection and the reference tools.
+
+> **Occupancy mapping:** preserve sensor exposure time separately from host
+> arrival time and reject stale results. Tracker-only output may add positive
+> occupied evidence, but missing masks must not clear free space. Use
+> `negative_evidence_valid` together with timestamp and result-age checks.
 
 ---
 
@@ -70,13 +179,15 @@ GPU preprocessing or backbone lookahead.
 
 ### Offline batch text-prompt (`tools/text_baseline.py`)
 
-Uses HF `Sam3VideoModel` directly with a fixed video session. Slower than the streaming
-path because SAM3 detection runs every frame, but it's the cleanest path against the
-upstream HF API — useful for debugging the wrapper and as a regression baseline.
+Uses HF `Sam3VideoModel` directly with a fixed video session, processing every
+selected video frame rather than replacing waiting frames with newer arrivals.
+Like the default live path, it runs SAM3 detection on every processed frame.
+Use it for offline output, debugging against the upstream HF API, and regression
+checks; its throughput is not a direct comparison with live output cadence.
 
-Pipeline: CLIP text encoder → ViT backbone → DETR encoder/decoder → SAM3 mask decoder
-on frame 0; backbone + memory_attention + mask_decoder on frames 1+. All three heavy
-modules (backbone, DETR encoder, memory attention) are MIG-accelerated.
+The text prompt is encoded once. Each frame runs the vision backbone and text
+detection, with memory-conditioned tracking on subsequent frames. The backbone,
+DETR encoder, and memory attention are MIG-accelerated when MIG is enabled.
 
 ### Specialized box-prompt (`demo_box.py`)
 
@@ -95,9 +206,9 @@ pixel_values ──► backbone.mxr ──► memory_attention (ORT MIG EP) ─�
 
 ---
 
-## Setup
+## Build reference
 
-The current release follows the original installation model:
+The [Quick start](#quick-start) connects these installation steps:
 
 1. Download checksum-pinned **precompiled runtime dependencies** (the
    [SAM3-specific MIGraphX 2.17 archive](https://github.com/harrysocool/AMDMIGraphX/releases/tag/v2.17.0%2Bsam3-fc1sink.20260908.1)
@@ -107,11 +218,6 @@ The current release follows the original installation model:
    compile rocMLIR, MIGraphX, ORT, or PyTorch.
 3. Obtain the SAM3 checkpoint separately under the SAM license.
 4. Export ONNX and compile the 504px SAM3 model artifacts locally.
-
-```bash
-./setup.sh --runtime
-./setup.sh --models /path/to/model/sam3
-```
 
 The model step builds the FC1-sink GPU-I/O backbone, DETR encoder, S1–S10
 memory-attention graphs, and fixed decoder. A complete clean-environment test
@@ -265,9 +371,11 @@ Three entry points — pick the one matching your use case:
 | `tools/text_baseline.py --mig` | text | Offline HF Sam3VideoModel, SAM3 every frame | **7.06** (1 obj) | debugging / regression baseline |
 | `demo_box.py` | bounding box | Tracking only (no detection) | **12.2** (single-object) | specialized: annotation / max-perf |
 
-All commands below assume you are in the project root. The optimized live path uses
-the pinned ROCm 7.14 / MIGraphX 2.17 container through `docker/rocm714/run.sh`.
-Host MIGraphX 2.16 is not a supported live/deployment runtime.
+All commands below assume you are in the project root. Live examples also
+require the `SAM3_MODEL_DIR` and `SAM3_ONNX_DIR` exports from the
+[Quick start](#quick-start). The optimized live path uses the pinned ROCm 7.14 /
+MIGraphX 2.17 container through `docker/rocm714/run.sh`. Host MIGraphX 2.16 is
+not a supported live/deployment runtime.
 
 ### Streaming live API (`demo_live.py`) — primary
 
@@ -279,12 +387,12 @@ mask for each frame selected by the bounded latest-frame scheduler.
 # Default optimized live path: MIG + parallel tail + fixed decoder + latest[1]
 ./docker/rocm714/run.sh python demo_live.py \
     --checkpoint /models/sam3 \
-    --video assets/office_hallway.mp4 --text floor wall
+    --video assets/blackswan.mp4 --text swan
 
-# Single-prompt live uses the same defaults
+# Multiple prompts use the same defaults
 ./docker/rocm714/run.sh python demo_live.py \
     --checkpoint /models/sam3 \
-    --video assets/blackswan.mp4 --text swan
+    --video assets/blackswan.mp4 --text swan water
 
 # Optional unified hybrid; all other optimized defaults remain enabled
 ./docker/rocm714/run.sh python demo_live.py \
