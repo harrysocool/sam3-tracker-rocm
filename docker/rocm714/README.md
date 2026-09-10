@@ -66,143 +66,72 @@ sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc4-local
 ## Smoke test
 
 `build.sh` checks GPU visibility and the imported runtime versions after image
-assembly. Model ONNX/MXR compilation is a separate local step:
+assembly. Model generation and inference checks are separate steps: follow
+[Quick start](../../README.md#quick-start), then the
+[installation smoke and regression guide](../../docs/evaluation.md).
 
-```bash
-./setup.sh --models /path/to/model/sam3
-```
+## Model artifacts and mounts
 
-The clean-environment runner assembles the image, builds model artifacts in a
-new directory, prewarms ORT caches, and runs full/hybrid smoke tests.
+For a fresh checkout, use the Quick start's explicit directory exports before
+building models. `setup.sh --models` does not create the development machine's
+`onnx_files_504_mgx217` symlink or persist variables into your shell.
+
+| Host setting | Container path / purpose |
+|---|---|
+| `SAM3_MODEL_DIR` | Complete checkpoint directory, mounted read-only at `/models/sam3` |
+| `SAM3_MODEL_BUILD_ROOT` | Output parent used by `setup.sh --models`; its `onnx_files_504` child is the runtime artifact directory |
+| `SAM3_ONNX_DIR` | Artifact directory mounted at `/models/onnx_files_504`; export the same child used for the model build |
+| `SAM3_OUTPUT_DIR` (optional) | An existing writable directory, mounted at `/output` |
+
+Without overrides, `run.sh` uses checkout `model/sam3` and
+`onnx_files_504_mgx217`. The latter is a development deployment link, not an
+artifact bundle included in a fresh clone. Legacy `onnx_files_504` is not the
+optimized default.
+
+The checkout is mounted at `/workspace`. The wrapper sets
+`SAM3_DEFAULT_ONNX_DIR=/models/onnx_files_504` for consumers such as live;
+offline tools may still require an explicit `--onnx-dir` and `--imgsz`.
+
+MIGraphX `.mxr` files and ORT caches are ABI-specific. Build them inside this
+image; never reuse host 2.16 artifacts or overwrite immutable baseline files.
+The default writable mode allows first-use ORT compilation beside the graphs.
+`SAM3_DOCKER_STRICT=1` disables networking and mounts the checkout/artifacts
+read-only, so prewarm caches first and use a writable output mount as needed.
 
 ## Run SAM3
 
-Set model and artifact directories if they live outside the checkout:
+With `SAM3_MODEL_DIR` and `SAM3_ONNX_DIR` still exported:
 
 ```bash
-export SAM3_MODEL_DIR=/path/to/model/sam3
-export SAM3_ONNX_DIR=/path/to/onnx_files_504
+./docker/rocm714/run.sh python demo_live.py \
+  --checkpoint /models/sam3 \
+  --video assets/blackswan.mp4 --text swan
 ```
 
-Without an override, `run.sh` uses the checkout symlink
-`onnx_files_504_mgx217`, which points at the assembled 2.17 production root.
-The legacy `onnx_files_504` directory is not the optimized default.
+The default is latest-frame full detection, with same-frame parallel tails and
+the available fixed 504px decoder. A missing or incompatible fixed decoder is
+not an accepted optimized deployment configuration; do not silently switch to
+the host runtime. Use `--no-fixed-detr-decoder` only for diagnosis.
 
-Open a shell:
+To open an interactive shell in the same configured environment:
 
 ```bash
 ./docker/rocm714/run.sh
 ```
 
-For a fresh checkout, create the 504px artifacts inside the assembled container:
-
-```bash
-./setup.sh --models /path/to/model/sam3
-```
-
-Run the text pipeline:
-
-```bash
-./docker/rocm714/run.sh python tools/text_baseline.py \
-  --checkpoint /models/sam3 \
-  --video assets/blackswan.mp4 \
-  --text swan \
-  --imgsz 504 \
-  --mig \
-  --parallel-tail \
-  --pipeline-backbone \
-  --onnx-dir /models/onnx_files_504 \
-  --max-frames 31 \
-  --output /workspace/demo_out/text/blackswan_rocm714.mp4
-```
-
-MIGraphX `.mxr` files and ORT caches are ABI-specific. Do not reuse artifacts
-built by the legacy ROCm 7.2/MIGraphX stack. Build them locally inside this
-image with the checked-in export pipeline.
-
-Run the default freshness-oriented live path:
-
-```bash
-./docker/rocm714/run.sh python demo_live.py \
-  --checkpoint /models/sam3 \
-  --video assets/blackswan.mp4 \
-  --text swan
-```
-
-For MIG 504px this automatically enables same-frame parallel detector/tracker
-tails and loads `detr_decoder_fixed/direct_gpuio.mxr`. A missing or incompatible
-fixed decoder is a deployment error for the optimized configuration; do not mix
-2.16 and 2.17 MXR artifacts.
-
-The default remains freshness-oriented full detection on every consumed frame.
-An explicitly positive interval enables the optional unified hybrid:
-
-```bash
-./docker/rocm714/run.sh python demo_live.py \
-  --checkpoint /models/sam3 \
-  --video assets/blackswan.mp4 \
-  --text swan \
-  --redetect-interval-ms 1000
-```
-
-This path uses one `SAM3Live` model and at most one active inference session.
-Before every wall-clock keyframe it creates a fresh inner session, reuses the
-encoded prompt tensors, and associates the fresh detections with stable public
-IDs by same-prompt mask IoU. The same model then performs native detector-skip
-tracking between keyframes. It does not instantiate the separate
-`SAM3OnnxTracker` backbone and does not load its legacy MIGraphX 2.16 artifacts.
-If tracker-only output loses an object, the request for full detection is
-sticky until the next consumed frame. Inspect `lost_object_ids` and
-`redetect_reason` in the result, and use `negative_evidence_valid` as the
-clearing gate. `redetect_reason` is one of `first_frame`, `interval`,
-`caller_override`, `inner_forced`, `object_loss`, `reset_prompts`,
-`reset_tracking`, `detection_retry`, or `None`.
-
-For occupancy mapping, tracker-only output (`detected=False`) is positive-only
-evidence: present masks may mark occupied space, but missing masks must not
-clear free space. Apply negative/free-space clearing only from a non-stale full
-detection result (`detected=True`).
+See [usage](../../docs/usage.md) for multiple prompts, optional hybrid detection,
+offline reference commands, and their different defaults. For occupancy
+mapping, preserve exposure timestamps, apply an age budget, and never clear
+free space from tracker-only absence; see the
+[integration guide](../../examples/README.md).
 
 ## Validated result
 
-On Ryzen AI Max+ 395 / gfx1151, 504 px, `blackswan.mp4`, prompt `swan`:
+Measurements, dates, aggregation windows, model identities, and correctness
+scope are maintained in one place: [performance records](../../docs/performance.md).
+The default-live 9.13 Hz reference, optional-hybrid runs, and earlier offline
+FPS values are different workloads, not interchangeable benchmarks.
 
-- profile mean: 111.65 ms/frame
-- default latest-frame + fixed decoder: 9.1275 Hz, age p95 152.73 ms
-- clean-keyframe unified hybrid headless, one object, 250 arrivals at 24 FPS:
-  10.4719/10.4724/10.4749 Hz across three runs, 110 outputs per run,
-  approximately 95.45 ms mean service time, and 135.63-137.76 ms frame-age p95
-- propagation: 8.51 FPS
-- offline propagation with `--parallel-tail`: 8.93-9.09 FPS (median 9.03)
-- propagation with `--parallel-tail --pipeline-backbone`: 10.21-10.27 FPS
-- two consecutive 30-frame regressions: mean IoU 0.9941, min IoU 0.9893
-
-The multi-object unified-hybrid matrix uses
-`two_person_dog_lawn.mp4`, 300 arrivals at 25 FPS, and no overlay/video
-encoding:
-
-| Prompts | Representative objects/output | Output rate | Service mean | Age p50/p95 |
-|---|---:|---:|---:|---:|
-| `people` | 2 | 9.4621 Hz | 105.60 ms | 126.91/150.74 ms |
-| `people,dog` | 3 | 8.3682 Hz | 119.44 ms | 139.49/172.52 ms |
-| `people,dog,lawn,sidewalk` | 6–7 | 6.2287 Hz | 160.47 ms | 178.26/237.65 ms |
-
-Prompt count alone is not the scaling variable; retained object count drives
-much of the tracker cost. All three matrix runs reported zero propagation-frame
-object-loss events.
-
-A separate 50-frame `office_hallway_two_way` check compared clean hybrid
-propagation with full SAM3 on every frame. Floor union IoU mean/min was
-0.981233/0.949965 and wall was 0.963659/0.933420; false-free rates were 1.4169%
-and 1.7963%, respectively. A tracker loss on frame 47 triggered sticky
-recovery on the next frame. These figures are workload-specific bounds.
-Tracker-only output remains positive-only evidence regardless of this result.
-
-A 120-keyframe no-GC fresh-session soak showed no sustained growth: Torch
-allocated memory changed by about +508 KB, reserved memory by +4 MiB, and
-process RSS by +72 KiB, with all metrics flat after iteration 10. See
-`/home/amd/project/sam3-artifacts/gpu/experiments/unified-reset-soak/REPORT.md`.
-
-The host setup is retained for source diagnostics and unrelated projects, not
-as a second supported SAM3 deployment path. This container is the reproducible
-ROCm 7.14 optimization and production path.
+Use [release validation](../../docs/evaluation.md#clean-environment-release-validation)
+to test a new binary assembly and local model build. The host runtime remains
+available only for unrelated projects/source diagnostics, not SAM3 deployment.

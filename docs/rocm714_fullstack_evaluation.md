@@ -1,5 +1,11 @@
 # ROCm 7.14 Full-Stack Evaluation on gfx1151
 
+> **Historical offline evaluation, August 2026.** This report predates default
+> latest-frame live and the fixed-decoder integration. Statements about an
+> optional container or a native compatibility default describe that period,
+> not current support. Use [Quick start](../README.md#quick-start) for deployment
+> and [performance records](performance.md) for live measurements.
+
 **Evaluation dates:** 2026-08-25 to 2026-08-27
 **Hardware:** AMD Ryzen AI Max+ 395 / Radeon 8060S (`gfx1151`)
 **Workload:** `assets/blackswan.mp4`, prompt `swan`, 504 px, 30 propagation frames
@@ -49,8 +55,10 @@ sam3-gpu714-ort1242-mgx217-gfx1151:torch211
 sha256:c3101960a75b6ee376bbb59ac071a5c57f51a109e220e3a2ae06bc9e037799b9
 ```
 
-The full from-source build and runtime instructions are in
-`docker/rocm714/README.md`.
+This experiment assembled its original runtime from source. Current
+binary-based installation is documented in the
+[container guide](../docker/rocm714/README.md); the experiment commands and
+paths below are provenance, not the current setup procedure.
 
 ## PyTorch gfx1151 compatibility
 

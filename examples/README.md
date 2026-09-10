@@ -4,6 +4,10 @@ This directory shows the deployment shape for a camera, ROS 2 image topic, or
 other real-time source. The primary example is
 [ros_node_skeleton.py](ros_node_skeleton.py).
 
+Complete the [Quick start](../README.md#quick-start) first. The standalone
+commands below use the supported container with `SAM3_MODEL_DIR` and
+`SAM3_ONNX_DIR` exported to the model and MIGraphX 2.17 artifact directories.
+
 The design optimizes observation freshness for occupancy-grid updates:
 
     camera callback
@@ -126,9 +130,9 @@ Other `redetect_reason` values are `first_frame`, `interval`,
 `caller_override`, `inner_forced`, `reset_prompts`, `reset_tracking`,
 `detection_retry`, and `None`.
 
-The previously measured single-prompt full-detection reference on the target
-machine was roughly 8.1-8.4 Hz with about 139 ms mean frame age. Treat that as a
-reference, not a deadline guarantee. Re-measure p50, p95, and p99 age with the
+Recorded full-detection and hybrid rates have different workloads and warmup
+windows; see [performance records](../docs/performance.md). Treat them as
+references, not deadline guarantees. Re-measure p50, p95, and p99 age with the
 complete robot stack sharing the GPU.
 
 ## 4. Detection policy
@@ -137,8 +141,8 @@ The example defaults to AlwaysFull. Every frame that survives latest-frame
 selection requests the text detector:
 
     node = SAM3Node(
-        checkpoint="model/sam3",
-        onnx_dir="onnx_files_504",
+        checkpoint="/models/sam3",
+        onnx_dir="/models/onnx_files_504",
         prompts=["person", "vehicle", "obstacle"],
         policy=AlwaysFull(),
         imgsz=504,
@@ -157,35 +161,10 @@ AlwaysFull is the recommended default for the full-text occupancy workload.
 Tracker-heavy policies need their own map-quality regression because source
 frames can be skipped.
 
-For reference, the clean-keyframe unified hybrid measured
-10.4719/10.4724/10.4749 Hz across three runs on the canonical
-`blackswan.mp4`/`swan` one-object headless workload (110 outputs from 250
-arrivals per run at 24 FPS). Mean service time was approximately 95.45 ms and
-frame-age p95 ranged from 135.63 to 137.76 ms.
-On `two_person_dog_lawn.mp4` with 300 arrivals at 25 FPS and no rendering, the
-measured rates were:
-
-| Prompts | Representative objects/output | Output rate | Service mean | Age p50/p95 |
-|---|---:|---:|---:|---:|
-| `people` | 2 | 9.4621 Hz | 105.60 ms | 126.91/150.74 ms |
-| `people,dog` | 3 | 8.3682 Hz | 119.44 ms | 139.49/172.52 ms |
-| `people,dog,lawn,sidewalk` | 6–7 | 6.2287 Hz | 160.47 ms | 178.26/237.65 ms |
-
-These workloads are not interchangeable: active object count, not prompt count
-alone, drives much of the tracker cost. None changes the default AlwaysFull
-freshness policy.
-
-On a separate 50-frame `office_hallway_two_way` comparison with full SAM3 on
-every frame, clean-hybrid propagation produced floor union IoU mean/min
-0.981233/0.949965 and wall 0.963659/0.933420. False-free rates were 1.4169% and
-1.7963%, respectively. Treat these as workload-specific bounds; they do not
-make negative evidence valid on tracker-only frames.
-
-A 120-keyframe no-GC fresh-session soak found no sustained memory growth:
-Torch allocated memory increased by about 508 KB, reserved memory by 4 MiB,
-and process RSS by 72 KiB, with all three plateauing after iteration 10. The
-full record is
-`/home/amd/project/sam3-artifacts/gpu/experiments/unified-reset-soak/REPORT.md`.
+The [hybrid measurements and resource checks](../docs/performance.md#optional-hybrid-live-reference)
+record single/multi-object scaling, the real-scene quality comparison, and the
+fresh-session soak. Those checks do not make tracker-only output valid
+negative evidence or replace a long-stream reset policy.
 
 ## 5. Prompt reset and generations
 
@@ -227,9 +206,9 @@ closing LatestFramePipeline cannot unblock a driver call that it does not own.
 The example reads at the video file's declared FPS instead of processing the
 file as fast as possible:
 
-    python examples/ros_node_skeleton.py \
-        --checkpoint model/sam3 \
-        --onnx-dir onnx_files_504 \
+    ./docker/rocm714/run.sh python examples/ros_node_skeleton.py \
+        --checkpoint /models/sam3 \
+        --onnx-dir /models/onnx_files_504 \
         --video assets/blackswan.mp4 \
         --text swan \
         --policy always_full \
