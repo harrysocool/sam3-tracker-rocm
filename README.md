@@ -691,3 +691,24 @@ sam3-tracker-rocm/
 - **DART**: the `sam3_tracker_video` model class originates from the
   [DART](https://arxiv.org/abs/2603.11441) project's transformers fork, since merged
   into HuggingFace Transformers (≥ 5.7.0).
+
+---
+
+## License
+
+Unless otherwise noted, project-authored source code and documentation in this
+repository are licensed under the Apache License, Version 2.0; see
+[LICENSE](LICENSE). Required upstream attribution is recorded in
+[NOTICE](NOTICE).
+
+The SAM model metadata and tokenizer files under `model/sam3/` are SAM
+Materials and remain subject to the separate
+[SAM License](model/sam3/LICENSE). Model checkpoints are not included and must
+be obtained separately under their applicable license.
+
+Media and generated or evaluation artifacts under `assets/`, `docs/images/`,
+and `results/` are not licensed under Apache-2.0 unless a file is explicitly
+marked otherwise; they retain their respective source copyrights and terms.
+External dependencies, downloaded binaries, datasets, model weights, and
+locally generated ONNX/MXR artifacts retain their own licenses and are not
+relicensed by this repository.
