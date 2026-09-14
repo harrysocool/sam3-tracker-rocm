@@ -7,8 +7,8 @@ and track its masks through video.
 
 The **streaming API prioritizes fresh observations**: it processes the newest
 available frame and runs full text detection on every consumed frame by
-default. Includes a video demo, a [ROS 2 integration skeleton](examples/README.md),
-and offline text- and box-prompt reference tools.
+default. It includes a video demo, a [ROS 2 integration skeleton](examples/README.md),
+and an offline text-prompt reference tool.
 
 <img src="docs/images/demo_swan_text_mig.gif" width="480" alt="Text-prompted swan segmentation across video frames">
 
@@ -189,7 +189,11 @@ Full detection on every consumed frame remains the default.
 |---|---|---|
 | `demo_live.py` / `SAM3Live` | Freshness-first streaming, one or more prompts | [Live usage](docs/usage.md#live-video) |
 | `tools/text_baseline.py` | Offline text-prompt reference and regression | [Offline usage](docs/usage.md#offline-text-reference) |
-| `demo_box.py` | Specialized single-object tracking; separate artifacts required | [Box reference](docs/usage.md#box-prompt-reference) |
+
+The legacy `demo_box.py` / `SAM3OnnxTracker` path is retained for historical
+box-prompt and DAVIS regression work. It requires a separate artifact set that
+`setup.sh --models` does not build, and it is outside the supported release
+smoke. See the [archived box reference](docs/usage.md#box-prompt-reference).
 
 See the [usage guide](docs/usage.md) for parameters, output files, diagnostic
 flags, and additional visual examples. Camera / ROS integrations should follow
