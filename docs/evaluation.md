@@ -44,7 +44,9 @@ Inspect the JSON's `passed` result and loaded-default records; do not report
 its timing as live throughput.
 
 The CPU-only release-flow guards can run with host Python and pytest; they
-do not load a model or select a GPU/NPU provider:
+do not load a model or select a GPU/NPU provider. Install pytest separately on
+the host if needed: it is an optional developer dependency, not included in
+the runtime image or required by Quick start:
 
 ```bash
 python3 -m pytest -q tests/test_binary_release_flow.py

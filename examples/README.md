@@ -155,6 +155,12 @@ Optional policies remain available:
 - PeriodicRedetect: request detection every N source arrivals;
 - OnDemandTrigger: an external service arms one detection.
 
+These policies operate on the skeleton's direct `SAM3Live` backend. They
+schedule detection requests; they do not install `SAM3HybridLive` or its
+clean-session replacement and public-ID association. Selecting `time_based`
+here is not equivalent to the demo's clean-keyframe hybrid mode and does not
+reproduce its reported performance.
+
 Detection requests are sticky across latest-slot replacement, so dropping the
 particular camera frame that carried a trigger does not lose the trigger.
 AlwaysFull is the recommended default for the full-text occupancy workload.

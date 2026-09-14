@@ -33,7 +33,8 @@ recording of the live performance benchmark.*
 | Validated GPU | AMD Ryzen AI Max+ 395 / Radeon 8060S (`gfx1151`); other AMD GPUs are untested |
 | Host | Linux x86-64, with an AMDGPU driver exposing `/dev/kfd` and `/dev/dri` |
 | Tools | Docker with BuildKit, permission to run Docker, Git, and `curl` |
-| Network | Access to GitHub release assets, AMD package repositories, and Hugging Face for the checkpoint |
+| Network | Access to Docker Hub, GitHub releases, AMD repositories, PyPI, and Hugging Face for the checkpoint |
+| Disk | At least 30 GiB free; 40 GiB is recommended for clean rebuilds and validation |
 | Runtime | ROCm **7.14**, MIGraphX **2.17**, ONNX Runtime **1.24.2**, installed inside the container |
 
 Use `docker/rocm714/run.sh` for the optimized GPU path. No host conda environment
@@ -82,6 +83,12 @@ Torch packages, and assembles a local Docker image. It does **not** compile the
 runtime stack or install ROCm on the host. The script checks GPU visibility and
 runtime versions after assembly.
 
+Pip may report that the gfx1151 Torch wheel requires the Python
+`rocm[libraries]` package. This warning is expected: the image deliberately uses
+the system ROCm 7.14 libraries instead, with the included `rocm_sdk`
+compatibility module. Treat the final GPU/provider smoke result, not that
+resolver warning, as the runtime assembly result.
+
 ### 3. Build the model artifacts
 
 Choose a new artifact directory outside the checkout. To resume an interrupted
@@ -106,7 +113,7 @@ This explicit configuration does not depend on the development machine's
 `onnx_files_504_mgx217` symlink. ONNX/MXR artifacts and caches are built locally;
 no compiled SAM3 model bundle is downloaded.
 
-### 4. Verify the provider and run the demo
+### 4. Verify the installation and run the demo
 
 ```bash
 ./docker/rocm714/run.sh python -c \
@@ -115,6 +122,22 @@ no compiled SAM3 model bundle is downloaded.
 
 Expect **1.24.2** and **MIGraphXExecutionProvider** in the provider list. A
 VitisAI-only provider list is the NPU environment, not this GPU runtime.
+
+```bash
+./docker/rocm714/run.sh python tools/smoke_live_release.py \
+  --checkpoint /models/sam3 \
+  --onnx-dir /models/onnx_files_504 \
+  --video assets/blackswan.mp4 --text swan \
+  --frames 12 --mode both \
+  --output results/perf/installation-smoke.json
+```
+
+Expect `Installation smoke PASS`. This verifies that full and hybrid inference
+produce valid, non-empty outputs and that the optimized fixed decoder and
+parallel tail load correctly. The smoke runs frames synchronously and is not a
+throughput benchmark.
+
+Run the source-paced demo after the smoke passes:
 
 ```bash
 ./docker/rocm714/run.sh python demo_live.py \
@@ -220,6 +243,7 @@ Use the [evaluation guide](docs/evaluation.md) for checks and measurement scope.
   tracking only after stopping the active pipeline; see the integration guide.
 
 ---
+
 ## Acknowledgements
 
 - **SAM3**: [facebookresearch/sam3](https://github.com/facebookresearch/sam3) — model weights

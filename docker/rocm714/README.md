@@ -37,7 +37,10 @@ covered by the smoke test and the SAM3 regression described below.
 
 - Linux x86-64 host with Docker and BuildKit
 - AMD gfx1151 GPU exposed as `/dev/kfd` and `/dev/dri`
-- Network access to the release assets and AMD package repositories
+- Network access to Docker Hub, GitHub release assets, AMD package
+  repositories, and PyPI; Hugging Face access for the separate checkpoint
+- At least 30 GiB of free disk space; 40 GiB is recommended for clean rebuilds
+  and release validation
 
 ## Assemble from precompiled dependencies
 
@@ -54,6 +57,12 @@ MIGRAPHX_ARCHIVE=/path/to/migraphx.tar.gz \
 ORT_WHEEL_PATH=/path/to/onnxruntime_migraphx.whl \
 ./docker/rocm714/build.sh
 ```
+
+Pip emits a resolver warning because the gfx1151 Torch wheel declares the
+Python `rocm[libraries]` package while this image deliberately supplies ROCm
+7.14 through system packages. The included `rocm_sdk` compatibility module
+prevents Python-packaged ROCm 7.13 libraries from being loaded. A successful
+GPU/provider smoke at the end of `build.sh` is the acceptance signal.
 
 The binary download cache defaults to `~/.cache/sam3-runtime-binaries/`.
 

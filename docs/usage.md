@@ -134,8 +134,11 @@ Output defaults to `demo_out/text/<input-stem>_text.{jpg,mp4}`; override with
 `"a person on a bike"`.
 
 - `--min-score` defaults to 0.5.
-- `--max-objects` defaults to 0 (all qualifying objects); a positive cap selects
-  objects by frame-0 detection score, rather than live's per-prompt cap.
+- `--max-objects` defaults to 0 (all qualifying objects); a positive value
+  limits the frame-0 selection by detection score. Video output can include
+  additional qualifying objects later, so this is not a persistent limit on
+  session size, per-frame output, or compute. It differs from live's per-prompt
+  cap.
 - `--parallel-tail` is opt-in here and requires `--mig`.
 - `--pipeline-backbone` additionally requires video input and `--parallel-tail`.
   It overlaps frame N+1's stateless backbone with frame N's tail, adds pipeline
