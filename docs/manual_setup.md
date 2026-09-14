@@ -1,7 +1,13 @@
 # Manual Setup Guide
 
-Step-by-step installation instructions for the SAM3 video tracker on AMD ROCm.
-Most users should use [`setup.sh`](../setup.sh) instead — it automates all steps below.
+> **Historical host-install guide.** These steps describe the former ROCm 7.2 /
+> conda environment, not the current supported runtime. The current `setup.sh`
+> does not automate these steps. Some commands require older source revisions;
+> do not use this page as a fallback for the optimized live path.
+>
+> Start with [Quick start](../README.md#quick-start) for the supported ROCm 7.14 /
+> MIGraphX 2.17 container. Historical context is in the
+> [legacy-runtime archive](historical/legacy-runtime.md).
 
 ---
 
@@ -39,7 +45,7 @@ We refer to the resulting build as **`MIGraphX 2.15+patches`**.
 | **Install prebuilt tarball** | **8.21 / 2.31 FPS** | ~2 min — download release asset, run install script |
 | Build patched from source | 8.21 / 2.31 FPS | ~30 min — for non-`gfx1151` GPUs or different ROCm/Python |
 
-Both prebuilt and source paths are documented in [`docs/build_migraphx_patched.md`](docs/build_migraphx_patched.md).
+Both prebuilt and source paths are documented in [`docs/build_migraphx_patched.md`](build_migraphx_patched.md).
 Patched source lives in the fork: [`harrysocool/AMDMIGraphX` branch `fix/offload-copy-contiguous-output`](https://github.com/harrysocool/AMDMIGraphX/tree/fix/offload-copy-contiguous-output) (both patches stacked).
 
 ### 1. Install ROCm SDK + PyTorch for gfx1151
@@ -78,7 +84,7 @@ export MIGRAPHX_GPU_HIP_FLAGS="-Wno-error -Wno-lifetime-safety-intra-tu-suggesti
 > **BIOS tip (128 GB systems)**: set *UMA Frame Buffer Size* to **64 GB** in BIOS.
 > This maximises the GPU's fast non-coherent memory pool. Setting it to 128 GB
 > starves the OS and paradoxically reduces GPU bandwidth. See
-> [`docs/project_summary.md`](docs/project_summary.md) Finding #7 for details.
+> [`docs/project_summary.md`](project_summary.md) Finding #7 for details.
 
 Verify:
 ```bash

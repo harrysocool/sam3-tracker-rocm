@@ -87,12 +87,28 @@ def parse_args():
                         "and per-frame backbone). Reads <onnx-dir>/backbone_detector/tuned.mxr "
                         "(build with: python export/backbone/export_backbone_single.py "
                         "--backbone-source detector + simplify + compile).")
+    p.add_argument(
+        "--parallel-tail",
+        action="store_true",
+        help="Overlap detector and tracker tails on two HIP streams. Requires --mig.",
+    )
+    p.add_argument(
+        "--pipeline-backbone",
+        action="store_true",
+        help="Prefetch the next frame's backbone. Requires video and --parallel-tail.",
+    )
     p.add_argument("--onnx-dir", type=Path, default=Path("onnx_files_1008"),
                    help="Resolution root (e.g. onnx_files_1008). The MIG path reads "
                         "<onnx-dir>/backbone_detector/{single_simplified.onnx,tuned.mxr}.")
     args = p.parse_args()
     if (args.image is None) == (args.video is None):
         sys.exit("Pass exactly one of --image or --video")
+    if args.parallel_tail and not args.mig:
+        sys.exit("--parallel-tail requires --mig")
+    if args.pipeline_backbone and not args.parallel_tail:
+        sys.exit("--pipeline-backbone requires --parallel-tail")
+    if args.pipeline_backbone and args.video is None:
+        sys.exit("--pipeline-backbone requires --video")
     return args
 
 
@@ -229,6 +245,7 @@ def main():
         mxr = MIGraphXBackbone(
             onnx_path=det_dir / "single_simplified.onnx",
             cache_path=det_dir / "tuned.mxr",
+            gpu_io_cache_path=det_dir / "tuned_gpuio.mxr",
         )
         mxr.warmup(n=2)
         patch_sam3_video_model_with_mig(model, mxr)
@@ -270,6 +287,13 @@ def main():
         from tracker.batched_mask_decoder import patch_batched_mask_decoder
         patch_batched_mask_decoder(model)
         print(f"  Batched mask_decoder patch applied (active for N>1 obj)")
+
+        if args.parallel_tail:
+            from tracker.parallel_video import patch_parallel_video_tail
+            patch_parallel_video_tail(model)
+            print("  Parallel detector/tracker tail enabled")
+            if args.pipeline_backbone:
+                print("  Cross-frame backbone prefetch enabled")
 
     # Collect frames
     if args.image is not None:
@@ -358,27 +382,45 @@ def main():
     n_total = len(frames_pil)
     print(f"Propagating through frames 1..{n_total - 1} ...")
     t_prop = time.perf_counter()
-    for i in range(1, n_total):
-        with torch.inference_mode():
-            out = model(inference_session=session, frame_idx=i)
-        obj_map = out.obj_id_to_mask or {}
-        score_map = out.obj_id_to_score or {}
-        # Include all objects the model is currently tracking, not just the
-        # original frame-0 set. Sam3VideoModel runs detection every frame and
-        # adds newly confirmed objects (after hotstart_delay≈15 frames) to
-        # out.object_ids automatically — this is re-detection for free.
-        all_ids = set(obj_map.keys()) | set(out.object_ids or [])
-        objs = [
-            (obj_map[j], float(score_map.get(j, 0.0)), j)
-            for j in all_ids
-            if j in obj_map and (
-                j in tracked or float(score_map.get(j, 0.0)) >= args.min_score
+
+    def serial_outputs():
+        for frame_idx in range(1, n_total):
+            with torch.inference_mode():
+                output = model(inference_session=session, frame_idx=frame_idx)
+            yield frame_idx, output
+
+    def consume_outputs(outputs):
+        for frame_idx, output in outputs:
+            obj_map = output.obj_id_to_mask or {}
+            score_map = output.obj_id_to_score or {}
+            # Include all objects the model is currently tracking, not just
+            # the original frame-0 set. Sam3VideoModel runs detection every
+            # frame and may add newly confirmed objects after hotstart.
+            all_ids = set(obj_map.keys()) | set(output.object_ids or [])
+            objs = [
+                (obj_map[j], float(score_map.get(j, 0.0)), j)
+                for j in all_ids
+                if j in obj_map and (
+                    j in tracked or float(score_map.get(j, 0.0)) >= args.min_score
+                )
+            ]
+            writer.write(
+                overlay(frames_bgr[frame_idx], objs, args.text, frame_idx=frame_idx)
             )
-        ]
-        writer.write(overlay(frames_bgr[i], objs, args.text, frame_idx=i))
-        if i % 20 == 0:
-            elapsed = time.perf_counter() - t_prop
-            print(f"  frame {i}/{n_total - 1}  ({i / elapsed:.1f} prop FPS)")
+            if frame_idx % 20 == 0:
+                elapsed = time.perf_counter() - t_prop
+                print(
+                    f"  frame {frame_idx}/{n_total - 1}  "
+                    f"({frame_idx / elapsed:.1f} prop FPS)"
+                )
+
+    if args.pipeline_backbone:
+        from tracker.backbone_pipeline import BackbonePrefetchPipeline
+
+        with BackbonePrefetchPipeline(model, session) as pipeline:
+            consume_outputs(pipeline.run(range(1, n_total)))
+    else:
+        consume_outputs(serial_outputs())
     if device.type == "cuda":
         torch.cuda.synchronize()
     writer.release()

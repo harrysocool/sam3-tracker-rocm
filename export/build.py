@@ -5,8 +5,8 @@ Two pipelines, pick one or both:
 
   box   — SAM3OnnxTracker (demo_box.py): tracker modules + MIGraphX backbone
             ~10 min @504px / ~20 min @1008px
-  text  — Sam3VideoModel (tools/text_baseline.py --mig): detector backbone + DETR encoder
-            + padded memory_attention
+  text  — Sam3VideoModel: FC1-sink detector backbone + DETR encoder,
+            padded memory_attention, and the fixed 504px DETR decoder
             ~18 min @504px / ~30 min @1008px
 
 Usage:
@@ -32,7 +32,6 @@ from __future__ import annotations
 
 
 import argparse
-import os
 import subprocess
 import sys
 import time
@@ -182,10 +181,6 @@ def build_text(imgsz: int, args) -> bool:
 # Final demo hints
 # ─────────────────────────────────────────────────────────────────────────────
 
-_rocm_base = os.environ.get("ROCM_PATH", "/opt/rocm-7.2.0").rstrip("/")
-LD = (f"LD_PRELOAD=" + _rocm_base + "/lib/libmigraphx_c.so.3:"
-      f"{_rocm_base}/lib/migraphx/lib/libmigraphx.so.2016000.0")
-
 def print_hints(pipeline: str, imgsz_list: list[int], checkpoint: Path) -> None:
     banner("Done — next steps")
     first = imgsz_list[0]
@@ -193,17 +188,16 @@ def print_hints(pipeline: str, imgsz_list: list[int], checkpoint: Path) -> None:
     if pipeline in ("box", "all"):
         print(f"""
 {B}Box-prompt demo:{NC}
-  python demo_box.py --checkpoint {checkpoint} --onnx-dir onnx_files_{first} \\
+  ./docker/rocm714/run.sh python demo_box.py --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \\
       --video YOUR_VIDEO.mp4 --box x1,y1,x2,y2
 """)
 
     if pipeline in ("text", "all"):
         print(f"""\
 {B}Text-prompt demo (MIG-accelerated):{NC}
-  {LD} \\
-      python tools/text_baseline.py --checkpoint {checkpoint} \\
-          --video YOUR_VIDEO.mp4 --text "object" \\
-          --imgsz {first} --mig --onnx-dir onnx_files_{first}
+  SAM3_ONNX_DIR="$PWD/onnx_files_{first}" ./docker/rocm714/run.sh \\
+      python demo_live.py --checkpoint /models/sam3 \\
+          --video YOUR_VIDEO.mp4 --text "object"
 """)
 
 
@@ -225,7 +219,7 @@ def parse_args():
                    help="Rebuild even if output files already exist")
     p.add_argument("--steps", nargs="+", default=["all"],
                    help=("Limit to specific stages. Box: tracker_modules, backbone, prewarm. "
-                         "Text: backbone, detr_encoder, memory_attention."))
+                         "Text: backbone, detr_encoder, memory_attention, fixed_decoder."))
     p.add_argument("--ptr-tokens", type=int, default=None,  # 504→64, 1008→48
                    help="Pointer token slots for memory_attention. Default: 64 at 504px, 48 at 1008px (highest safe K per kernel cliff). Set explicitly to override.")
     return p.parse_args()

@@ -1,13 +1,25 @@
 # SAM3 Video Tracking on AMD Ryzen AI Max+ 395 — Project Summary
 
+> **Historical optimization summary.** This report spans earlier native and
+> offline experiments. Its host-default and optional-container descriptions
+> are superseded: current live deployment uses only the ROCm 7.14 / MIGraphX
+> 2.17 container. See [Quick start](../README.md#quick-start) and the
+> [separated performance records](performance.md) for current usage and context.
+
 **Hardware**: AMD Ryzen AI Max+ 395 (gfx1151), 128GB unified memory (UMA=64GB GPU pool)
 **Task**: Open-vocabulary video tracking (text-prompt) + mask-level tracking (box-prompt)
 
 | Pipeline | 504px FPS | 1008px FPS |
 |---|---|---|
 | Box-prompt (`demo_box.py`) | **12.21** | **3.22** |
-| Text-prompt MIG (`tools/text_baseline.py --mig`) | **5.5** | **~1.5** |
+| Text-prompt MIG, pipelined offline (ROCm 7.14 Docker) | **10.78** | — |
+| Text-prompt MIG, parallel tail (ROCm 7.14 Docker) | **9.03** | — |
+| Text-prompt MIG (ROCm 7.14 Docker) | **8.51** | — |
+| Text-prompt MIG (native compatibility stack) | **7.06** | **~1.5** ¹ |
 | Text-prompt PyTorch | 2.6 | 0.52 |
+
+¹ 1008px has not yet been rebuilt with the GPU-I/O artifact and retains the
+host-I/O baseline.
 
 ---
 
@@ -24,6 +36,16 @@
 
 > **Dual ROCm stack**: nightly pip wheels (ROCm 7.13) provide gfx1151 PyTorch support;
 > stable APT (ROCm 7.2) provides MIGraphX. Both coexist via `LD_PRELOAD`.
+
+The optional gfx1151 Docker path uses ROCm 7.14, MIGraphX 2.17 at commit
+`9f1a138`, and a source-built ONNX Runtime 1.24.2 MIGraphX EP. It reaches
+111.65 ms/frame in the module profile and 8.51 FPS end-to-end. The native
+stack remains the compatibility default. Opt-in detector/tracker tail overlap
+raises the median end-to-end result to 9.03 FPS; preloaded-video backbone
+lookahead plus per-instance position-encoding caching raises it further to
+10.78 FPS. See
+[`rocm714_fullstack_evaluation.md`](rocm714_fullstack_evaluation.md) and
+[`../docker/rocm714/README.md`](../docker/rocm714/README.md).
 
 ---
 
@@ -45,14 +67,14 @@ Input frame
 
 ```
 Input frame
-  → backbone_detector/tuned.mxr  [MIGraphX 2.15+patches, MLIR attn, FP16]   ~97ms / ~378ms
+  → backbone_detector/tuned_gpuio.mxr [MIGraphX, MLIR attn, GPU I/O]        ~67ms / unmeasured
   → tracker_neck                 [PyTorch]                                      ~4ms /  ~23ms
-  → detr_encoder                 [ORT MIGraphX EP, FP16] ¹                    ~12ms /  ~64ms
+  → detr_encoder                 [ORT MIGraphX EP, FP16, GPU I/O] ¹             ~7ms /  ~64ms
   → detr_decoder                 [PyTorch]                                     ~11ms /  ~25ms
-  → memory_attention             [ORT MIGraphX EP, FP16, padded S7×P32] ¹     ~19ms / ~139ms
+  → memory_attention             [ORT MIGraphX EP, FP16, S1…S10 GPU I/O] ¹     ~15ms / ~139ms
   → mask_decoder + memory_encoder [PyTorch]                                     ~4ms /  ~10ms
   ─────────────────────────────────────────────────────────────────────────────────
-  Total:  504px → ~169ms → 5.9 FPS   |   1008px → ~722ms → ~1.4 FPS
+  Total:  504px → ~137ms profile / 7.06 FPS E2E   |   1008px → ~722ms → ~1.4 FPS
 ```
 
 ¹ Attention modules route through ORT MIGraphX EP (not direct API) due to FP16
@@ -93,6 +115,12 @@ fallbacks in `tracker/rocm_patches.py`, applied automatically at import).
 | B.4 | MIG memory_attention (padded S7×P32, ORT MIG EP) | **1.53** | — |
 | C | 504px config-based init (image_size setter cascade) | 1.53 | **5.12** |
 | D | MLIR attention backbone (`MIGRAPHX_MLIR_USE_SPECIFIC_OPS=attention`) | ~1.5 | **5.5** |
+| E | GPU-resident backbone + ORT GPU I/O binding | — | **6.58** |
+| F | Exact S1…S10 memory-attention shapes | — | **7.06** |
+| G | ROCm 7.14 + MIGraphX 2.17 + matching ORT EP container | — | **8.51** |
+| H | Parallel detector/tracker tails after the shared backbone | — | **9.03** |
+| I | Cross-frame backbone prefetch on the parallel-tail path | — | **10.24** |
+| J | Per-instance fixed position-encoding cache | — | **10.78** |
 
 ---
 
@@ -129,7 +157,8 @@ The gap reflects prompt quality difference, not tracker propagation quality.
 |---|---|---|---|
 | NVIDIA H200 | 1008px | ~5–6 | PyTorch, single object |
 | NVIDIA RTX 5090 | 1008px | 30+ | TensorRT + ByteTrack |
-| **AMD Ryzen AI Max+ 395 (APU)** | **504px** | **12.21** (box) / **5.5** (text) | MIGraphX + MLIR |
+| **AMD Ryzen AI Max+ 395 (APU)** | **504px** | **12.21** (box) / **10.78** (text Docker, pipelined) | MIGraphX + MLIR |
+| AMD Ryzen AI Max+ 395 (native compatibility) | 504px | 7.06 text | ROCm 7.2/7.13 dual stack |
 | **AMD Ryzen AI Max+ 395 (APU)** | **1008px** | **3.22** (box) / **~1.5** (text) | MIGraphX + MLIR |
 
 The Ryzen AI Max+ 395 is memory-bandwidth-limited (APU, unified memory).
@@ -163,9 +192,9 @@ BIOS UMA=64GB maximizes the fast non-coherent GPU pool (see Finding #7).
    Workaround: ORT MIGraphX EP (`migraphx_fp16_enable=1`). Same bug affects
    `detr_encoder`. Root cause: [ROCm/AMDMIGraphX#3596](https://github.com/ROCm/AMDMIGraphX/issues/3596).
 
-9. **memory_attention K=64 kernel cliff**: MIGraphX picks 14× slower kernel at
-   `num_object_pointer_tokens=64` (791ms vs 55ms at K≤32). Shim caps at K=32,
-   truncates oldest pointers. Quality impact invisible for continuous tracking.
+9. **memory_attention K=64 kernel cliff is resolution-specific**: at 1008px,
+   K=64 is much slower than K≤48, so production uses K=48. At 504px K=64
+   remains fast and preserves capacity for 16 objects.
 
 10. **Detector and tracker have different FPN projection weights**: `Sam3VideoModel`
     `detector_model.vision_encoder.neck` (detector FPN) ≠ the FPN baked into the
@@ -187,8 +216,9 @@ BIOS UMA=64GB maximizes the fast non-coherent GPU pool (see Finding #7).
     2× slower backbone (ROCm issue #5643, silent fallback to hipBLAS without tensor cores).
     Do not use.
 
-14. **GPU-resident backbone not worth pursuing**: numpy round-trip overhead only 1.5ms
-    (1.6% of 97ms backbone). Kernel execution is the bottleneck; data movement is negligible.
+14. **GPU-resident backbone is material for the text path**: the five FP32
+    outputs total 33.5 MB. Avoiding their NumPy-to-Torch round-trip reduces the
+    detector vision encoder from ~102ms to ~67ms with matching mask quality.
 
 15. **cv_utils kernel (NMS, fill_holes) CUDA-only**: `kernels-community/cv-utils` has no
     ROCm build. Fixed via `tracker/rocm_patches.py`: scipy.ndimage.label for connected
@@ -214,7 +244,7 @@ BIOS UMA=64GB maximizes the fast non-coherent GPU pool (see Finding #7).
 | Topic | File |
 |---|---|
 | Backbone optimization (find_splits patch, NHWC fix, MLIR attn) | [`analysis/backbone_optimization.md`](../analysis/backbone_optimization.md) |
-| Backbone optimization research (gfx1151 env vars, community findings) | [`analysis/backbone_optimization_research.md`](backbone_optimization_research.md) |
+| Backbone optimization research (gfx1151 env vars, community findings) | [`analysis/backbone_optimization_research.md`](../analysis/backbone_optimization_research.md) |
 | Tracking module optimization (memory_attention, dec/enc, ORT cache) | [`analysis/module_optimization.md`](../analysis/module_optimization.md) |
 | MIGraphX backbone investigation (detailed, pre-patch) | [`analysis/migraphx_backbone_investigation.md`](../analysis/migraphx_backbone_investigation.md) |
 | 1008px performance deep-dive (NHWC, rocprof, op analysis) | [`analysis/1008px_perf_analysis.md`](historical/1008px_perf_analysis.md) |
