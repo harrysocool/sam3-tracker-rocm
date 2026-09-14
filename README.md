@@ -44,14 +44,17 @@ cannot load the current fixed-decoder artifact. See the
 
 ## Quick start
 
-These steps use release **v0.2.0-rc4** and build the recommended **504px text / live
-pipeline**. Run the commands in Bash, in order, from the same shell. An existing
-checkout of this release or a compatible development branch can skip the clone.
+These steps use the current supported **`main` branch** and assemble the
+versioned **v0.2.0-rc4 runtime** while building the recommended **504px text /
+live pipeline**. Run the commands in Bash, in order, from the same shell. An
+existing checkout of `main` or a compatible development branch can skip the
+clone.
 
 ### 1. Get the source and checkpoint
 
 ```bash
-git clone --branch v0.2.0-rc4 --depth 1 https://github.com/harrysocool/sam3-tracker-rocm.git
+git clone --branch main --single-branch \
+  https://github.com/harrysocool/sam3-tracker-rocm.git
 cd sam3-tracker-rocm
 export SAM3_MODEL_DIR="$PWD/model/sam3"
 ```
