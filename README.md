@@ -44,11 +44,10 @@ cannot load the current fixed-decoder artifact. See the
 
 ## Quick start
 
-These steps use the current supported **`main` branch** and assemble the
-versioned **v0.2.0-rc4 runtime** while building the recommended **504px text /
-live pipeline**. Run the commands in Bash, in order, from the same shell. An
-existing checkout of `main` or a compatible development branch can skip the
-clone.
+These steps use the current supported **`main` branch** and build the
+recommended **504px text / live pipeline**. Run the commands in Bash, in order,
+from the same shell. An existing checkout of `main` or a compatible development
+branch can skip the clone.
 
 ### 1. Get the source and checkpoint
 
@@ -98,7 +97,7 @@ Choose a new artifact directory outside the checkout. To resume an interrupted
 build, reuse that same directory; do not point it at older runtime artifacts.
 
 ```bash
-export SAM3_MODEL_BUILD_ROOT="$HOME/sam3-artifacts/gpu/build-0.2.0-rc4"
+export SAM3_MODEL_BUILD_ROOT="$HOME/sam3-artifacts/gpu/build-$(git rev-parse --short HEAD)"
 export SAM3_ONNX_DIR="$SAM3_MODEL_BUILD_ROOT/onnx_files_504"
 ./setup.sh --models "$SAM3_MODEL_DIR"
 ```
@@ -227,7 +226,7 @@ Use the [evaluation guide](docs/evaluation.md) for checks and measurement scope.
 - [Performance records and correctness evidence](docs/performance.md)
 - [Evaluation and regression commands](docs/evaluation.md)
 - [Historical host setup, box benchmarks, and optimization notes](docs/historical/legacy-runtime.md)
-- [Release notes](docs/releases/0.2.0-rc4.md)
+- [Release notes](docs/releases/)
 
 ## Known limitations
 
