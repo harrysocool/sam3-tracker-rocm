@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import types
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 
 import torch
 
@@ -20,9 +20,19 @@ class BackbonePrefetchPipeline:
     vision encoder for frame N+1 overlaps the detector/tracker tail for frame
     N.  The model must already have the parallel-tail patch, which supplies
     the ORT input fences needed when cached features cross stream boundaries.
+
+    With ``frame_provider``, preprocessed frames live outside the tracking
+    session. Each frame is inserted through the model's streaming forward only
+    when consumed, preserving live's session-length and hotstart semantics.
+    The provider must return stable tensors on the model device. Prefetching
+    a future frame never inserts it into the tracking session.
+    Without a provider, historical preloaded-session behavior is unchanged.
     """
 
-    def __init__(self, model, inference_session) -> None:
+    def __init__(
+        self, model, inference_session, *,
+        frame_provider: Callable[[int], torch.Tensor] | None = None,
+    ) -> None:
         if not hasattr(model, "_parallel_tail_runtime"):
             raise ValueError("backbone prefetch requires the parallel-tail patch")
 
@@ -33,6 +43,7 @@ class BackbonePrefetchPipeline:
 
         self.model = model
         self.inference_session = inference_session
+        self.frame_provider = frame_provider
         self.detector = detector
         self.encoder = encoder
         self.device = next(model.parameters()).device
@@ -105,9 +116,25 @@ class BackbonePrefetchPipeline:
             self._active = False
             self._running = False
 
+    def _get_frame(self, frame_idx: int) -> torch.Tensor:
+        if self.frame_provider is not None:
+            return self.frame_provider(frame_idx)
+        return self.inference_session.get_frame(frame_idx)
+
+    def _forward(self, frame_idx: int, reverse: bool):
+        kwargs = {}
+        if self.frame_provider is not None:
+            kwargs["frame"] = self._get_frame(frame_idx)
+        return self.model(
+            inference_session=self.inference_session,
+            frame_idx=frame_idx,
+            reverse=reverse,
+            **kwargs,
+        )
+
     def _enqueue(self, frame_idx: int) -> _PendingVisionOutput:
         with torch.inference_mode(), torch.cuda.stream(self.stream):
-            pixel_values = self.inference_session.get_frame(frame_idx).unsqueeze(0)
+            pixel_values = self._get_frame(frame_idx).unsqueeze(0)
             return self.encoder._prefetch(pixel_values, self.stream)
 
     def run(
@@ -145,11 +172,7 @@ class BackbonePrefetchPipeline:
             self._current_consumed = False
             self._pending = self._enqueue(next_index)
             with torch.inference_mode(), fence_ort_inputs():
-                output = self.model(
-                    inference_session=self.inference_session,
-                    frame_idx=current_index,
-                    reverse=reverse,
-                )
+                output = self._forward(current_index, reverse)
             if not self._current_consumed:
                 raise RuntimeError("model did not consume the prefetched vision output")
             self._consuming = None
@@ -164,11 +187,7 @@ class BackbonePrefetchPipeline:
         self._current_consumed = False
         self._pending = None
         with torch.inference_mode(), fence_ort_inputs():
-            output = self.model(
-                inference_session=self.inference_session,
-                frame_idx=current_index,
-                reverse=reverse,
-            )
+            output = self._forward(current_index, reverse)
         if not self._current_consumed:
             raise RuntimeError("model did not consume the prefetched vision output")
         self._consuming = None

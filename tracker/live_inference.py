@@ -52,6 +52,13 @@ import numpy as np
 import torch
 from PIL import Image
 
+from .output_processing import (
+    DEFAULT_MAX_OBJECTS_PER_PROMPT,
+    cap_for_prompt,
+    enforce_per_prompt_cap,
+    postprocess_frame_output,
+)
+
 
 def _bgr_to_pil(bgr: np.ndarray) -> Image.Image:
     return Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
@@ -87,7 +94,7 @@ class SAM3Live:
         max_vision_features_cache_size: int = 1,
         keep_recent_frames: int = 0,
         redetect_every: int = 1,
-        max_objects_per_prompt: int | dict[str, int] | None = 5,
+        max_objects_per_prompt: int | dict[str, int] | None = DEFAULT_MAX_OBJECTS_PER_PROMPT,
         bootstrap_frames: int = 0,
         bootstrap_min_score: float = 0.3,
         periodic_rebootstrap_seconds: float | None = None,
@@ -133,7 +140,7 @@ class SAM3Live:
                 regardless of this schedule. Set to e.g. 3-5 to recover
                 FPS on multi-prompt workloads.
             max_objects_per_prompt: cap on simultaneously tracked objects
-                per prompt. Excess (lowest detection score) are evicted via
+                per prompt. Excess (lowest current tracker score) are evicted via
                 ``session.remove_object``, freeing tracker memory and
                 bounding compute. **Default 5** — without a cap the session
                 silently accumulates ghost objects (low-score detections
@@ -902,56 +909,22 @@ class SAM3Live:
         if self.bootstrap_frames > 0 and not skip_detection:
             self._process_bootstrap_capture()
 
-        frame_idx = raw_out.frame_idx
-
         # Enforce per-prompt cap BEFORE postprocess. Evicted objects:
         #   (a) are removed from session state via session.remove_object, so
         #       the tracker stops propagating them next frame (bounds compute)
         #   (b) are stripped from this frame's raw output so they don't appear
         #       once before disappearing
         evicted_ids = self._enforce_per_prompt_cap(raw_out.obj_id_to_tracker_score)
-
-        def _strip(d):
-            if not evicted_ids or not isinstance(d, dict):
-                return d
-            return {k: v for k, v in d.items() if k not in evicted_ids}
-
-        # Postprocess: low-res masks → original resolution + multi-prompt grouping.
-        model_outputs = {
-            "obj_id_to_mask": _strip(raw_out.obj_id_to_mask),
-            "obj_id_to_score": _strip(raw_out.obj_id_to_score),
-            "obj_id_to_tracker_score": _strip(raw_out.obj_id_to_tracker_score),
-            "suppressed_obj_ids": raw_out.suppressed_obj_ids,
-        }
-        pp = self.processor.postprocess_outputs(
-            inference_session=self.session,
-            model_outputs=model_outputs,
-            original_sizes=[[H, W]],
+        result = postprocess_frame_output(
+            self.processor, self.session, raw_out, (H, W), evicted_ids,
         )
-
-        obj_ids = pp["object_ids"].tolist()
-        scores_list = pp["scores"].tolist()
-        if len(obj_ids):
-            masks_np = pp["masks"].cpu().numpy()
-            boxes_np = pp["boxes"].cpu().numpy()
-        else:
-            masks_np = np.zeros((0, H, W), dtype=bool)
-            boxes_np = np.zeros((0, 4), dtype=np.float32)
 
         # Bound memory growth from accumulating raw frame tensors.
         if self.keep_recent_frames > 0:
             self._prune_old_frames(keep_last=self.keep_recent_frames)
 
-        result = {
-            "object_ids": obj_ids,
-            "scores": {oid: float(s) for oid, s in zip(obj_ids, scores_list)},
-            "masks": {oid: masks_np[i] for i, oid in enumerate(obj_ids)},
-            "boxes": {oid: tuple(float(v) for v in boxes_np[i]) for i, oid in enumerate(obj_ids)},
-            "prompt_to_obj_ids": pp["prompt_to_obj_ids"],
-            "frame_idx": frame_idx,
-            "detected": not skip_detection,
-            "negative_evidence_valid": not skip_detection,
-        }
+        result["detected"] = not skip_detection
+        result["negative_evidence_valid"] = not skip_detection
         # Drift detection: record this frame's per-prompt avg score, and
         # throttled-check whether any prompt has dropped enough from its
         # bootstrap baseline to trigger a re-bootstrap on the next infer.
@@ -967,14 +940,7 @@ class SAM3Live:
     # Internals
     # ------------------------------------------------------------------
     def _cap_for(self, prompt_text: str) -> int | None:
-        cap = self.max_objects_per_prompt
-        if cap is None:
-            return None
-        if isinstance(cap, int):
-            return cap
-        if isinstance(cap, dict):
-            return cap.get(prompt_text)
-        return None
+        return cap_for_prompt(self.max_objects_per_prompt, prompt_text)
 
     def _enforce_per_prompt_cap(self, tracker_scores: dict) -> set[int]:
         """Evict excess objects per prompt, keeping the most-persistent ones.
@@ -995,28 +961,9 @@ class SAM3Live:
         is freed starting next frame. Returns the set of evicted obj_ids
         so the caller can also strip them from this frame's raw outputs.
         """
-        if self.max_objects_per_prompt is None:
-            return set()
-
-        by_prompt: dict[str, list[tuple[int, float]]] = {}
-        for oid in list(self.session.obj_ids):
-            pid = self.session.obj_id_to_prompt_id.get(oid)
-            if pid is None:
-                continue
-            prompt_text = self.session.prompts.get(pid, "?")
-            score = float(tracker_scores.get(oid, 0.0))
-            by_prompt.setdefault(prompt_text, []).append((oid, score))
-
-        evicted: set[int] = set()
-        for prompt_text, items in by_prompt.items():
-            cap = self._cap_for(prompt_text)
-            if cap is None or len(items) <= cap:
-                continue
-            items.sort(key=lambda x: x[1], reverse=True)
-            for oid, _ in items[cap:]:
-                self.session.remove_object(oid, strict=False)
-                evicted.add(oid)
-        return evicted
+        return enforce_per_prompt_cap(
+            self.session, tracker_scores, self.max_objects_per_prompt,
+        )
 
     def _prune_old_frames(self, keep_last: int) -> None:
         """Drop processed_frames entries older than the last ``keep_last``.

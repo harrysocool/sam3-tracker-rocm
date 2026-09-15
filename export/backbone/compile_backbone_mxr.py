@@ -6,15 +6,25 @@ backbone_<source>/tuned.mxr (host I/O) or tuned_gpuio.mxr (Torch GPU I/O).
 Both are runtime caches that load in seconds instead of recompiling each
 session; the GPU-I/O artifact is additive and never overwrites tuned.mxr.
 
-Autotuning runs ~3 minutes for 504px and ~9 minutes for 1008px the first
-time; the resulting .mxr is hardware-specific (gfx1151) and locked to the
-MIGraphX build that produced it (currently 2.15+patches.20260511).
+Autotuning may take several minutes on the first compile. The resulting
+.mxr is hardware-specific (gfx1151) and tied to the MIGraphX build that
+produced it. The supported runtime is ROCm 7.14 / MIGraphX 2.17, selected
+through docker/rocm714/run.sh; do not compile deployment caches with a host
+runtime. See docker/rocm714/README.md for setup and runtime verification.
 
-Requires PYTHONPATH=/opt/rocm-7.2.x/lib so the patched migraphx Python
-binding loads. The wrapping setup.sh sets this; if running standalone:
+Configure SAM3_MODEL_DIR and SAM3_ONNX_DIR as described in that guide.
+SAM3_ONNX_DIR must select a writable build directory containing the source
+ONNX files, not an immutable baseline; it is mounted at /models/onnx_files_504.
+For an additive GPU-I/O build, run from the repository root:
 
-    PYTHONPATH=/opt/rocm-7.2.x/lib${PYTHONPATH:+:$PYTHONPATH} \\
-        python export/backbone/compile_backbone_mxr.py --imgsz 504 --onnx-dir onnx_files_504
+    SAM3_DOCKER_STRICT=0 ./docker/rocm714/run.sh \\
+        python export/backbone/compile_backbone_mxr.py \\
+        --imgsz 504 --backbone-source detector \\
+        --onnx-dir /models/onnx_files_504 --gpu-io
+
+Check the printed migraphx module path and the selected artifact directory
+if verification fails. When changing runtime versions, rebuild in a new
+artifact directory instead of overwriting existing baseline MXR files.
 """
 
 from __future__ import annotations
@@ -37,7 +47,7 @@ def parse_args():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     p.add_argument("--onnx-dir", type=Path, required=True,
-                   help="Resolution root (e.g. onnx_files_504). Reads "
+                   help="Resolution root (e.g. /models/onnx_files_504 in the container). Reads "
                         "<onnx-dir>/backbone_<source>/single_simplified.onnx, writes "
                         "<onnx-dir>/backbone_<source>/tuned.mxr or "
                         "tuned_gpuio.mxr with --gpu-io.")
@@ -102,7 +112,7 @@ def main():
 
     print(f"migraphx from: {migraphx.__file__}")
     print(f"Compiling {src} ...")
-    print(f"  (autotuning enabled — first run takes ~3 min @504px / ~9 min @1008px)")
+    print("  (autotuning enabled — first run may take several minutes)")
 
     t0 = time.perf_counter()
     prog = migraphx.parse_onnx(str(src))
@@ -150,8 +160,14 @@ def main():
         print(f"  fpn_{i}: shape={a.shape} C_contiguous={c}")
     if not all_ok:
         raise SystemExit(
-            "Outputs are NOT C-contiguous — patched MIGraphX (NHWC fix) is "
-            "not in effect. Reinstall via tools/install_migraphx_patched.sh."
+            f"Outputs are NOT C-contiguous; do not use the saved cache {dst}. "
+            "Check the printed migraphx module path and use the supported "
+            "ROCm 7.14 / MIGraphX 2.17 runtime through docker/rocm714/run.sh. "
+            "Verify SAM3_ONNX_DIR and --onnx-dir select the intended artifact "
+            "directory; do not mix host-runtime caches with container artifacts. "
+            "See docker/rocm714/README.md for runtime verification and artifact "
+            "setup. Rebuild in a new writable artifact directory, without "
+            "overwriting baseline MXR files."
         )
     print("  OK — all outputs C-contiguous")
 

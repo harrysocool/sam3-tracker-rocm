@@ -1,6 +1,6 @@
 # Evaluation and regression guide
 
-These commands use the [supported ROCm 7.14 / MIGraphX 2.17 container](../docker/rocm714/README.md).
+GPU commands use the [supported ROCm 7.14 / MIGraphX 2.17 container](../docker/rocm714/README.md).
 Complete [Quick start](../README.md#quick-start), keep `SAM3_MODEL_DIR` and
 `SAM3_ONNX_DIR` exported, and run commands from the checkout root in Bash.
 Keep outputs under ignored `results/perf/` or an external artifact directory.
@@ -15,6 +15,21 @@ Keep outputs under ignored `results/perf/` or an external artifact directory.
 | Serial/parallel A/B | Offline output equivalence and schedule timing | Default live frame age |
 | Source-paced integration check | Latest-frame ownership, drops, service, and age on that input | Original benchmark reproduction or robot-wide latency |
 | DAVIS box regression | Tracker quality under a fixed dataset/prompt protocol | Text detection quality or current full-model throughput |
+
+## Checkpoint identity
+
+This optional check identifies whether your locally supplied weights match
+those used in the published validation results. Run it on the host with
+`SAM3_MODEL_DIR` set to your model directory:
+
+```bash
+sha256sum "$SAM3_MODEL_DIR/model.safetensors"
+```
+
+The recorded validation checkpoint has SHA256
+`6d06f0a5f84e435071fe6603e61d0b4cc7b40e0d39d487cfd4d67d8cc11cc14a`.
+A matching hash confirms identical file contents. A different hash identifies
+a different file and needs its own compatibility and correctness validation.
 
 ## Provider and installation checks
 
@@ -67,7 +82,8 @@ offline lookahead configuration, add `--pipeline-backbone`; it requires
 `--parallel-tail` and does not make this a live test.
 
 This script patches the backbone, DETR encoder, and memory attention but
-retains the native DETR decoder. Decoder changes additionally need a
+retains the native DETR decoder. The default live and offline 504px entry points
+also use the fixed decoder, which additionally needs a
 native-versus-fixed full-path comparison and replay of the exact dropped
 latest-frame subsequence. The [fixed-decoder evidence](performance.md#correctness-and-resource-checks)
 records those checks; the generic PT-vs-MIG script alone does not cover them.
@@ -88,7 +104,8 @@ negative-evidence, and reset-lifecycle checks, not just a high mean IoU.
 The harness checks per-frame mask, score, object-ID, and prompt-ownership
 equivalence. Add `--pipeline-backbone` only for an offline lookahead experiment.
 Match frame windows and exclude or report pipeline fill/drain explicitly.
-This harness does not benchmark live's fixed decoder or latest-frame queue.
+This harness retains the native decoder and does not benchmark the fixed
+decoder used by the default entry points or the latest-frame queue.
 
 ## Source-paced live integration check
 
@@ -108,6 +125,11 @@ set -o pipefail
 
 This includes the skeleton's 200 ms result-age gate. Report publication
 rejections separately from inference failures and latest-slot drops.
+The terminal summary labels all returned inference results as `completed`
+and successful publications as `published`, with `age_rejected` and
+`superseded` counts reported separately. Compare the `completed` service/age
+statistics when assessing inference latency; the `published` statistics exclude
+rejected results. Neither includes downstream ROS transport or rendering.
 `--max-frames` caps available source arrivals; it does not extend or loop a
 short file.
 
@@ -147,6 +169,14 @@ canonical offline workload shape. It retains the native decoder and uses
 device synchronization hooks: it is not a measurement of default live,
 parallel-tail overlap, or end-to-end camera latency. Do not sum asynchronous
 stage timings to claim a live output rate.
+
+## External datasets
+
+DAVIS and SA-Co datasets are external prerequisites; this repository does not
+distribute them or track a machine-specific `dataset` symlink. The local
+`dataset/` path is ignored. Put the actual files there, or pass an explicit path
+to host-side tools. Inside the supported container, inputs must be under a
+configured mount; an absolute symlink to an unmounted host path is not visible.
 
 ## DAVIS tracker regression
 

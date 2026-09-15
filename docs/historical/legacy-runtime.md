@@ -8,6 +8,10 @@
 > Some referenced installer scripts no longer exist. Do not execute these
 > instructions against the current release or use them as a host fallback.
 
+Historical weight-download instructions are omitted. Model weights must be
+obtained independently under the separate SAM License before use; see the
+current [requirements](../../README.md#requirements).
+
 Use the [current Quick start](../../README.md#quick-start) for ROCm 7.14 / MIGraphX
 2.17 live deployment. [Current performance records](../../docs/performance.md) separate
 live, hybrid, offline, and box workloads. Existing baseline artifacts remain
@@ -28,7 +32,7 @@ Have these in place **before** running `./setup.sh`:
 | OS: Ubuntu 24.04.4 LTS | You | Other Linux distros with ROCm 7.x support may work |
 | Kernel: 6.8+ (tested: 6.18.6) | You | Required for gfx1151 AMDGPU driver support |
 | **conda / miniforge** (any recent) | ⚠️ You — install before running setup.sh | `setup.sh` errors out if conda is not found. [Install miniforge](https://github.com/conda-forge/miniforge) |
-| **BIOS UMA Frame Buffer Size = 64 GB** | ⚠️ You — set in BIOS | **128 GB systems only** — without this, backbone OOMs at 1008px. See [Finding #7](../../docs/project_summary.md). |
+| **BIOS UMA Frame Buffer Size = 64 GB** | ⚠️ You — set in BIOS | **128 GB systems only** — without this, backbone OOMs at 1008px. See [Finding #7](project-summary.md#key-findings). |
 | **System ROCm 7.2 APT** (`migraphx 2.15.0`) | ✅ setup.sh step 0a | Installs automatically; skip with `--skip-apt` if already done |
 
 > **Why two ROCm stacks?** AMD currently ships gfx1151 PyTorch support only in nightly
@@ -53,7 +57,6 @@ What it does:
 4. ROCm 7.13 nightly SDK + PyTorch (gfx1151 wheels, ~2–5 min)
 5. ONNX Runtime MIGraphX EP wheel (1.24.2)
 6. Python dependencies from `requirements.txt`
-7. Model weights from community mirror `1038lab/sam3` (no HF account needed)
 
 ### Stage 2 — Build model artefacts (`export/build.py`)
 
@@ -106,24 +109,7 @@ NHWC output fix). `setup.sh` installs a prebuilt tarball; if you'd rather build:
 |---|---|---|
 | Stock APT 2.15.0 | 5.72 / 1.35 | Checkout tag `v0.1-migraphx-2.15` |
 | **Prebuilt tarball** (default) | **8.21 / 2.31** | `setup.sh` downloads + installs |
-| Build from source | 8.21 / 2.31 | See [`docs/build_migraphx_patched.md`](../../docs/build_migraphx_patched.md) |
-
-</details>
-
-<details>
-<summary><b>Model weights — download from official HF source</b></summary>
-
-`setup.sh` pulls `1038lab/sam3` (community mirror, no account). To use the
-official `facebook/sam3` repo instead (HuggingFace account + accepted terms
-required), download manually before running `setup.sh`:
-
-```bash
-hf download facebook/sam3 model.safetensors --local-dir model/sam3
-```
-
-`setup.sh` skips the download step if `model/sam3/model.safetensors` already exists.
-
-> `hf` is the new CLI in `huggingface_hub ≥ 1.0`. Older versions ship `huggingface-cli` (same arguments).
+| Build from source | 8.21 / 2.31 | See the [MIGraphX 2.15 patch guide](migraphx-2.15-patches.md) |
 
 </details>
 
@@ -131,7 +117,7 @@ hf download facebook/sam3 model.safetensors --local-dir model/sam3
 <summary><b>Step-by-step manual install (no setup.sh)</b></summary>
 
 For full control over each step (APT, conda, pip, ONNX export, backbone compile)
-see [`docs/manual_setup.md`](../../docs/manual_setup.md).
+see the [historical manual host setup guide](manual-host-setup.md).
 
 </details>
 
@@ -229,21 +215,21 @@ conda activate sam3-tracker  # if not already active
 
 | Script | Requires | What it checks | Time |
 |---|---|---|---|
-| `eval/probes/probe_text_prompt.py`     | Stage 1 only | Text-prompt detection (pure PyTorch) | ~10 s |
+| `eval/historical/probes/probe_text_prompt.py` | Stage 1 only | Text-prompt detection (pure PyTorch) | ~10 s |
 | `eval/benchmarks/bench_pipeline.py`    | Stage 2 box  | Per-module latency + total FPS       | ~30 s |
-| `eval/probes/probe_text_prompt_mxr.py` | Stage 2 text | Text-prompt with MIGraphX backbone   | ~15 s |
-| `eval/benchmarks/profile_text_prompt.py` | Stage 2 text | Per-stage latency of text-prompt   | ~30 s |
+| `eval/historical/probes/probe_text_prompt_mxr.py` | Stage 2 text | Text-prompt with MIGraphX backbone | ~15 s |
+| `eval/historical/profilers/profile_text_prompt.py` | Stage 2 text | Per-stage latency of text-prompt | ~30 s |
 
 ```bash
 # After Stage 1 only:
-python eval/probes/probe_text_prompt.py --checkpoint model/sam3 --image assets/truck.jpg --text "truck"
+python eval/historical/probes/probe_text_prompt.py --checkpoint model/sam3 --image assets/truck.jpg --text "truck"
 
 # After Stage 2 (box):
 python eval/benchmarks/bench_pipeline.py --checkpoint model/sam3 --onnx-dir onnx_files_504
 
 # After Stage 2 (text):
-python eval/probes/probe_text_prompt_mxr.py --checkpoint model/sam3 --onnx-dir onnx_files_504 --image assets/truck.jpg --text "truck"
-python eval/benchmarks/profile_text_prompt.py --checkpoint model/sam3 --image assets/truck.jpg --text "truck"
+python eval/historical/probes/probe_text_prompt_mxr.py --checkpoint model/sam3 --onnx-dir onnx_files_504 --image assets/truck.jpg --text "truck"
+python eval/historical/profilers/profile_text_prompt.py --checkpoint model/sam3 --image assets/truck.jpg --text "truck"
 ```
 
 ## Native and box benchmark snapshots
@@ -393,9 +379,9 @@ fixed decoder, and MIGraphX 2.15 is no longer the deployment requirement.
 
 ## Further history
 
-- [Manual host installation](../../docs/manual_setup.md)
-- [MIGraphX 2.15 patch installation / source build](../../docs/build_migraphx_patched.md)
-- [Historical project summary](../../docs/project_summary.md)
+- [Manual host installation](manual-host-setup.md)
+- [MIGraphX 2.15 patch installation / source build](migraphx-2.15-patches.md)
+- [Historical project summary](project-summary.md)
 - [August 2026 ROCm 7.14 offline evaluation](../../docs/rocm714_fullstack_evaluation.md)
 - [1008px performance analysis](../../docs/historical/1008px_perf_analysis.md)
 - [Backbone investigation](../../analysis/migraphx_backbone_investigation.md)

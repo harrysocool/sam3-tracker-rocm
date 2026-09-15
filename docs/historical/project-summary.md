@@ -1,10 +1,10 @@
-# SAM3 Video Tracking on AMD Ryzen AI Max+ 395 — Project Summary
+# Historical SAM3 project summary — AMD Ryzen AI Max+ 395
 
 > **Historical optimization summary.** This report spans earlier native and
 > offline experiments. Its host-default and optional-container descriptions
 > are superseded: current live deployment uses only the ROCm 7.14 / MIGraphX
-> 2.17 container. See [Quick start](../README.md#quick-start) and the
-> [separated performance records](performance.md) for current usage and context.
+> 2.17 container. See [Quick start](../../README.md#quick-start) and the
+> [separated performance records](../performance.md) for current usage and context.
 
 **Hardware**: AMD Ryzen AI Max+ 395 (gfx1151), 128GB unified memory (UMA=64GB GPU pool)
 **Task**: Open-vocabulary video tracking (text-prompt) + mask-level tracking (box-prompt)
@@ -44,8 +44,8 @@ stack remains the compatibility default. Opt-in detector/tracker tail overlap
 raises the median end-to-end result to 9.03 FPS; preloaded-video backbone
 lookahead plus per-instance position-encoding caching raises it further to
 10.78 FPS. See
-[`rocm714_fullstack_evaluation.md`](rocm714_fullstack_evaluation.md) and
-[`../docker/rocm714/README.md`](../docker/rocm714/README.md).
+[the original full-stack evaluation](../rocm714_fullstack_evaluation.md) and
+[the current container guide](../../docker/rocm714/README.md).
 
 ---
 
@@ -227,7 +227,10 @@ BIOS UMA=64GB maximizes the fast non-coherent GPU pool (see Finding #7).
 
 ---
 
-## Pending Work
+## Pending Work (historical snapshot)
+
+This list preserves planning notes from the earlier experiments. Some items
+were completed by later stages recorded above; it is not the current roadmap.
 
 | Item | Effort | Notes |
 |---|---|---|
@@ -243,8 +246,8 @@ BIOS UMA=64GB maximizes the fast non-coherent GPU pool (see Finding #7).
 
 | Topic | File |
 |---|---|
-| Backbone optimization (find_splits patch, NHWC fix, MLIR attn) | [`analysis/backbone_optimization.md`](../analysis/backbone_optimization.md) |
-| Backbone optimization research (gfx1151 env vars, community findings) | [`analysis/backbone_optimization_research.md`](../analysis/backbone_optimization_research.md) |
-| Tracking module optimization (memory_attention, dec/enc, ORT cache) | [`analysis/module_optimization.md`](../analysis/module_optimization.md) |
-| MIGraphX backbone investigation (detailed, pre-patch) | [`analysis/migraphx_backbone_investigation.md`](../analysis/migraphx_backbone_investigation.md) |
-| 1008px performance deep-dive (NHWC, rocprof, op analysis) | [`analysis/1008px_perf_analysis.md`](historical/1008px_perf_analysis.md) |
+| Backbone optimization (find_splits patch, NHWC fix, MLIR attn) | [`analysis/backbone_optimization.md`](../../analysis/backbone_optimization.md) |
+| Backbone optimization research (gfx1151 env vars, community findings) | [`analysis/backbone_optimization_research.md`](../../analysis/backbone_optimization_research.md) |
+| Tracking module optimization (memory_attention, dec/enc, ORT cache) | [`analysis/module_optimization.md`](../../analysis/module_optimization.md) |
+| MIGraphX backbone investigation (detailed, pre-patch) | [`analysis/migraphx_backbone_investigation.md`](../../analysis/migraphx_backbone_investigation.md) |
+| 1008px performance deep-dive (NHWC, rocprof, op analysis) | [Historical 1008px performance analysis](1008px_perf_analysis.md) |
