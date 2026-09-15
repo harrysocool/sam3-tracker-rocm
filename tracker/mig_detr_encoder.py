@@ -3,7 +3,8 @@
 Drop-in replacement for `Sam3VideoModel.detector_model.detr_encoder`. Routes
 the encoder forward through ONNX Runtime's MIGraphX execution provider —
 NOT direct migraphx.parse_onnx, because that path has the same FP16
-attention numerical bug as memory_attention (Finding #8 in project_summary).
+attention numerical bug as memory_attention (Finding #8 in
+docs/historical/project-summary.md).
 ORT MIG EP gives correct results and is still ~5× faster than the pure
 PyTorch detr_encoder.
 

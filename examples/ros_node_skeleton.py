@@ -45,6 +45,7 @@ import numpy as np
 
 from tracker.latest_frame import LatestFramePipeline
 from tracker.live_inference import SAM3Live
+from tracker.output_processing import DEFAULT_MAX_OBJECTS_PER_PROMPT
 
 
 # ======================================================================
@@ -150,7 +151,7 @@ class SAM3Node:
         parallel_tail: bool | None = None,
         fixed_detr_decoder: bool | None = None,
         max_result_age_ms: float | None = 200.0,
-        max_objects_per_prompt: int | None = 5,
+        max_objects_per_prompt: int | None = DEFAULT_MAX_OBJECTS_PER_PROMPT,
     ):
         # In a lifecycle node, construct this object in on_configure. Model load
         # and MIG warmup are one-time costs.
@@ -196,6 +197,10 @@ class SAM3Node:
         self._rejected_callbacks = 0
         self._output_count = 0
         self._stale_result_count = 0
+        self._superseded_result_count = 0
+        self._completed_service_ms: list[float] = []
+        self._completed_age_ms: list[float] = []
+        # Keep these legacy fields scoped to successfully published results.
         self._service_ms: list[float] = []
         self._age_ms: list[float] = []
 
@@ -329,6 +334,10 @@ class SAM3Node:
                     return
                 context = item.packet.metadata
                 with self._state_lock:
+                    # Record every returned inference result before applying
+                    # generation and age gates; do not hide slow completions.
+                    self._completed_service_ms.append(item.service_ms)
+                    self._completed_age_ms.append(item.age_ms)
                     # A reset or abort detaches first. Suppress any old result
                     # that completed while the lifecycle caller waited.
                     current = (
@@ -342,6 +351,8 @@ class SAM3Node:
                     )
                     if stale:
                         self._stale_result_count += 1
+                    elif not current:
+                        self._superseded_result_count += 1
                 if stale:
                     continue
                 if current:
@@ -461,14 +472,23 @@ class SAM3Node:
                     self._live_closed = True
 
     def stats(self) -> dict:
-        """Return node counters and completed generation statistics."""
+        """Return node counters and completed generation statistics.
+
+        ``completed_*`` includes all results returned by the inference pipeline,
+        before age/generation gates. Legacy ``output_frames``, ``service_ms``
+        and ``age_ms`` describe successful publications only.
+        """
         with self._state_lock:
             return {
                 "callbacks": self._callback_count,
                 "accepted_callbacks": self._accepted_callbacks,
                 "rejected_callbacks": self._rejected_callbacks,
                 "output_frames": self._output_count,
+                "completed_frames": len(self._completed_service_ms),
                 "stale_results": self._stale_result_count,
+                "superseded_results": self._superseded_result_count,
+                "completed_service_ms": list(self._completed_service_ms),
+                "completed_age_ms": list(self._completed_age_ms),
                 "service_ms": list(self._service_ms),
                 "age_ms": list(self._age_ms),
                 "pipeline_generations": list(self._pipeline_history),
@@ -577,7 +597,7 @@ def _build_policy(name: str, args) -> Policy:
     raise ValueError(f"unknown policy: {name}")
 
 
-def main() -> None:
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -622,7 +642,11 @@ def main() -> None:
         help="Use the native DETR decoder for diagnosis.",
     )
     parser.set_defaults(fixed_detr_decoder=None)
-    parser.add_argument("--max-objects", type=int, default=5)
+    parser.add_argument(
+        "--max-objects", type=int, default=DEFAULT_MAX_OBJECTS_PER_PROMPT,
+        help="Maximum tracked objects per prompt (default 5; 0 = unlimited). "
+             "The legacy -1 value also selects the default.",
+    )
     parser.add_argument(
         "--max-result-age-ms",
         type=float,
@@ -650,13 +674,22 @@ def main() -> None:
         default=[],
         help="Source-index prompt swaps, for example 30:car,sidewalk.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    if args.max_objects == -1:
+        args.max_objects = DEFAULT_MAX_OBJECTS_PER_PROMPT
+    if args.max_objects < 0:
+        parser.error("--max-objects must be non-negative (or -1 for the default)")
     if args.parallel_tail is None:
         args.parallel_tail = not args.no_mig
     if args.parallel_tail and args.no_mig:
         parser.error("--parallel-tail requires MIG (remove --no-mig)")
     if args.fixed_detr_decoder is True and args.no_mig:
         parser.error("--fixed-detr-decoder requires MIG")
+    return args
+
+
+def main() -> None:
+    args = parse_args()
 
     switch_at: dict[int, list[str]] = {}
     for spec in args.switch_at:
@@ -678,7 +711,7 @@ def main() -> None:
         parallel_tail=args.parallel_tail,
         fixed_detr_decoder=args.fixed_detr_decoder,
         max_result_age_ms=args.max_result_age_ms,
-        max_objects_per_prompt=args.max_objects,
+        max_objects_per_prompt=None if args.max_objects == 0 else args.max_objects,
     )
     capture = cv2.VideoCapture(str(args.video))
     if not capture.isOpened():
@@ -732,22 +765,34 @@ def main() -> None:
         capture.release()
         node.close()
 
-    service = np.asarray(stats["service_ms"], dtype=np.float64)
-    age = np.asarray(stats["age_ms"], dtype=np.float64)
+    _print_summary(stats, source_count)
+
+
+def _print_summary(stats: dict, source_count: int) -> None:
     print(
         f"\n[node] done. source={source_count} "
         f"accepted={stats['accepted_callbacks']} "
-        f"outputs={stats['output_frames']} "
-        f"rejected={stats['rejected_callbacks']}"
+        f"completed={stats['completed_frames']} "
+        f"published={stats['output_frames']} "
+        f"age_rejected={stats['stale_results']} "
+        f"superseded={stats['superseded_results']} "
+        f"callback_rejected={stats['rejected_callbacks']}"
     )
-    if service.size:
+    for label, service_key, age_key in (
+        ("completed", "completed_service_ms", "completed_age_ms"),
+        ("published", "service_ms", "age_ms"),
+    ):
+        service = np.asarray(stats[service_key], dtype=np.float64)
+        age = np.asarray(stats[age_key], dtype=np.float64)
+        if not service.size:
+            continue
         print(
-            f"  service: mean={service.mean():.1f} ms "
+            f"  {label} service: mean={service.mean():.1f} ms "
             f"p50={np.median(service):.1f} "
             f"p95={np.percentile(service, 95):.1f} ms"
         )
         print(
-            f"  age:     mean={age.mean():.1f} ms "
+            f"  {label} age:     mean={age.mean():.1f} ms "
             f"p50={np.median(age):.1f} "
             f"p95={np.percentile(age, 95):.1f} ms"
         )

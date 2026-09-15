@@ -1,5 +1,13 @@
 # Tracking Module Optimization
 
+> **Historical box-tracker results, before the attention correctness correction.**
+> The direct-MIG FP16 memory-attention "safe" claim and associated peak results
+> below were superseded by a DAVIS regression and a return to ORT MIGraphX EP
+> (Finding #8 in the [historical project summary](../docs/historical/project-summary.md#key-findings)).
+> These are not accepted current deployment results. Use the
+> [performance records](../docs/performance.md) and
+> [evaluation guide](../docs/evaluation.md) for current measurements and checks.
+
 ## Overview
 
 The four tracking modules (memory_attention, mask_decoder_propagate,

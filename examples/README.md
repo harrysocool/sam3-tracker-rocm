@@ -1,12 +1,116 @@
 # SAM3Live freshness-first integration guide
 
-This directory shows the deployment shape for a camera, ROS 2 image topic, or
-other real-time source. The primary example is
-[ros_node_skeleton.py](ros_node_skeleton.py).
+This directory provides [ros_node_skeleton.py](ros_node_skeleton.py), a
+standalone video example and integration skeleton for camera / ROS 2 input.
+It runs without ROS and prints per-result logs and final statistics; it does
+not subscribe to ROS topics, publish ROS messages, or save a rendered video.
+
+For real ROS integration, your application must provide the ROS 2 environment
+and dependencies (including `rclpy`, `sensor_msgs`, and `cv_bridge`), subscriptions,
+and publishers. The supported SAM3 runtime image does not install ROS, and this
+repository does not provide a ROS package or launch file.
 
 Complete the [Quick start](../README.md#quick-start) first. The standalone
 commands below use the supported container with `SAM3_MODEL_DIR` and
 `SAM3_ONNX_DIR` exported to the model and MIGraphX 2.17 artifact directories.
+
+## Standalone video check
+
+Run this from the repository root. The bundled `blackswan.mp4` contains
+50 frames at 24 FPS; the example paces arrivals at that rate:
+
+```bash
+./docker/rocm714/run.sh python examples/ros_node_skeleton.py \
+  --checkpoint /models/sam3 \
+  --onnx-dir /models/onnx_files_504 \
+  --video assets/blackswan.mp4 \
+  --text swan \
+  --policy always_full \
+  --max-frames 50
+```
+
+Published results produce `[gen=... src=...]` log lines, followed by a final
+`[node] done.` summary. There may be fewer results than source frames because
+waiting frames are replaced, and completed results older than the age budget
+are not published. A short clip can finish during cold-start inference;
+with the default 200 ms age gate, all its results may be rejected. Inspect
+`completed` and `age_rejected` before treating zero publications as a model
+failure. For a functional check only, add `--max-result-age-ms 0` to inspect
+results regardless of age; restore an appropriate age budget for deployment.
+Use [the video demos](../docs/usage.md) when you want an output MP4.
+
+### Parameters and statistics
+
+| Parameter | Default / behavior |
+|---|---|
+| `--text` | Required; one or more prompts |
+| `--max-frames` | 0: read to EOF; positive values cap source arrivals, not output count |
+| `--max-objects` | 5 per prompt; 0 is unlimited; -1 selects the default |
+| `--max-result-age-ms` | 200: reject older results before publication; 0 disables this gate |
+| `--policy` | `always_full`; alternatives request detection through the direct `SAM3Live` backend |
+| `--redetect-interval-ms` | 300; used with `--policy time_based`, not the demo's clean-keyframe hybrid |
+| `--redetect-period` | 5 source arrivals; used with `--policy periodic` |
+
+The CLI converts `--max-objects 0` to the Python API's unlimited value, `None`.
+For direct `SAM3Node` / `SAM3Live` calls, use `max_objects_per_prompt=None` to
+remove the cap; API value 0 retains zero objects. The skeleton does not apply
+the demos' `--min-score` filter. If needed, apply the
+[shared output filter](../docs/usage.md#shared-output-behavior) in your publisher.
+
+MIG and same-frame parallel tails are enabled by default. At 504px, the default
+fixed decoder requires `detr_decoder_fixed/direct_gpuio.mxr`; a missing artifact
+is an error. Use `--no-parallel-tail` or `--no-fixed-detr-decoder` for diagnosis.
+
+The final summary distinguishes these populations:
+
+| Terminal label | Meaning |
+|---|---|
+| `accepted` / `callback_rejected` | Source callbacks accepted into the pipeline or rejected during lifecycle transitions |
+| `completed` | All inference results returned to the consumer, before age and generation checks |
+| `published` | Results that passed those checks and whose publication callback completed |
+| `age_rejected` | Results rejected because their host-arrival age exceeded the budget |
+| `superseded` | Completed results suppressed because their generation was detached |
+
+Service and age statistics are printed separately for `completed` and
+`published` results. The latter exclude rejected results and must not be used
+as the latency distribution of all inference work. These timings exclude the
+publication callback and downstream ROS transport. Failed inference and frames
+dropped or aborted before a result are not timing samples. The separate
+`generation` counters report queue drops and aborts. An inference failure ends
+the CLI with an error rather than a normal summary.
+
+In `SAM3Node.stats()`, `completed_frames`, `completed_service_ms`, and
+`completed_age_ms` describe returned inference results. The existing
+`output_frames`, `service_ms`, and `age_ms` fields remain publication-only;
+`stale_results` and `superseded_results` record the two rejection reasons.
+
+### Exercise prompt changes
+
+```bash
+./docker/rocm714/run.sh python examples/ros_node_skeleton.py \
+  --checkpoint /models/sam3 \
+  --onnx-dir /models/onnx_files_504 \
+  --video assets/blackswan.mp4 \
+  --text swan \
+  --policy always_full \
+  --max-frames 50 \
+  --switch-at 15:swan,water 30:swan
+```
+
+Expect both reset messages:
+
+```text
+[node] reset_prompts(['swan', 'water']) at source=15
+[node] reset_prompts(['swan']) at source=30
+```
+
+The indices are zero-based source arrivals, not model frame indices or output
+counts. Check the final generation statistics as well; reset messages show
+that requests occurred, while the statistics report work in each generation.
+A reset can cancel a queued frame, so nonzero dropped or aborted counts during
+transitions are expected. Inspect inference failures and drain failures separately.
+
+## Runtime structure
 
 The design optimizes observation freshness for occupancy-grid updates:
 
@@ -24,14 +128,10 @@ There is no live N+1 preprocessing or backbone lookahead. While inference is
 busy, newer camera arrivals replace the one waiting frame before any model
 state is touched.
 
-The default robotics policy still runs full text detection on every consumed
-frame. `demo_live.py --redetect-interval-ms N`, with `N > 0`, is an opt-in
-unified hybrid: one `SAM3Live` model performs full detection on
-wall-clock keyframes and native detector-skip tracking between them. Before a
-keyframe it replaces the inner session with a fresh one, reuses encoded prompt
-tensors, and maps the new detections to stable public IDs by same-prompt mask
-IoU. There is only one active session at a time. It does not create a second
-tracker backbone or load legacy MIGraphX 2.16 tracker artifacts.
+The default policy runs full text detection on every consumed frame using
+`SAM3Live`. The separate demo's optional `SAM3HybridLive` mode is described in
+[Usage](../docs/usage.md#optional-hybrid-detection); it is not this skeleton's
+backend.
 
 ## 1. Required threading and ownership rules
 
@@ -118,14 +218,22 @@ Tracker-only output must also be treated asymmetrically even when it is fresh:
 
 - `detected=False`: masks that are present may add positive occupied evidence;
   an absent/lost mask is unknown and must not clear free space.
-- `detected=True`: negative/free-space clearing is permitted after the normal
-  timestamp and result-age checks.
+- `detected=True`: the detector ran on this frame. This alone does not prove
+  that an area is free of obstacles, even after timestamp and age checks.
 
-The unified hybrid reports lost IDs in `lost_object_ids` and makes the recovery
-detection request sticky until the next consumed frame. Latest-frame dropping
+`negative_evidence_valid` is a detection-policy gate, not a free-space
+guarantee. Clearing also requires application-specific geometric evidence,
+visibility and sensor coverage checks, and a policy for the selected semantic
+classes. Missing masks can result from missed detections, score filtering,
+object caps, or suppression; they must not by themselves clear a costmap.
+
+Applications using `SAM3HybridLive` separately also receive lost IDs in
+`lost_object_ids`. Its recovery detection request remains sticky until the
+next consumed frame. Latest-frame dropping
 means that recovery frame need not be the next source sequence. Use
 `redetect_reason == "object_loss"` to identify that recovery keyframe, and use
-`negative_evidence_valid` as the direct gate for clearing operations.
+`negative_evidence_valid` as the detection-policy gate alongside the
+application's geometric and observation checks.
 Other `redetect_reason` values are `first_frame`, `interval`,
 `caller_override`, `inner_forced`, `reset_prompts`, `reset_tracking`,
 `detection_retry`, and `None`.
@@ -207,56 +315,41 @@ The standalone harness calls finish at video EOF and close in a finally block.
 A real camera adapter must also provide a way to cancel a blocking camera read;
 closing LatestFramePipeline cannot unblock a driver call that it does not own.
 
-## 7. Standalone source-paced check
+## 7. Model output
 
-The example reads at the video file's declared FPS instead of processing the
-file as fast as possible:
+The result carried by `LatestFrameResult.output` has the normal `SAM3Live`
+schema. For this single-object example, `mask` is an HxW NumPy boolean array
+at the original image resolution, and box coordinates are source-image pixels:
 
-    ./docker/rocm714/run.sh python examples/ros_node_skeleton.py \
-        --checkpoint /models/sam3 \
-        --onnx-dir /models/onnx_files_504 \
-        --video assets/blackswan.mp4 \
-        --text swan \
-        --policy always_full \
-        --max-frames 200
+```python
+{
+    "object_ids": [3],
+    "scores": {3: 0.91},
+    "masks": {3: mask},
+    "boxes": {3: (40.0, 20.0, 140.0, 180.0)},
+    "prompt_to_obj_ids": {"person": [3]},
+    "frame_idx": 42,
+    "detected": True,
+    "negative_evidence_valid": True,
+}
+```
 
-The default policy is always_full, and MIG enables parallel detector/tracker
-tails and the fixed 504px DETR decoder automatically when its artifact is
-present. Use `--no-parallel-tail` or `--no-fixed-detr-decoder` only for
-diagnosis. The report separates source callbacks,
-accepted submissions, emitted outputs, rejected transition frames, inference
-service time, frame age, and per-generation drop counters.
+Every returned object ID has a score, mask, box, and prompt assignment. An
+empty result has no object IDs and empty object maps; prompt groups may remain
+with empty lists.
 
-Prompt generation changes can be exercised with:
+Only `SAM3HybridLive` adds these fields; the current `SAM3Node` does not:
 
-    --switch-at 60:person,vehicle 120:floor,wall
+| Field | Meaning |
+|---|---|
+| `keyframe` | Whether this is a clean full-detection keyframe |
+| `lost_object_ids` | Public object IDs lost during propagation |
+| `redetect_reason` | Why a detection step was requested |
 
-The indices are source arrivals, not model frame indices or output counts.
-
-## 8. Model output
-
-The result carried by LatestFrameResult.output has the normal SAM3Live schema:
-
-    {
-        "object_ids":         [3, 7, 12],
-        "scores":             {3: 0.91, 7: 0.83},
-        "masks":              {3: HxW_bool_array},
-        "boxes":              {3: (x1, y1, x2, y2)},
-        "prompt_to_obj_ids":  {"person": [3, 7], "car": [12]},
-        "frame_idx":          42,
-        "detected":           True,
-        "keyframe":           True,
-        "lost_object_ids":    [],
-        "redetect_reason":    "interval",
-        "negative_evidence_valid": True,
-    }
-
-`keyframe`, `lost_object_ids`, and `redetect_reason` are supplied by
-`SAM3HybridLive`. Both direct `SAM3Live` and hybrid callers always receive
-`detected` and `negative_evidence_valid`; the latter is true exactly when the
-detector actually ran. Costmap integrations should read
-`negative_evidence_valid` directly, not infer clearing permission from an
-empty mask.
+Both direct `SAM3Live` and hybrid callers receive `detected` and
+`negative_evidence_valid`; the latter is true exactly when the detector ran.
+It is not a clearing guarantee; apply the observation checks in
+[Occupancy-grid timestamps and age](#3-occupancy-grid-timestamps-and-age).
 
 For long-running streams, model/session history still needs a bounded reset
 policy. Perform any tracking reset with the same stop/join/reset/new-generation

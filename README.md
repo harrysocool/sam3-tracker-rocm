@@ -10,10 +10,9 @@ available frame and runs full text detection on every consumed frame by
 default. It includes a video demo, a [ROS 2 integration skeleton](examples/README.md),
 and an offline text-prompt inference tool.
 
-<img src="docs/images/demo_swan_text_mig.gif" width="480" alt="Text-prompted swan segmentation across video frames">
-
-*Prompt: `"swan"`. Qualitative example from the offline text-prompt path, not a
-recording of the live performance benchmark.*
+| `"swan"` | `"camel"` | `"pig"` (3 objects) |
+|:---:|:---:|:---:|
+| <img src="docs/images/demo_swan_text_mig.gif" width="260" alt="swan text-prompt segmentation"> | <img src="docs/images/demo_camel_text_mig.gif" width="260" alt="camel text-prompt segmentation"> | <img src="docs/images/demo_pigs_multi_object.gif" width="260" alt="three pigs tracked with a text prompt"> |
 
 ## Contents
 
@@ -33,7 +32,8 @@ recording of the live performance benchmark.*
 | Validated GPU | AMD Ryzen AI Max+ 395 / Radeon 8060S (`gfx1151`); other AMD GPUs are untested |
 | Host | Linux x86-64, with an AMDGPU driver exposing `/dev/kfd` and `/dev/dri` |
 | Tools | Docker with BuildKit, permission to run Docker, Git, and `curl` |
-| Network | Access to Docker Hub, GitHub releases, AMD repositories, PyPI, and Hugging Face for the checkpoint |
+| Network | Access to Docker Hub, Ubuntu package repositories, GitHub releases, AMD repositories, and PyPI for runtime dependencies |
+| SAM3 weights | A compatible local `model.safetensors`, obtained separately under the [SAM License](model/sam3/LICENSE) |
 | Disk | At least 30 GiB free; 40 GiB is recommended for clean rebuilds and validation |
 | Runtime | ROCm **7.14**, MIGraphX **2.17**, ONNX Runtime **1.24.2**, installed inside the container |
 
@@ -49,7 +49,7 @@ recommended **504px text / live pipeline**. Run the commands in Bash, in order,
 from the same shell. An existing checkout of `main` or a compatible development
 branch can skip the clone.
 
-### 1. Get the source and checkpoint
+### 1. Get the source and configure local weights
 
 ```bash
 git clone --branch main --single-branch \
@@ -58,21 +58,25 @@ cd sam3-tracker-rocm
 export SAM3_MODEL_DIR="$PWD/model/sam3"
 ```
 
-The checkout includes model configuration and tokenizer files, **not weights**.
-Request access and accept the terms at
-[facebook/sam3](https://huggingface.co/facebook/sam3). With the
-[Hugging Face CLI](https://huggingface.co/docs/huggingface_hub/guides/cli) installed
-on the host, download the checkpoint separately:
+The checkout includes model configuration and tokenizer files. Supply the
+local weights described in [Requirements](#requirements) alongside those files.
+
+If `model.safetensors` is not already present in `SAM3_MODEL_DIR`, link your
+existing file using its absolute path:
 
 ```bash
-hf auth login
-hf download facebook/sam3 model.safetensors --local-dir "$SAM3_MODEL_DIR"
+ln -s /absolute/path/to/model.safetensors \
+  "$SAM3_MODEL_DIR/model.safetensors"
 ```
 
-Already have the checkpoint? Skip the download and set `SAM3_MODEL_DIR` to the
-absolute path of your complete model directory, containing `model.safetensors`
-alongside the config and tokenizer files. Do not redownload over an existing
-weight symlink. The weights remain subject to the separate SAM License.
+Replace the source path with your actual file. You can also copy it into place.
+Keep the configuration and tokenizer files supplied by this checkout; the
+runtime expects the weight file to be named `model.safetensors`. If you already
+have a complete compatible model directory, set `SAM3_MODEL_DIR` to its absolute
+path instead.
+
+To compare your weights with the published validation checkpoint, see the
+optional [checkpoint identity check](docs/evaluation.md#checkpoint-identity).
 
 ### 2. Assemble the runtime
 
@@ -145,13 +149,14 @@ Run the source-paced demo after the smoke passes:
 ./docker/rocm714/run.sh python demo_live.py \
   --checkpoint /models/sam3 \
   --video assets/blackswan.mp4 --text swan \
-  --max-frames 60
+  --max-frames 50
 ```
 
-The bundled video simulates live arrivals. Output is saved on the host as
-`results/blackswan_live_<timestamp>.mp4`. By default, inference uses MIG,
-same-frame detector/tracker overlap, and the fixed decoder, with full detection
-on every consumed frame. **This command is a demo, not a benchmark.**
+The bundled video contains 50 frames at 24 FPS and simulates live arrivals.
+Output is saved on the host as `results/blackswan_live_<timestamp>.mp4`.
+By default, inference uses MIG, same-frame detector/tracker overlap, and the
+fixed decoder, with full detection on every consumed frame.
+**This command is a demo, not a benchmark.**
 
 `--max-frames` counts source frames, not output masks: stale waiting frames are
 replaced by newer arrivals. The output video contains emitted frames only and
@@ -160,24 +165,50 @@ next-frame GPU preprocessing or backbone lookahead in the live path.
 
 For camera / ROS input, use the [integration guide](examples/README.md);
 `demo_live.py` itself accepts a video file. See [Usage](#usage)
-for optional hybrid detection and the reference tools.
-
-> **Occupancy mapping:** preserve sensor exposure time separately from host
-> arrival time and reject stale results. Tracker-only output may add positive
-> occupied evidence, but missing masks must not clear free space. Use
-> `negative_evidence_valid` together with timestamp and result-age checks.
+for offline inference and optional hybrid detection.
 
 ---
 
 ## Usage
 
-The default live command is in [Quick start](#quick-start). Pass multiple
-prompts with `--text swan water`, or explicitly opt into hybrid detection:
+Live and offline inference share the optimized **504px FP16 MIG backend** by
+default. Choose the entry point by how input frames should be processed:
+
+| Entry point | Frame handling | Details |
+|---|---|---|
+| `demo_live.py` | Process the newest available frame; stale waiting frames may be dropped | [Live usage](docs/usage.md#live-video) |
+| `tools/text_baseline.py` | Process every selected video frame in order, or a single image | [Offline usage](docs/usage.md#offline-text-inference) |
+
+### Live video
+
+Use the live command in [Quick start](#quick-start) for freshness-oriented
+processing. Pass multiple prompts with `--text swan water`. For camera / ROS
+input, use `SAM3Live` with the latest-frame pipeline described in the
+[integration guide](examples/README.md).
+
+### Offline images and videos
+
+For a recorded video where every selected frame should be processed:
+
+```bash
+./docker/rocm714/run.sh python tools/text_baseline.py \
+  --checkpoint /models/sam3 \
+  --video assets/blackswan.mp4 --text swan --max-frames 50
+```
+
+Output is saved as `demo_out/text/blackswan_text.mp4` in the host checkout.
+Offline video inference uses backbone prefetch for throughput; live does not.
+See [offline usage](docs/usage.md#offline-text-inference) for single images,
+multiple prompts, output controls, and the explicit PyTorch reference mode.
+
+### Optional hybrid detection
+
+To enable optional hybrid detection:
 
 ```bash
 ./docker/rocm714/run.sh python demo_live.py \
   --checkpoint /models/sam3 \
-  --video assets/blackswan.mp4 --text swan \
+  --video assets/blackswan.mp4 --text swan --max-frames 50 \
   --redetect-interval-ms 1000
 ```
 
@@ -185,19 +216,15 @@ Hybrid uses periodic full-detection keyframes and native tracking between them.
 It changes detection frequency, not the latest-frame scheduling policy.
 Full detection on every consumed frame remains the default.
 
-| Entry point | Purpose | Details |
-|---|---|---|
-| `demo_live.py` / `SAM3Live` | Freshness-first streaming, one or more prompts | [Live usage](docs/usage.md#live-video) |
-| `tools/text_baseline.py` | Accelerated offline inference with an explicit PyTorch reference mode | [Offline usage](docs/usage.md#offline-text-inference) |
+### Historical box-prompt reference
 
 The legacy `demo_box.py` / `SAM3OnnxTracker` path is retained for historical
 box-prompt and DAVIS regression work. It requires a separate artifact set that
 `setup.sh --models` does not build, and it is outside the supported release
-smoke. See the [archived box reference](docs/usage.md#box-prompt-reference).
+smoke. See the [historical box reference](docs/usage.md#historical-box-prompt-reference).
 
 See the [usage guide](docs/usage.md) for parameters, output files, diagnostic
-flags, and additional visual examples. Camera / ROS integrations should follow
-the [ownership, timestamps, and lifecycle rules](examples/README.md).
+flags, and additional visual examples.
 
 ## Performance
 
@@ -206,20 +233,27 @@ Recorded live reference runs on **Ryzen AI Max+ 395 / gfx1151**, **504px**,
 ORT 1.24.2. The source was paced at 24 FPS for 250 arrivals; not all arrivals
 were processed. Measurements exclude overlay and video encoding.
 
-| Detection policy | Output rate | Arrival-to-result age p95 | Emitted / captured |
+Both modes ran with the fixed 504px DETR decoder and same-frame
+detector/tracker parallel tail enabled. These are the optimized live defaults
+with the complete MIG artifacts built by Quick start.
+
+| Detection policy | Mean service time | Output rate | Emitted / captured |
 |---|---:|---:|---:|
-| **Full detection on every consumed frame (default)** | **9.13 Hz** | **152.73 ms** | 96 / 250 |
-| Hybrid, 1000 ms detection interval (opt-in) | 10.47 Hz | 135.63–137.76 ms | 110 / 250 per run |
+| **Full detection on every consumed frame (default)** | **109.53 ms** | **9.13 Hz** | 96 / 250 |
+| Hybrid, 1000 ms detection interval (opt-in) | 95.43–95.48 ms | 10.47 Hz | 110 / 250 per run |
+
+Service time measures processing of a selected frame, including preprocessing,
+model inference, and output postprocessing. Output rate counts completed results.
 
 These are September 1–2, 2026 reference measurements, **not a new release
 benchmark or a paired full-versus-hybrid speedup claim**. The full-mode
 statistics exclude the first five outputs; the hybrid statistics include all
-outputs after explicit prewarm. Age starts at host arrival, not sensor exposure,
-and these rates are not input FPS or a real-time deadline guarantee.
+outputs after explicit prewarm. These rates are not input FPS or a real-time
+deadline guarantee.
 
 [Performance details](docs/performance.md) record the measurement windows,
 multi-object scaling, fixed-decoder A/B, and correctness checks. Offline
-throughput and historical box-only results are listed separately.
+throughput and historical results are listed separately.
 Use the [evaluation guide](docs/evaluation.md) for checks and measurement scope.
 
 ## Documentation
@@ -229,7 +263,7 @@ Use the [evaluation guide](docs/evaluation.md) for checks and measurement scope.
 - [Camera / ROS 2 integration](examples/README.md)
 - [Performance records and correctness evidence](docs/performance.md)
 - [Evaluation and regression commands](docs/evaluation.md)
-- [Historical host setup, box benchmarks, and optimization notes](docs/historical/legacy-runtime.md)
+- [Historical runtime and optimization notes](docs/historical/legacy-runtime.md)
 - [Release notes](docs/releases/)
 
 ## Known limitations
@@ -241,10 +275,8 @@ Use the [evaluation guide](docs/evaluation.md) for checks and measurement scope.
 - **Object scaling:** more active objects increase tracker cost. Live and
   offline default to a five-object cap per prompt; this is not a performance guarantee.
 - **Live output drops frames by design.** Use the offline tool when every
-  source frame must be processed. The demo accepts files; camera / ROS transport
-  and occupancy-grid publication require application integration.
-- **Mapping safety:** maintain exposure-time pose alignment and an age budget;
-  tracker-only missing masks are not evidence of free space.
+  source frame must be processed. The demo accepts files; camera / ROS input
+  requires application integration.
 - **Long streams:** keep a bounded session-reset policy. Reset prompts or
   tracking only after stopping the active pipeline; see the integration guide.
 
@@ -252,9 +284,8 @@ Use the [evaluation guide](docs/evaluation.md) for checks and measurement scope.
 
 ## Acknowledgements
 
-- **SAM3**: [facebookresearch/sam3](https://github.com/facebookresearch/sam3) — model weights
-  and architecture. Weights must be downloaded separately from
-  [facebook/sam3](https://huggingface.co/facebook/sam3) on HuggingFace.
+- **SAM3**: [facebookresearch/sam3](https://github.com/facebookresearch/sam3) —
+  upstream model architecture and materials, subject to the separate SAM License.
 - **DART**: the `sam3_tracker_video` model class originates from the
   [DART](https://arxiv.org/abs/2603.11441) project's transformers fork, since merged
   into HuggingFace Transformers (≥ 5.7.0).

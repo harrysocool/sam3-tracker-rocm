@@ -1,5 +1,12 @@
 # MIGraphX Backbone Investigation
 
+> **Historical pre-patch investigation, May 7, 2026.** The conclusion below
+> that the PyTorch backbone is "irreplaceable" was superseded by subsequent
+> find_splits, layout, MLIR, and GPU-I/O work. Preserve these experiments as
+> historical evidence, not current deployment advice. See the
+> [later backbone optimization record](backbone_optimization.md) and
+> [current performance records](../docs/performance.md).
+
 **Date**: 2026-05-07  
 **Goal**: Replace PyTorch backbone with MIGraphX ONNX to improve inference speed  
 **Conclusion**: **PyTorch backbone is irreplaceable** for this model architecture  

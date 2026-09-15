@@ -1,9 +1,9 @@
-# Installing / building patched MIGraphX (`2.15+patches`) for SAM3 tracker
+# Historical MIGraphX 2.15 patch installation and source build
 
 > **Historical MIGraphX 2.15 instructions.** The performance claims and
 > compatibility recommendations below refer to that older stack, not current
 > live deployment. These patches are not the current installation requirement.
-> Use [Quick start](../README.md#quick-start) for the supported 2.17 container;
+> Use [Quick start](../../README.md#quick-start) for the supported 2.17 container;
 > this page is retained as source-build history, not a fallback.
 
 The SAM3 tracker's headline FPS numbers (9.46 / 2.39 at 504 / 1008 px) require

@@ -1,5 +1,12 @@
 # Backbone Optimization
 
+> **Historical MIGraphX 2.15-era optimization record.** The tables and
+> "Remaining Opportunities" below describe that stage, not the complete
+> current optimization stack. They do not cover the later GPU-I/O, MIGraphX
+> 2.17, or FC1-sink work. Current runtime settings and measured results are in
+> the [container guide](../docker/rocm714/README.md) and
+> [performance records](../docs/performance.md).
+
 ## Overview
 
 The SAM3 vision encoder (backbone) was the dominant bottleneck.
@@ -14,7 +21,7 @@ and `If` ops that MIGraphX cannot efficiently handle. After onnxsim simplificati
 (9324 → 2202 nodes), profiling showed **Gemm+MatMul = 63% of runtime** — MIGraphX
 used untuned generic GEMM kernels vs PyTorch's TunableOp-autotuned hipBLASLt.
 
-Full investigation: [`migrachx_backbone_investigation.md`](migrachx_backbone_investigation.md)
+Full investigation: [`migraphx_backbone_investigation.md`](migraphx_backbone_investigation.md)
 
 ---
 

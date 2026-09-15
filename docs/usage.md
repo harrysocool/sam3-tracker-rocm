@@ -15,17 +15,42 @@ should use the [integration skeleton](../examples/README.md), not the file demo.
 # Default: full detection on every consumed frame
 ./docker/rocm714/run.sh python demo_live.py \
   --checkpoint /models/sam3 \
-  --video assets/blackswan.mp4 --text swan --max-frames 60
+  --video assets/blackswan.mp4 --text swan --max-frames 50
 
 # Multiple prompts, same defaults
 ./docker/rocm714/run.sh python demo_live.py \
   --checkpoint /models/sam3 \
-  --video assets/blackswan.mp4 --text swan water --max-frames 60
+  --video assets/blackswan.mp4 --text swan water --max-frames 50
 ```
 
 Output defaults to `results/<video-stem>_live_<timestamp>.mp4`; override it with
 `--output`. Container-relative output paths under `/workspace` refer to the
 checkout on the host.
+
+### Use your own video
+
+The wrapper mounts the repository at `/workspace`. Copy your input into the
+ignored `results/inputs/` directory and use its container path:
+
+```bash
+mkdir -p results/inputs
+cp /absolute/path/to/my-video.mp4 results/inputs/my-video.mp4
+
+./docker/rocm714/run.sh python demo_live.py \
+  --checkpoint /models/sam3 \
+  --video /workspace/results/inputs/my-video.mp4 \
+  --text person \
+  --output /workspace/results/my-video-segmented.mp4
+```
+
+Replace the input path and prompt with your own. The output is saved as
+`results/my-video-segmented.mp4` in the host checkout.
+
+An arbitrary host path such as `/home/user/videos/my-video.mp4` is not visible
+inside the container unless it lies in one of the configured mounts. A video
+symlink pointing outside those mounts is insufficient. See the
+[mount reference](../docker/rocm714/README.md#directories-and-mounts) for the
+host-to-container mapping.
 
 ### Scheduling and ownership
 
@@ -48,7 +73,7 @@ wall-clock recording or proof of the model's throughput.
 ```bash
 ./docker/rocm714/run.sh python demo_live.py \
   --checkpoint /models/sam3 \
-  --video assets/blackswan.mp4 --text swan \
+  --video assets/blackswan.mp4 --text swan --max-frames 50 \
   --redetect-interval-ms 1000
 ```
 
@@ -104,10 +129,11 @@ skeleton provides this lifecycle; the demo does not switch prompts mid-stream.
 
 ## Offline text inference
 
-`tools/text_baseline.py` uses HF `Sam3VideoModel` with a preloaded video session.
-It processes the selected video frames in order rather than dropping stale
-waiting frames. Both this path and default live run detection on every
-processed frame; their scheduling and output-rate measurements differ.
+`tools/text_baseline.py` uses HF `Sam3VideoModel`. It preloads input frames and
+advances the tracking session one frame at a time, processing all selected
+frames in order rather than dropping stale waiting frames. Both this path and
+default live run detection on every processed frame; their scheduling and
+output-rate measurements differ.
 
 The tool defaults to **504px MIGraphX inference with the fixed DETR decoder**,
 same-frame parallel tails, and next-frame backbone prefetch for videos. It uses
@@ -115,7 +141,7 @@ the artifact mount configured by Quick start through `SAM3_DEFAULT_ONNX_DIR`.
 Single-image runs do not prefetch another frame.
 
 Like live, `--text` accepts multiple prompts and quoted multiword phrases.
-The default `--max-frames 120` bounds the preloaded video session; use
+The default `--max-frames 120` limits the number of input frames preloaded; use
 `--max-frames 0` to read the entire video. Full-video loading requires memory
 for the selected input frames and inference session, while live reads frames
 as they arrive and defaults to no source-frame limit.
@@ -132,18 +158,19 @@ as they arrive and defaults to no source-frame limit.
   --video assets/blackswan.mp4 --text swan water \
   --max-objects 2 --max-frames 50
 
-# Explicit PyTorch reference at the same resolution
+# Accelerated single image, using the defaults
+./docker/rocm714/run.sh python tools/text_baseline.py \
+  --checkpoint /models/sam3 \
+  --image assets/truck.jpg --text truck
+
+# Explicit PyTorch video reference at the same resolution
 ./docker/rocm714/run.sh python tools/text_baseline.py \
   --checkpoint /models/sam3 \
   --video assets/blackswan.mp4 --text swan --no-mig --max-frames 50
-
-# Pure-PyTorch single-image reference
-./docker/rocm714/run.sh python tools/text_baseline.py \
-  --checkpoint /models/sam3 \
-  --image assets/truck.jpg --text truck --no-mig
 ```
 
-`--no-mig` also disables the fixed decoder, parallel tails, and backbone prefetch.
+For either images or videos, add `--no-mig` to select the PyTorch reference.
+It disables the fixed decoder, parallel tails, and backbone prefetch.
 Add `--imgsz 1008` for the original-resolution PyTorch reference. MIG at 1008px
 requires an explicit `--onnx-dir` containing separately built 1008px artifacts;
 the 504px Quick start artifacts cannot be used at that resolution.
@@ -176,11 +203,17 @@ throughput, while live consumes the newest available frame. See
 
 ### Shared output behavior
 
-Both entry points use the same object-limit and postprocessing helpers. They
+Both CLI tools use the same object-limit and postprocessing helpers. They
 resize mask logits to the original image size before binarization, apply the
 processor's suppression and per-prompt overlap rules, and return the same
 mask, box, score, object-ID, and prompt-ownership fields before rendering.
-The same score filter is then applied to every output frame.
+Both apply `--min-score` (default 0.5) to every output frame.
+
+The Python API `SAM3Live.infer()` returns standard postprocessed outputs
+without applying the CLI's score threshold. Direct API callers can apply
+`tracker.output_processing.filter_result(result, min_score=0.5)` when needed.
+This output filter does not remove objects from the tracking session; the
+per-prompt object cap is enforced separately.
 
 Offline keeps preloaded inputs separate from tracking history and passes each
 consumed frame through the same streaming model entry point as live. Future
@@ -196,10 +229,12 @@ below the score threshold are still written to the output video.
 Different frame-selection policies can still produce different tracking
 histories: comparisons with live must replay the same selected input frames.
 
-## Box-prompt reference
+## Historical box-prompt reference
 
-`demo_box.py` uses `SAM3OnnxTracker` for single-object tracking from a supplied
-frame-0 box. It skips text detection. The box is `x1,y1,x2,y2` in source pixels.
+`demo_box.py` and `SAM3OnnxTracker` are retained for historical box-prompt and
+DAVIS regression work. They are outside the current supported text/live build
+and release smoke. The tracker uses a supplied frame-0 box, expressed as
+`x1,y1,x2,y2` in source pixels, and skips text detection.
 
 This path needs a separate tracker backbone and tracker decoder artifacts;
 **the text/live Quick start does not build that artifact set**. Its historical
@@ -219,7 +254,7 @@ recordings of the current live throughput or frame-age measurements.
 |:---:|:---:|:---:|
 | <img src="images/demo_swan_text_mig.gif" width="260" alt="swan text-prompt segmentation"> | <img src="images/demo_camel_text_mig.gif" width="260" alt="camel text-prompt segmentation"> | <img src="images/demo_pigs_multi_object.gif" width="260" alt="three pigs tracked with a text prompt"> |
 
-### Box-prompt reference
+### Historical box-prompt examples
 
 | truck — single image | dog-agility — video |
 |:---:|:---:|
