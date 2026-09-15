@@ -36,6 +36,8 @@ def test_live_defaults_to_mig_parallel_tail_and_fixed_auto(monkeypatch):
     assert args.fixed_detr_decoder is None
     assert str(args.onnx_dir) == "onnx_files_504_mgx217"
     assert args.redetect_interval_ms == 0.0
+    assert args.max_objects == 5
+    assert args.max_frames == 0
 
 
 def test_parallel_tail_can_be_disabled_explicitly(monkeypatch):
@@ -160,3 +162,31 @@ def test_explicit_warmup_keeps_full_detection_for_non_hybrid_mode():
         demo_live._warmup_uses_full_detection(index, hybrid=False)
         for index in range(4)
     ] == [True, True, True, True]
+
+
+@pytest.mark.parametrize(("prompts", "expected"), [
+    (["people", "dog"], ["people", "dog"]),
+    (["person on a bike"], ["person on a bike"]),
+    ([" swan ", "water", "swan"], ["swan", "water"]),
+])
+def test_live_prompt_normalization(monkeypatch, prompts, expected):
+    assert _parse(monkeypatch, "--text", *prompts).text == expected
+
+
+@pytest.mark.parametrize(("value", "expected"), [("0", 0), ("2", 2), ("-1", 5)])
+def test_live_object_limit_semantics(monkeypatch, value, expected):
+    assert _parse(monkeypatch, "--max-objects", value).max_objects == expected
+
+
+@pytest.mark.parametrize("flags", [
+    ["--text", "  "],
+    ["--max-objects", "-2"],
+    ["--max-frames", "-1"],
+    ["--min-score", "-0.1"],
+    ["--min-score", "1.1"],
+    ["--min-score", "nan"],
+])
+def test_live_invalid_output_options_are_rejected(monkeypatch, flags):
+    with pytest.raises(SystemExit) as exc:
+        _parse(monkeypatch, *flags)
+    assert exc.value.code == 2

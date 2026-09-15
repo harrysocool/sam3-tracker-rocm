@@ -38,6 +38,7 @@ import numpy as np
 
 # Trigger tracker/__init__.py ROCm patches before any HF model import.
 from tracker.live_inference import SAM3Live
+from tracker.output_processing import DEFAULT_MAX_OBJECTS_PER_PROMPT, filter_result
 
 
 # Fixed palette (BGR).
@@ -84,11 +85,9 @@ def parse_args():
                    help="Force re-bootstrap every N seconds wall-clock. Catches scene "
                         "changes the score-only drift signal cannot detect. "
                         "Default 180s (3 min safety net); set to 0 to disable.")
-    p.add_argument("--max-objects", type=int, default=-1,
-                   help="Cap tracked objects per prompt. -1 = use SAM3Live default (5). "
-                        "0 = explicitly unlimited (NOT recommended — session accumulates "
-                        "ghost detections that bloat tracker propagation to seconds per "
-                        "frame). Positive int = per-prompt cap.")
+    p.add_argument("--max-objects", type=int, default=DEFAULT_MAX_OBJECTS_PER_PROMPT,
+                   help="Maximum tracked objects per prompt (default 5; 0 = unlimited). "
+                        "The legacy -1 value also selects the default.")
     p.add_argument("--output", type=Path, default=None,
                    help="Output mp4. Default: results/<video-stem>_live_<ts>.mp4")
     p.add_argument("--max-frames", type=int, default=0,
@@ -160,6 +159,18 @@ def parse_args():
     args = p.parse_args()
     if (args.text is None) == (args.text_set is None):
         sys.exit("Pass exactly one of --text or --text-set.")
+    if args.text is not None:
+        args.text = list(dict.fromkeys(prompt.strip() for prompt in args.text))
+        if not all(args.text):
+            p.error("--text prompts must not be empty")
+    if args.max_objects == -1:
+        args.max_objects = DEFAULT_MAX_OBJECTS_PER_PROMPT
+    if args.max_objects < 0:
+        p.error("--max-objects must be non-negative (or -1 for the default)")
+    if args.max_frames < 0:
+        p.error("--max-frames must be non-negative; 0 reads to the end")
+    if not 0.0 <= args.min_score <= 1.0:
+        p.error("--min-score must be between 0 and 1")
     if args.parallel_tail is None:
         args.parallel_tail = args.mig
     if args.parallel_tail and not args.mig:
@@ -301,32 +312,6 @@ def overlay(bgr: np.ndarray, result: dict, prompts: list[str],
     return vis
 
 
-def filter_result(result: dict, min_score: float) -> dict:
-    """Drop objects below threshold (in-place on a copy)."""
-    keep = [oid for oid in result["object_ids"]
-            if result["scores"].get(oid, 0.0) >= min_score]
-    keep_set = set(keep)
-    filtered = {
-        "object_ids": keep,
-        "scores": {k: v for k, v in result["scores"].items() if k in keep_set},
-        "masks": {k: v for k, v in result["masks"].items() if k in keep_set},
-        "boxes": {k: v for k, v in result["boxes"].items() if k in keep_set},
-        "prompt_to_obj_ids": {p: [o for o in oids if o in keep_set]
-                              for p, oids in result["prompt_to_obj_ids"].items()},
-        "frame_idx": result["frame_idx"],
-    }
-    for key in (
-        "detected",
-        "keyframe",
-        "lost_object_ids",
-        "redetect_reason",
-        "negative_evidence_valid",
-    ):
-        if key in result:
-            filtered[key] = result[key]
-    return filtered
-
-
 def _warmup_uses_full_detection(index: int, *, hybrid: bool) -> bool:
     """Warm full mode every frame; warm hybrid detection then propagation."""
     return not hybrid or index == 0
@@ -381,10 +366,7 @@ def main():
     import torch
     dtype = torch.float16 if args.dtype == "fp16" else torch.float32
 
-    max_obj = (
-        None if args.max_objects == 0
-        else (args.max_objects if args.max_objects > 0 else 5)
-    )
+    max_obj = None if args.max_objects == 0 else args.max_objects
     hybrid_mode = args.redetect_interval_ms > 0.0
     if not hybrid_mode:
         live = SAM3Live(

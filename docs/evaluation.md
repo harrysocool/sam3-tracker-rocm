@@ -67,7 +67,8 @@ offline lookahead configuration, add `--pipeline-backbone`; it requires
 `--parallel-tail` and does not make this a live test.
 
 This script patches the backbone, DETR encoder, and memory attention but
-retains the native DETR decoder. Decoder changes additionally need a
+retains the native DETR decoder. The default live and offline 504px entry points
+also use the fixed decoder, which additionally needs a
 native-versus-fixed full-path comparison and replay of the exact dropped
 latest-frame subsequence. The [fixed-decoder evidence](performance.md#correctness-and-resource-checks)
 records those checks; the generic PT-vs-MIG script alone does not cover them.
@@ -88,7 +89,8 @@ negative-evidence, and reset-lifecycle checks, not just a high mean IoU.
 The harness checks per-frame mask, score, object-ID, and prompt-ownership
 equivalence. Add `--pipeline-backbone` only for an offline lookahead experiment.
 Match frame windows and exclude or report pipeline fill/drain explicitly.
-This harness does not benchmark live's fixed decoder or latest-frame queue.
+This harness retains the native decoder and does not benchmark the fixed
+decoder used by the default entry points or the latest-frame queue.
 
 ## Source-paced live integration check
 

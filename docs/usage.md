@@ -78,14 +78,14 @@ Full output fields, recovery reasons, and reset rules are documented in the
 | `--imgsz` | 504; the default fixed decoder supports 504px only |
 | `--redetect-interval-ms` | 0: full detection on every consumed frame; positive: opt-in hybrid |
 | `--min-score` | 0.5: output confidence filter |
-| `--max-objects` | -1 selects the API default of 5 per prompt; positive values set a per-prompt cap; 0 explicitly removes the cap |
+| `--max-objects` | 5 per prompt; positive values set a persistent per-prompt cap; 0 explicitly removes the cap |
 | `--max-frames` | 0: whole input; otherwise cap source frames, not outputs |
 | `--warmup-frames` | 0: no explicit prewarm; positive values pre-run file frames, reset tracking, and seek back |
 | `--output` | Override the emitted-frame MP4 path |
 
-Unlimited live objects are not recommended: accumulated detections can make
-tracker work grow substantially. The offline object's cap has different
-semantics; do not assume these defaults apply to `text_baseline.py`.
+Accumulated detections can make tracker work grow substantially. Both live and
+offline default to five tracked objects per prompt; use an unlimited setting
+only when the workload calls for it.
 
 MIG, same-frame parallel tails, and the available 504px fixed decoder are
 the optimized defaults. `--no-mig`, `--no-parallel-tail`, and
@@ -102,52 +102,99 @@ Do not change prompts or reset tracking on an active inference owner. Close
 the pipeline, reset the session, and start a new generation. The integration
 skeleton provides this lifecycle; the demo does not switch prompts mid-stream.
 
-## Offline text reference
+## Offline text inference
 
 `tools/text_baseline.py` uses HF `Sam3VideoModel` with a preloaded video session.
 It processes the selected video frames in order rather than dropping stale
 waiting frames. Both this path and default live run detection on every
 processed frame; their scheduling and output-rate measurements differ.
 
-Unlike live, this tool defaults to **pure PyTorch and 1008px**. Set `--imgsz 504`
-and `--onnx-dir` explicitly when using the artifacts built by Quick start:
+The tool defaults to **504px MIGraphX inference with the fixed DETR decoder**,
+same-frame parallel tails, and next-frame backbone prefetch for videos. It uses
+the artifact mount configured by Quick start through `SAM3_DEFAULT_ONNX_DIR`.
+Single-image runs do not prefetch another frame.
+
+Like live, `--text` accepts multiple prompts and quoted multiword phrases.
+The default `--max-frames 120` bounds the preloaded video session; use
+`--max-frames 0` to read the entire video. Full-video loading requires memory
+for the selected input frames and inference session, while live reads frames
+as they arrive and defaults to no source-frame limit.
 
 ```bash
-# Offline MIG at 504px
-./docker/rocm714/run.sh python tools/text_baseline.py \
-  --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
-  --video assets/blackswan.mp4 --text swan --imgsz 504 --mig --max-frames 60
-
-# Pure-PyTorch video reference
+# Accelerated offline video, using the defaults
 ./docker/rocm714/run.sh python tools/text_baseline.py \
   --checkpoint /models/sam3 \
-  --video assets/blackswan.mp4 --text swan --imgsz 504 --max-frames 60
+  --video assets/blackswan.mp4 --text swan --max-frames 50
+
+# Multiple prompts, at most two tracked objects per prompt
+./docker/rocm714/run.sh python tools/text_baseline.py \
+  --checkpoint /models/sam3 \
+  --video assets/blackswan.mp4 --text swan water \
+  --max-objects 2 --max-frames 50
+
+# Explicit PyTorch reference at the same resolution
+./docker/rocm714/run.sh python tools/text_baseline.py \
+  --checkpoint /models/sam3 \
+  --video assets/blackswan.mp4 --text swan --no-mig --max-frames 50
 
 # Pure-PyTorch single-image reference
 ./docker/rocm714/run.sh python tools/text_baseline.py \
   --checkpoint /models/sam3 \
-  --image assets/truck.jpg --text truck --imgsz 504
+  --image assets/truck.jpg --text truck --no-mig
 ```
+
+`--no-mig` also disables the fixed decoder, parallel tails, and backbone prefetch.
+Add `--imgsz 1008` for the original-resolution PyTorch reference. MIG at 1008px
+requires an explicit `--onnx-dir` containing separately built 1008px artifacts;
+the 504px Quick start artifacts cannot be used at that resolution.
 
 Output defaults to `demo_out/text/<input-stem>_text.{jpg,mp4}`; override with
 `--output`. Use short noun phrases such as `"swan"`, `"yellow taxi"`, or
 `"a person on a bike"`.
 
-- `--min-score` defaults to 0.5.
-- `--max-objects` defaults to 0 (all qualifying objects); a positive value
-  limits the frame-0 selection by detection score. Video output can include
-  additional qualifying objects later, so this is not a persistent limit on
-  session size, per-frame output, or compute. It differs from live's per-prompt
-  cap.
-- `--parallel-tail` is opt-in here and requires `--mig`.
-- `--pipeline-backbone` additionally requires video input and `--parallel-tail`.
-  It overlaps frame N+1's stateless backbone with frame N's tail, adds pipeline
-  fill, and retains an extra frame. This offline-only optimization is not a
-  live latency improvement.
+- `--min-score` defaults to 0.5 and filters output on every frame.
+- `--max-objects` defaults to 5 per prompt. After each inference, excess objects
+  are removed from the session using their current tracker scores, matching
+  live's policy. Use 0 to leave the session uncapped.
+- Same-frame parallel tails are enabled by default with MIG. Use
+  `--no-parallel-tail` for serial MIG comparison; it also disables automatic
+  backbone prefetch.
+- Backbone prefetch is enabled by default for MIG videos with parallel tails.
+  Use `--no-pipeline-backbone` to retain same-frame overlap without lookahead.
+  Prefetch overlaps frame N+1's stateless backbone with frame N's tail, adds
+  pipeline fill, and retains an extra frame. It improves offline throughput;
+  live scheduling remains unchanged.
+- The fixed DETR decoder is enabled by default for 504px MIG and requires
+  `detr_decoder_fixed/direct_gpuio.mxr`. Use `--no-fixed-detr-decoder` for a
+  native-decoder comparison while keeping the other MIG optimizations.
+  The 1008px path uses the native decoder.
 
-The current offline tool uses the native PyTorch DETR decoder rather than
-live's auto-loaded fixed decoder. Likewise, a pure-PyTorch reference is not
-the same graph configuration as default live. See [measurement scope](evaluation.md).
+The offline and live 504px paths use the same fixed decoder implementation.
+Their scheduling and timing windows differ: offline prefetch optimizes file
+throughput, while live consumes the newest available frame. See
+[measurement scope](evaluation.md) before comparing their rates.
+
+### Shared output behavior
+
+Both entry points use the same object-limit and postprocessing helpers. They
+resize mask logits to the original image size before binarization, apply the
+processor's suppression and per-prompt overlap rules, and return the same
+mask, box, score, object-ID, and prompt-ownership fields before rendering.
+The same score filter is then applied to every output frame.
+
+Offline keeps preloaded inputs separate from tracking history and passes each
+consumed frame through the same streaming model entry point as live. Future
+backbone prefetch does not advance the tracking session. This also aligns
+the upstream model's session-length-dependent tracker encoding and hotstart
+rules; preloading a video is an input-storage choice, not a different tracking
+policy.
+
+An empty result is valid. Offline video processing continues after an empty
+first frame so targets can be detected later, and frames whose objects fall
+below the score threshold are still written to the output video.
+
+Different frame-selection policies can still produce different tracking
+histories: comparisons with live must replay the same selected input frames.
 
 ## Box-prompt reference
 
@@ -187,4 +234,5 @@ recordings of the current live throughput or frame-age measurements.
 | Latest-frame scheduling | [latest_frame.py](../tracker/latest_frame.py) |
 | Same-frame overlap / offline lookahead | [parallel_video.py](../tracker/parallel_video.py), [backbone_pipeline.py](../tracker/backbone_pipeline.py) |
 | Fixed decoder | [mig_detr_decoder.py](../tracker/mig_detr_decoder.py) |
+| Object limits and output processing | [output_processing.py](../tracker/output_processing.py) |
 | Benchmarks and regressions | [evaluation guide](evaluation.md), [eval/](../eval/) |

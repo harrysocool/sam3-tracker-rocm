@@ -8,7 +8,7 @@ and track its masks through video.
 The **streaming API prioritizes fresh observations**: it processes the newest
 available frame and runs full text detection on every consumed frame by
 default. It includes a video demo, a [ROS 2 integration skeleton](examples/README.md),
-and an offline text-prompt reference tool.
+and an offline text-prompt inference tool.
 
 <img src="docs/images/demo_swan_text_mig.gif" width="480" alt="Text-prompted swan segmentation across video frames">
 
@@ -188,7 +188,7 @@ Full detection on every consumed frame remains the default.
 | Entry point | Purpose | Details |
 |---|---|---|
 | `demo_live.py` / `SAM3Live` | Freshness-first streaming, one or more prompts | [Live usage](docs/usage.md#live-video) |
-| `tools/text_baseline.py` | Offline text-prompt reference and regression | [Offline usage](docs/usage.md#offline-text-reference) |
+| `tools/text_baseline.py` | Accelerated offline inference with an explicit PyTorch reference mode | [Offline usage](docs/usage.md#offline-text-inference) |
 
 The legacy `demo_box.py` / `SAM3OnnxTracker` path is retained for historical
 box-prompt and DAVIS regression work. It requires a separate artifact set that
@@ -238,8 +238,8 @@ Use the [evaluation guide](docs/evaluation.md) for checks and measurement scope.
   advanced research path, not supported by the current fixed decoder.
 - **Cold start:** ONNX/MXR build and first-use ORT compilation take time.
   Build once, retain caches, and measure startup separately from steady state.
-- **Object scaling:** more active objects increase tracker cost. Live defaults
-  to a five-object cap per prompt; this is not a performance guarantee.
+- **Object scaling:** more active objects increase tracker cost. Live and
+  offline default to a five-object cap per prompt; this is not a performance guarantee.
 - **Live output drops frames by design.** Use the offline tool when every
   source frame must be processed. The demo accepts files; camera / ROS transport
   and occupancy-grid publication require application integration.

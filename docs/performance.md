@@ -1,10 +1,11 @@
 # Performance records and correctness evidence
 
 This page separates live freshness measurements, offline throughput, and
-historical box-tracker results. It summarizes existing records; the README
-refresh did **not** rebuild models or run new GPU benchmarks. Runtime code and
-local model artifacts may evolve, so record their identities when reproducing
-a result. These numbers are reference observations, not deployment deadlines.
+historical box-tracker results. Published latency and throughput values retain
+their original measurement windows; newer correctness checks are labeled
+separately. Runtime code and local model artifacts may evolve, so record their
+identities when reproducing a result. These numbers are reference observations,
+not deployment deadlines.
 
 ## Measurement terms
 
@@ -154,6 +155,38 @@ The [original full-stack evaluation](rocm714_fullstack_evaluation.md) preserves
 the test sequence and synchronization findings. Current commands and the
 coverage limits of each test are in the [evaluation guide](evaluation.md).
 
+### Live/offline output unification
+
+The September 14 review validation used the same loaded 504px FP16 MIG model
+for offline prefetch and direct `SAM3Live.infer` replay of identical frames.
+Both used the fixed decoder, same-frame parallel tails, and a 0.5 output-score
+threshold in the supported ROCm 7.14 / MIGraphX 2.17 / ORT 1.24.2 runtime.
+
+| Input and policy | Compared outputs | Result |
+|---|---:|---|
+| Local `two_person_dog_lawn.mp4`, `people dog`, cap 1 per prompt | 30 frames / 60 masks | Masks, boxes, scores, IDs, and prompt ownership identical |
+| `blackswan.mp4`, `swan`, uncapped, `--max-frames 0` | 50 frames / 50 masks | All outputs identical; offline encoded all 50 frames |
+
+The multi-prompt run evicted 30 excess objects in each path and checked the
+per-prompt session limit after every frame. This is a persistent tracking cap,
+not just a rendering filter. Offline input storage is now separate from the
+tracking session, avoiding the upstream preloaded-versus-streaming differences
+in tracker temporal encoding and hotstart policy.
+
+A separate 30-frame swan run through the actual offline CLI compared pure
+PyTorch with the optimized MIG path. Original-resolution binary mask IoU was
+**0.994427 mean / 0.992279 minimum**, with matching IDs and ownership; maximum
+score difference was **0.041504**. PT and MIG outputs are not bit-exact.
+
+These are correctness checks, not latency measurements or a general guarantee
+of identical results across separately loaded models or different frame
+sequences. The initial output-only refactor still differed between preloaded
+and live sessions; the accepted run includes frame-by-frame session alignment.
+Scripts, source/input/artifact hashes, logs, and `acceptance.json` are retained
+in maintainer storage under
+`gpu/experiments/unified-output-causal-20260914.PIDaTgnj/`. The multi-person
+fixture is local and is not distributed with the repository.
+
 ### Hybrid versus full detection on a real scene
 
 A separate 50-frame `office_hallway_two_way` test used a local ROS-bag-derived
@@ -202,6 +235,19 @@ end-to-end propagation window.
 | Serial MIG | 8.51 |
 | Same-frame parallel tail | 8.93–9.09; median 9.03 |
 | Parallel tail + next-frame backbone + per-instance position-encoding cache | 10.63 / 10.84 / 10.78; median 10.78 |
+
+The current offline 504px CLI enables the fixed decoder, parallel tails, and
+backbone prefetch for MIG videos by default. For the native-decoder schedules
+above, add `--no-fixed-detr-decoder`; use `--no-parallel-tail` for serial MIG or
+`--no-pipeline-backbone` for same-frame overlap only. `--no-mig` selects the
+PyTorch reference and disables all MIG optimizations. These historical results
+retain their original artifacts and measurement windows; changing defaults
+does not remeasure them.
+
+The current CLI also shares live's postprocessing, frame-by-frame tracking
+session semantics, and persistent object limits (five per prompt by default,
+`--max-objects 0` for uncapped sessions). The historical offline figures above
+predate that unification.
 
 An earlier pipeline-only record was 10.21–10.27 FPS, before the final
 position-encoding cache improvement. It is not a conflicting measurement of
