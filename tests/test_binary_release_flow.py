@@ -84,16 +84,23 @@ def test_repository_license_scope_is_explicit():
     assert "SAM License" in (ROOT / "model/sam3/LICENSE").read_text()
 
 
-def test_release_version_is_consistent():
-    version = "0.2.0-rc4"
-    assert (ROOT / "VERSION").read_text().strip() == version
+def test_source_release_and_runtime_dependency_versions_are_consistent():
+    source_version = "0.2.0-rc5"
+    runtime_version = "0.2.0-rc4"
+    assert (ROOT / "VERSION").read_text().strip() == source_version
+    release_notes = ROOT / "docs/releases" / f"{source_version}.md"
+    assert release_notes.is_file()
+    assert f"SAM3 ROCm {source_version}" in release_notes.read_text()
+
+    # rc5 reuses the checksum-pinned runtime bundle published for rc4. Keep
+    # source-release metadata independent from the binary dependency version.
     for path in (
         ROOT / "docker/rocm714/build.sh",
         ROOT / "docker/rocm714/run.sh",
         ROOT / "docker/rocm714/README.md",
         ROOT / "tools/docker_test_runner.sh",
     ):
-        assert version in path.read_text()
+        assert runtime_version in path.read_text()
 
 
 def test_model_build_enables_current_optimizations():
