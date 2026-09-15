@@ -9,7 +9,8 @@ Optionally patches the detector vision_encoder with the MIGraphX backbone
 shim (--mig) so we can compare PT-only vs MIG-backbone profiles.
 
 Usage:
-    python eval/benchmarks/profile_video_pipeline.py --image assets/truck.jpg --text truck --frames 10 [--mig]
+    python eval/historical/profilers/profile_video_pipeline.py \
+        --image assets/truck.jpg --text truck --frames 10 [--mig]
 """
 from __future__ import annotations
 
@@ -54,6 +55,7 @@ def main():
         mxr = MIGraphXBackbone(
             onnx_path=det_dir / "single_simplified.onnx",
             cache_path=det_dir / "tuned.mxr",
+            gpu_io_cache_path=det_dir / "tuned_gpuio.mxr",
         )
         mxr.warmup(n=2)
         patch_sam3_video_model_with_mig(model, mxr)

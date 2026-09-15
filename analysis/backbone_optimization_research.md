@@ -1,5 +1,13 @@
 # Backbone Optimization Research — gfx1151 / MIGraphX 2.16
 
+> **Historical research snapshot, May 13, 2026 — not current tuning guidance.**
+> MLIR attention is now enabled by the backbone compiler. The old assessment
+> of GPU-resident backbone copies applies to the workload measured here, not
+> the later text full-model GPU-I/O path. See Finding #14 in the
+> [historical project summary](../docs/historical/project-summary.md#key-findings)
+> and the [current performance records](../docs/performance.md). Environment
+> variable proposals below are preserved as research history, not deployment settings.
+
 **Context**: SAM3 ViT-H backbone, 93ms/frame @504px (already FP16, autotuned, onnxsimmed).
 Copy overhead only 1.5ms — kernel is the real bottleneck. Researched 2026-05-13.
 
