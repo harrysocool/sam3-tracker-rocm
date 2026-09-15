@@ -33,9 +33,16 @@ def parse_args():
     p.add_argument("--max-frames", type=int, default=20)
     p.add_argument("--onnx-dir", type=Path, default=None,
                    help="Default: onnx_files_<imgsz>")
+    p.add_argument("--parallel-tail", action="store_true",
+                   help="Enable detector/tracker tail overlap on the MIG model")
+    p.add_argument("--pipeline-backbone", action="store_true",
+                   help="Prefetch the next MIG backbone; requires --parallel-tail")
     p.add_argument("--out", type=Path, required=True,
                    help="JSON output with per-frame IoU stats")
-    return p.parse_args()
+    args = p.parse_args()
+    if args.pipeline_backbone and not args.parallel_tail:
+        p.error("--pipeline-backbone requires --parallel-tail")
+    return args
 
 
 def load_video(path: Path, n: int):
@@ -72,38 +79,55 @@ def build_model(ckpt: Path, imgsz: int, device, dtype):
     return processor, model
 
 
-def patch_mig(model, onnx_dir: Path):
+def patch_mig(model, onnx_dir: Path, imgsz: int, parallel_tail: bool = False):
     from tracker.migraphx_runtime import MIGraphXBackbone
     from tracker.mig_vision_encoder import patch_sam3_video_model_with_mig
     det_dir = onnx_dir / "backbone_detector"
     mxr = MIGraphXBackbone(
         onnx_path=det_dir / "single_simplified.onnx",
         cache_path=det_dir / "tuned.mxr",
+        gpu_io_cache_path=det_dir / "tuned_gpuio.mxr",
     )
     patch_sam3_video_model_with_mig(model, mxr)
     detr_onnx = onnx_dir / "detector_modules" / "detr_encoder_simplified.onnx"
     if detr_onnx.exists():
         from tracker.mig_detr_encoder import patch_sam3_video_model_detr_encoder
         patch_sam3_video_model_detr_encoder(model, detr_onnx)
-    mem_attn_onnx = onnx_dir / "tracker_modules" / "memory_attention_fixed_S7_P32.onnx"
+    ptr_tokens = {504: 64, 1008: 48}.get(imgsz, 32)
+    mem_attn_onnx = (
+        onnx_dir / "tracker_modules"
+        / f"memory_attention_fixed_S7_P{ptr_tokens}.onnx"
+    )
     if mem_attn_onnx.exists():
         from tracker.mig_memory_attention import patch_sam3_video_model_memory_attention
         patch_sam3_video_model_memory_attention(model, mem_attn_onnx)
+    if parallel_tail:
+        from tracker.parallel_video import patch_parallel_video_tail
+        patch_parallel_video_tail(model)
 
 
-def run_path(processor, model, frames_pil, text, device, dtype, n: int):
+def run_path(
+    processor,
+    model,
+    frames_pil,
+    text,
+    device,
+    dtype,
+    n: int,
+    pipeline_backbone: bool = False,
+):
     """Returns list of (mask_bool_np_array_HxW, score) for each of n frames."""
     session = processor.init_video_session(
         video=frames_pil, inference_device=device, dtype=dtype,
     )
     processor.add_text_prompt(session, text)
     masks_scores = []
-    for i in range(n):
-        with torch.inference_mode():
-            out = model(inference_session=session, frame_idx=i)
+
+    def record(i, out):
+        nonlocal primary
         if i == 0:
             if not out.object_ids:
-                return None
+                return False
             primary = max(out.object_ids, key=lambda j: out.obj_id_to_score.get(j, 0))
         if primary in (out.obj_id_to_mask or {}):
             m = out.obj_id_to_mask[primary]
@@ -115,6 +139,25 @@ def run_path(processor, model, frames_pil, text, device, dtype, n: int):
             m = np.zeros_like(masks_scores[0][0]) if masks_scores else np.zeros((1,1), dtype=bool)
             s = 0.0
         masks_scores.append((m, s))
+        return True
+
+    primary = None
+    with torch.inference_mode():
+        out0 = model(inference_session=session, frame_idx=0)
+    if not record(0, out0):
+        return None
+
+    if pipeline_backbone and n > 1:
+        from tracker.backbone_pipeline import BackbonePrefetchPipeline
+
+        with BackbonePrefetchPipeline(model, session) as pipeline:
+            for i, out in pipeline.run(range(1, n)):
+                record(i, out)
+    else:
+        for i in range(1, n):
+            with torch.inference_mode():
+                out = model(inference_session=session, frame_idx=i)
+            record(i, out)
     return masks_scores
 
 
@@ -160,8 +203,17 @@ def main():
     print(f"\n=== MIG @{args.imgsz} ===")
     t = time.perf_counter()
     processor2, model2 = build_model(args.checkpoint, args.imgsz, device, dtype)
-    patch_mig(model2, args.onnx_dir)
-    mig_results = run_path(processor2, model2, frames, args.text, device, dtype, n)
+    patch_mig(model2, args.onnx_dir, args.imgsz, args.parallel_tail)
+    mig_results = run_path(
+        processor2,
+        model2,
+        frames,
+        args.text,
+        device,
+        dtype,
+        n,
+        pipeline_backbone=args.pipeline_backbone,
+    )
     mig_time = time.perf_counter() - t
     print(f"  done in {mig_time:.1f}s")
 
@@ -184,6 +236,8 @@ def main():
         "video": str(args.video),
         "text": args.text,
         "n_frames": n,
+        "parallel_tail": args.parallel_tail,
+        "pipeline_backbone": args.pipeline_backbone,
         "pt_time_s": pt_time,
         "mig_time_s": mig_time,
         "iou_mean": float(np.mean(ious)),

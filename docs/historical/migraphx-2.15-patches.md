@@ -1,4 +1,10 @@
-# Installing / building patched MIGraphX (`2.15+patches`) for SAM3 tracker
+# Historical MIGraphX 2.15 patch installation and source build
+
+> **Historical MIGraphX 2.15 instructions.** The performance claims and
+> compatibility recommendations below refer to that older stack, not current
+> live deployment. These patches are not the current installation requirement.
+> Use [Quick start](../../README.md#quick-start) for the supported 2.17 container;
+> this page is retained as source-build history, not a fallback.
 
 The SAM3 tracker's headline FPS numbers (9.46 / 2.39 at 504 / 1008 px) require
 two MIGraphX fixes that are not in any released version yet. There are three
@@ -50,7 +56,7 @@ python3 -c "import migraphx; print('MIGraphX from:', migraphx.__file__)"
 > for `gfx1151` and Python 3.12. Different glibc / libstdc++ / GPU arch will not
 > work — fall back to [Path B](#b-build-from-source) below.
 
-To roll back to stock 2.15, see [Rollback](#rollback) below.
+To roll back to stock 2.15, see [Rollback](#rollback-to-stock-215) below.
 
 ---
 
@@ -152,7 +158,9 @@ install, the C API symlink `libmigraphx_c.so.3.0.70200` is repointed to the
 new patched lib, so the system loader (and ORT MIGraphX EP) picks up the
 patched code.
 
-The script lives in this repo at [`tools/install_migraphx_patched.sh`](../tools/install_migraphx_patched.sh).
+The historical script was `tools/install_migraphx_patched.sh`. It has been
+removed from the current checkout; the commands below require the matching
+historical revision.
 
 ```bash
 # Default: BUILD=./build_docker, ROCM=<auto-detected or /opt/rocm-7.2.x>
@@ -181,7 +189,7 @@ End-to-end check — run the project's prewarm script (it compiles the patched
 backbone via `migraphx.parse_onnx` and the tracking modules via ORT MIGraphX EP):
 
 ```bash
-cd <sam3-tracker-rocm>
+cd /path/to/sam3-tracker-rocm
 python export/prewarm_ort_cache.py --onnx-dir onnx_files
 # Expect: a fresh mxr_cache/ populates without errors; the per-module timings
 # should match analysis/backbone_optimization.md.

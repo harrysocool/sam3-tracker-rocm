@@ -21,10 +21,9 @@ Quick start
 
     live = SAM3Live(
         checkpoint="model/sam3",
-        onnx_dir="onnx_files_504",
+        onnx_dir="onnx_files_504_mgx217",
         prompts=["car", "sidewalk", "grass"],
         imgsz=504,
-        mig=True,
     )
 
     for frame_bgr in video_stream():
@@ -42,7 +41,7 @@ Quick start
 from __future__ import annotations
 
 import os
-from tracker.rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
+from .rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
 
 import time
 from pathlib import Path
@@ -52,6 +51,13 @@ import cv2
 import numpy as np
 import torch
 from PIL import Image
+
+from .output_processing import (
+    DEFAULT_MAX_OBJECTS_PER_PROMPT,
+    cap_for_prompt,
+    enforce_per_prompt_cap,
+    postprocess_frame_output,
+)
 
 
 def _bgr_to_pil(bgr: np.ndarray) -> Image.Image:
@@ -82,11 +88,13 @@ class SAM3Live:
         imgsz: int = 504,
         dtype: torch.dtype = torch.float16,
         device: str | torch.device | None = None,
-        mig: bool = False,
+        mig: bool = True,
+        parallel_tail: bool | None = None,
+        fixed_detr_decoder: bool | None = None,
         max_vision_features_cache_size: int = 1,
         keep_recent_frames: int = 0,
         redetect_every: int = 1,
-        max_objects_per_prompt: int | dict[str, int] | None = 5,
+        max_objects_per_prompt: int | dict[str, int] | None = DEFAULT_MAX_OBJECTS_PER_PROMPT,
         bootstrap_frames: int = 0,
         bootstrap_min_score: float = 0.3,
         periodic_rebootstrap_seconds: float | None = None,
@@ -95,12 +103,24 @@ class SAM3Live:
         Args:
             checkpoint: HF model dir (contains model.safetensors).
             prompts: initial text prompts (e.g. ["car", "sidewalk"]).
-            onnx_dir: required if ``mig=True`` (e.g. ``onnx_files_504``).
+            onnx_dir: MIGraphX artifact root. When omitted with ``mig=True``,
+                defaults to ``onnx_files_<imgsz>_mgx217`` in the current workspace
+                or `SAM3_DEFAULT_ONNX_DIR` when set by the container launcher.
             imgsz: 504 or 1008. Must match the MIG artifacts under ``onnx_dir``.
             dtype: fp16 (default) or fp32.
             device: torch device, defaults to cuda if available.
             mig: enable MIGraphX accelerated paths (vision encoder, DETR encoder,
-                memory attention, batched mask decoder). Highly recommended.
+                memory attention, fixed DETR decoder, batched mask decoder).
+                Default ``True`` for the supported optimized runtime; pass
+                ``False`` only for pure-PyTorch diagnosis.
+            parallel_tail: overlap the detector and tracker branches on two HIP
+                streams after their shared backbone. ``None`` (default) enables
+                it when ``mig=True`` and leaves it disabled otherwise. Pass
+                ``False`` for an explicit diagnostic fallback.
+            fixed_detr_decoder: use the direct-MXR fixed 504px DETR decoder.
+                ``None`` (default) loads it when MIG is enabled and
+                ``onnx_dir/detr_decoder_fixed/direct_gpuio.mxr`` exists.
+                Pass ``False`` to force the native decoder.
             max_vision_features_cache_size: HF vision-feature LRU size. Default 1
                 — only keeps the most recent frame's features.
             keep_recent_frames: bound on number of past raw frame tensors kept
@@ -120,7 +140,7 @@ class SAM3Live:
                 regardless of this schedule. Set to e.g. 3-5 to recover
                 FPS on multi-prompt workloads.
             max_objects_per_prompt: cap on simultaneously tracked objects
-                per prompt. Excess (lowest detection score) are evicted via
+                per prompt. Excess (lowest current tracker score) are evicted via
                 ``session.remove_object``, freeing tracker memory and
                 bounding compute. **Default 5** — without a cap the session
                 silently accumulates ghost objects (low-score detections
@@ -156,8 +176,27 @@ class SAM3Live:
         self.dtype = dtype
         self.imgsz = imgsz
         self.keep_recent_frames = keep_recent_frames
+        self.max_vision_features_cache_size = max_vision_features_cache_size
         self.redetect_every = max(1, int(redetect_every))
         self.max_objects_per_prompt = max_objects_per_prompt
+        if mig:
+            onnx_dir = Path(
+                onnx_dir
+                or os.environ.get(
+                    "SAM3_DEFAULT_ONNX_DIR",
+                    f"onnx_files_{imgsz}_mgx217",
+                )
+            )
+            if not onnx_dir.is_dir():
+                raise FileNotFoundError(f"MIGraphX artifact directory not found: {onnx_dir}")
+        if parallel_tail is None:
+            parallel_tail = mig
+        if parallel_tail and not mig:
+            raise ValueError("parallel_tail=True requires mig=True")
+        self.parallel_tail = bool(parallel_tail)
+        if fixed_detr_decoder is True and not mig:
+            raise ValueError("fixed_detr_decoder=True requires mig=True")
+        self.fixed_detr_decoder = fixed_detr_decoder
         # Force full detection on next infer() (frame 0, or first after reset).
         self._force_detect_next = True
         # Monotonic count of calls to infer() — drives the redetect schedule.
@@ -169,6 +208,17 @@ class SAM3Live:
         # CxCyWH normalized [0,1] format (matches Sam3GeometryEncoder input).
         self.bootstrap_frames = max(0, int(bootstrap_frames))
         self.bootstrap_min_score = float(bootstrap_min_score)
+        if (
+            mig
+            and imgsz == 504
+            and fixed_detr_decoder is not False
+            and self.bootstrap_frames > 0
+        ):
+            raise ValueError(
+                "fixed DETR decoder requires a 32-token prompt contract and "
+                "cannot be combined with bootstrap_frames > 0; pass "
+                "fixed_detr_decoder=False for the native diagnostic path"
+            )
         self._bootstrap_remaining: dict[int, int] = {}
         # During bootstrap: per-prompt accumulator of high-conf pred_boxes.
         # After bootstrap done: per-prompt stored exemplar boxes (tensor).
@@ -258,6 +308,11 @@ class SAM3Live:
                 raise ValueError("mig=True requires onnx_dir")
             self._apply_mig_patches(Path(onnx_dir), imgsz)
 
+        if self.parallel_tail:
+            from .parallel_video import patch_parallel_video_tail
+            patch_parallel_video_tail(self.model)
+            print("[SAM3Live] parallel detector/tracker tail enabled")
+
         # Detector-skip patch — always applied; controlled per-frame via
         # model._skip_detection. Idempotent.
         from .redetect_schedule import patch_redetect_schedule
@@ -268,7 +323,7 @@ class SAM3Live:
             video=None,
             inference_device=device,
             dtype=dtype,
-            max_vision_features_cache_size=max_vision_features_cache_size,
+            max_vision_features_cache_size=self.max_vision_features_cache_size,
         )
 
         # Bootstrap hook on detector_model — captures decoder_hidden_states
@@ -294,6 +349,7 @@ class SAM3Live:
         mxr = MIGraphXBackbone(
             onnx_path=det_dir / "single_simplified.onnx",
             cache_path=det_dir / "tuned.mxr",
+            gpu_io_cache_path=det_dir / "tuned_gpuio.mxr",
         )
         mxr.warmup(n=2)
         patch_sam3_video_model_with_mig(self.model, mxr)
@@ -306,6 +362,33 @@ class SAM3Live:
             print(f"  detr_encoder MIG ready")
         else:
             print(f"  (skip detr_encoder MIG: {detr_onnx} not found)")
+
+        fixed_decoder_mxr = (
+            onnx_dir / "detr_decoder_fixed" / "direct_gpuio.mxr"
+        )
+        fixed_decoder_enabled = (
+            self.fixed_detr_decoder is not False and imgsz == 504
+        )
+        if self.fixed_detr_decoder is True and imgsz != 504:
+            raise ValueError("fixed_detr_decoder currently requires imgsz=504")
+        if fixed_decoder_enabled and fixed_decoder_mxr.exists():
+            from .mig_detr_decoder import MIGFixedDetrDecoder
+
+            original_decoder = self.model.detector_model.detr_decoder
+            fixed_decoder = MIGFixedDetrDecoder(
+                fixed_decoder_mxr,
+                original_decoder,
+            )
+            self.model.detector_model.detr_decoder = fixed_decoder
+            self._fixed_detr_decoder = fixed_decoder
+            print(
+                "  fixed DETR decoder direct-MXR enabled "
+                f"({fixed_decoder_mxr.name})"
+            )
+        elif fixed_decoder_enabled:
+            raise FileNotFoundError(
+                f"fixed DETR decoder artifact not found: {fixed_decoder_mxr}"
+            )
 
         # K is resolution-dependent (MLIR attention perf cliff).
         k = _K_PER_IMGSZ.get(imgsz, 32)
@@ -607,6 +690,10 @@ class SAM3Live:
         """Add prompts to the current session. Duplicates are deduped by
         the processor. Incremental — does NOT clear existing prompts.
         """
+        if getattr(self, "_latest_frame_pipeline_active", False):
+            raise RuntimeError(
+                "close the active LatestFramePipeline before set_prompts()"
+            )
         prompts = [p for p in prompts if p]
         if not prompts:
             return
@@ -619,21 +706,72 @@ class SAM3Live:
                 self._bootstrap_remaining.setdefault(pid, self.bootstrap_frames)
                 self._exemplar_box_pool.setdefault(pid, [])
 
+    def _new_empty_session(self):
+        """Construct an empty streaming session without mutating the live one."""
+        return self.processor.init_video_session(
+            video=None,
+            inference_device=self.device,
+            dtype=self.dtype,
+            max_vision_features_cache_size=self.max_vision_features_cache_size,
+        )
+
+    @staticmethod
+    def _copy_prompt_state(source, destination) -> None:
+        """Copy prompt mappings while sharing their immutable tensor values."""
+        for name in (
+            "prompts",
+            "prompt_input_ids",
+            "prompt_embeddings",
+            "prompt_attention_masks",
+        ):
+            setattr(destination, name, dict(getattr(source, name)))
+
+    def _reset_session_counters(self) -> None:
+        self._next_frame_idx = 0
+        self._infer_calls = 0
+        self._force_detect_next = True
+        self._detector_call_counter = 0
+        self.model._skip_detection = False
+        self.session._parallel_tail_failed = False
+
+    def _replace_tracking_session_preserving_prompts(self) -> None:
+        """Atomically install an empty session with the current prompt state.
+
+        This private helper intentionally has no public pipeline guard. It may
+        be used by the single inference owner at an internal keyframe boundary.
+        Public callers must use ``reset_tracking()``, which enforces the guard.
+        """
+        old_session = self.session
+        replacement = self._new_empty_session()
+        self._copy_prompt_state(old_session, replacement)
+
+        # Construction and prompt-state copying can fail; do not publish the
+        # replacement or reset counters until both have completed.
+        self.session = replacement
+        self._reset_session_counters()
+
     def reset_prompts(self, prompts: Sequence[str]) -> None:
         """Drop ALL existing prompts + tracked objects + cache, install new
         prompt set. Use when the operating context changes (e.g. user
         switches from "indoor objects" to "outdoor objects").
         """
-        # reset_state() clears prompts, tracking, and vision cache.
-        # processed_frames is preserved (raw pixel tensors stay), but we
-        # don't reuse old frame_idx so this is OK.
-        self.session.reset_state()
-        # reset_state() does NOT clear processed_frames — drop the stale
-        # raw pixel buffers ourselves so memory doesn't leak and our reset
-        # counter doesn't collide with old indices on the next infer().
-        if self.session.processed_frames is not None:
-            self.session.processed_frames.clear()
-        self._next_frame_idx = 0
+        if getattr(self, "_latest_frame_pipeline_active", False):
+            raise RuntimeError(
+                "close the active LatestFramePipeline before reset_prompts()"
+            )
+        prompts = [prompt for prompt in prompts if prompt]
+
+        # Prepare the complete replacement before publishing it. If session
+        # construction, tokenization, a prompt-device transfer, or the device
+        # fence fails, the old session remains fully usable.
+        replacement = self._new_empty_session()
+        if prompts:
+            self.processor.add_text_prompt(replacement, list(prompts))
+        if self.device.type == "cuda":
+            torch.cuda.synchronize(device=self.device)
+
+        self.session = replacement
+        self._reset_session_counters()
         # Reset bootstrap state — new prompts get a fresh bootstrap cycle.
         self._bootstrap_remaining.clear()
         self._exemplar_box_pool.clear()
@@ -644,9 +782,19 @@ class SAM3Live:
         self._drift_frames_since_bootstrap.clear()
         self._drift_pending_rebootstrap = False
         self._last_bootstrap_complete_time = 0.0
-        self.set_prompts(prompts)
-        # Force detection on next frame — no tracked objects to propagate.
-        self._force_detect_next = True
+        if self.bootstrap_frames > 0:
+            for prompt_id in self.session.prompts:
+                self._bootstrap_remaining[prompt_id] = self.bootstrap_frames
+                self._exemplar_box_pool[prompt_id] = []
+
+    def close(self) -> None:
+        """Release resources owned by optional inference schedulers."""
+        if getattr(self, "_latest_frame_pipeline_active", False):
+            raise RuntimeError("close the active LatestFramePipeline before SAM3Live")
+        if hasattr(self.model, "_parallel_tail_runtime"):
+            from .parallel_video import close_parallel_video_tail
+
+            close_parallel_video_tail(self.model)
 
     def reset_tracking(self) -> None:
         """Drop tracked-object history but keep prompts. Use when the scene
@@ -656,11 +804,11 @@ class SAM3Live:
         installed) stay in session.prompt_embeddings. To re-bootstrap, use
         reset_prompts() with the same prompt list.
         """
-        self.session.reset_inference_session()
-        if self.session.processed_frames is not None:
-            self.session.processed_frames.clear()
-        self._next_frame_idx = 0
-        self._force_detect_next = True
+        if getattr(self, "_latest_frame_pipeline_active", False):
+            raise RuntimeError(
+                "close the active LatestFramePipeline before reset_tracking()"
+            )
+        self._replace_tracking_session_preserving_prompts()
 
     def infer(
         self,
@@ -694,7 +842,16 @@ class SAM3Live:
                 prompt_to_obj_ids:  dict[str, list[int]] grouping by prompt text
                 frame_idx:          int                  session-internal frame counter
                 detected:           bool                 True if detector ran this frame
+                negative_evidence_valid: bool             same as ``detected``;
+                                                          authoritative clearing gate
         """
+        active_pipeline = getattr(self, "_latest_frame_pipeline_active", None)
+        if active_pipeline is not None and not getattr(
+            active_pipeline, "_is_inference_owner_thread", lambda: False
+        )():
+            raise RuntimeError(
+                "use LatestFramePipeline.infer_next() while the live pipeline is active"
+            )
         if frame_bgr.ndim != 3 or frame_bgr.shape[2] != 3:
             raise ValueError(f"expected HxWx3 BGR, got shape {frame_bgr.shape}")
         H, W = frame_bgr.shape[:2]
@@ -752,55 +909,22 @@ class SAM3Live:
         if self.bootstrap_frames > 0 and not skip_detection:
             self._process_bootstrap_capture()
 
-        frame_idx = raw_out.frame_idx
-
         # Enforce per-prompt cap BEFORE postprocess. Evicted objects:
         #   (a) are removed from session state via session.remove_object, so
         #       the tracker stops propagating them next frame (bounds compute)
         #   (b) are stripped from this frame's raw output so they don't appear
         #       once before disappearing
         evicted_ids = self._enforce_per_prompt_cap(raw_out.obj_id_to_tracker_score)
-
-        def _strip(d):
-            if not evicted_ids or not isinstance(d, dict):
-                return d
-            return {k: v for k, v in d.items() if k not in evicted_ids}
-
-        # Postprocess: low-res masks → original resolution + multi-prompt grouping.
-        model_outputs = {
-            "obj_id_to_mask": _strip(raw_out.obj_id_to_mask),
-            "obj_id_to_score": _strip(raw_out.obj_id_to_score),
-            "obj_id_to_tracker_score": _strip(raw_out.obj_id_to_tracker_score),
-            "suppressed_obj_ids": raw_out.suppressed_obj_ids,
-        }
-        pp = self.processor.postprocess_outputs(
-            inference_session=self.session,
-            model_outputs=model_outputs,
-            original_sizes=[[H, W]],
+        result = postprocess_frame_output(
+            self.processor, self.session, raw_out, (H, W), evicted_ids,
         )
-
-        obj_ids = pp["object_ids"].tolist()
-        scores_list = pp["scores"].tolist()
-        if len(obj_ids):
-            masks_np = pp["masks"].cpu().numpy()
-            boxes_np = pp["boxes"].cpu().numpy()
-        else:
-            masks_np = np.zeros((0, H, W), dtype=bool)
-            boxes_np = np.zeros((0, 4), dtype=np.float32)
 
         # Bound memory growth from accumulating raw frame tensors.
         if self.keep_recent_frames > 0:
             self._prune_old_frames(keep_last=self.keep_recent_frames)
 
-        result = {
-            "object_ids": obj_ids,
-            "scores": {oid: float(s) for oid, s in zip(obj_ids, scores_list)},
-            "masks": {oid: masks_np[i] for i, oid in enumerate(obj_ids)},
-            "boxes": {oid: tuple(float(v) for v in boxes_np[i]) for i, oid in enumerate(obj_ids)},
-            "prompt_to_obj_ids": pp["prompt_to_obj_ids"],
-            "frame_idx": frame_idx,
-            "detected": not skip_detection,
-        }
+        result["detected"] = not skip_detection
+        result["negative_evidence_valid"] = not skip_detection
         # Drift detection: record this frame's per-prompt avg score, and
         # throttled-check whether any prompt has dropped enough from its
         # bootstrap baseline to trigger a re-bootstrap on the next infer.
@@ -816,14 +940,7 @@ class SAM3Live:
     # Internals
     # ------------------------------------------------------------------
     def _cap_for(self, prompt_text: str) -> int | None:
-        cap = self.max_objects_per_prompt
-        if cap is None:
-            return None
-        if isinstance(cap, int):
-            return cap
-        if isinstance(cap, dict):
-            return cap.get(prompt_text)
-        return None
+        return cap_for_prompt(self.max_objects_per_prompt, prompt_text)
 
     def _enforce_per_prompt_cap(self, tracker_scores: dict) -> set[int]:
         """Evict excess objects per prompt, keeping the most-persistent ones.
@@ -844,28 +961,9 @@ class SAM3Live:
         is freed starting next frame. Returns the set of evicted obj_ids
         so the caller can also strip them from this frame's raw outputs.
         """
-        if self.max_objects_per_prompt is None:
-            return set()
-
-        by_prompt: dict[str, list[tuple[int, float]]] = {}
-        for oid in list(self.session.obj_ids):
-            pid = self.session.obj_id_to_prompt_id.get(oid)
-            if pid is None:
-                continue
-            prompt_text = self.session.prompts.get(pid, "?")
-            score = float(tracker_scores.get(oid, 0.0))
-            by_prompt.setdefault(prompt_text, []).append((oid, score))
-
-        evicted: set[int] = set()
-        for prompt_text, items in by_prompt.items():
-            cap = self._cap_for(prompt_text)
-            if cap is None or len(items) <= cap:
-                continue
-            items.sort(key=lambda x: x[1], reverse=True)
-            for oid, _ in items[cap:]:
-                self.session.remove_object(oid, strict=False)
-                evicted.add(oid)
-        return evicted
+        return enforce_per_prompt_cap(
+            self.session, tracker_scores, self.max_objects_per_prompt,
+        )
 
     def _prune_old_frames(self, keep_last: int) -> None:
         """Drop processed_frames entries older than the last ``keep_last``.

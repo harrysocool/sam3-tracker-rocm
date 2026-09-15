@@ -7,9 +7,10 @@ __pycache__/
 model/
 onnx_files_504/
 onnx_files_1008/
+onnx_files_504_mgx217
 
-# Datasets
-dataset/
+# External datasets and local dataset links
+/dataset
 
 # Results: ignore generated artefacts; whitelist what should be committed.
 # Subdirs:

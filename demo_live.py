@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Streaming SAM3 demo — frame-by-frame, multi-prompt.
 
-Simulates a live sensor by reading a video file frame-by-frame with OpenCV and
-feeding each frame into ``SAM3Live.infer()``. Unlike ``tools/text_baseline.py``, no video
-is pre-loaded into the session; frames arrive one at a time, as they would
-from a webcam, RTSP stream, or robot camera.
+Simulates a live sensor by reading a video file at source cadence with OpenCV.
+A bounded latest-frame scheduler continuously drains capture, drops stale
+waiting frames, and starts the complete ``SAM3Live.infer()`` path only after
+the preceding inference finishes. Unlike ``tools/text_baseline.py``, no video
+is pre-loaded into the session and no N+1 GPU work is launched.
 
 Examples
 --------
@@ -18,17 +19,15 @@ Multi-class (key new feature):
         --video assets/parkour.mp4 --text person trees buildings \\
         --imgsz 504 --mig
 
-Mid-stream prompt switch (every --switch-every frames, cycling through
---text-set arguments):
-    python demo_live.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \\
-        --video assets/parkour.mp4 --imgsz 504 --mig \\
-        --text-set person --text-set "trees,buildings" --switch-every 40
+Prompt changes require an explicit pipeline close, session reset, and a new
+pipeline generation; this demo intentionally does not switch them mid-stream.
 """
 from __future__ import annotations
 
 import argparse
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -39,6 +38,7 @@ import numpy as np
 
 # Trigger tracker/__init__.py ROCm patches before any HF model import.
 from tracker.live_inference import SAM3Live
+from tracker.output_processing import DEFAULT_MAX_OBJECTS_PER_PROMPT, filter_result
 
 
 # Fixed palette (BGR).
@@ -65,11 +65,13 @@ def parse_args():
     p.add_argument("--switch-every", type=int, default=0,
                    help="With --text-set: rotate to next prompt set every N frames. "
                         "0 disables switching.")
-    p.add_argument("--redetect-interval-ms", type=float, default=1000.0,
+    p.add_argument("--redetect-interval-ms", type=float, default=0.0,
                    help="Wall-clock interval between SAM3 detections (ms). "
-                        "0 = SAM3 every frame (slowest, most accurate). "
-                        ">0 = SAM3 on keyframes, lightweight tracker propagates between. "
-                        "Default 1000ms (1Hz keyframes) for typical multi-prompt deploys.")
+                        "0 = SAM3 on every consumed latest frame (default; "
+                        "recommended for occupancy-grid freshness). "
+                        ">0 = SAM3 on keyframes; the same model's native tracker "
+                        "propagates between. "
+                        "Hybrid propagation is opt-in.")
     p.add_argument(
         "--bootstrap-frames", type=int, default=0,
         help="First N frames run in pure text mode to capture high-confidence "
@@ -83,24 +85,115 @@ def parse_args():
                    help="Force re-bootstrap every N seconds wall-clock. Catches scene "
                         "changes the score-only drift signal cannot detect. "
                         "Default 180s (3 min safety net); set to 0 to disable.")
-    p.add_argument("--max-objects", type=int, default=-1,
-                   help="Cap tracked objects per prompt. -1 = use SAM3Live default (5). "
-                        "0 = explicitly unlimited (NOT recommended — session accumulates "
-                        "ghost detections that bloat tracker propagation to seconds per "
-                        "frame). Positive int = per-prompt cap.")
+    p.add_argument("--max-objects", type=int, default=DEFAULT_MAX_OBJECTS_PER_PROMPT,
+                   help="Maximum tracked objects per prompt (default 5; 0 = unlimited). "
+                        "The legacy -1 value also selects the default.")
     p.add_argument("--output", type=Path, default=None,
                    help="Output mp4. Default: results/<video-stem>_live_<ts>.mp4")
     p.add_argument("--max-frames", type=int, default=0,
-                   help="Cap frames processed (0 = entire video).")
+                   help="Cap source frames read (0 = entire video). Output frames may "
+                        "be fewer because the live path drops stale frames.")
+    p.add_argument(
+        "--warmup-frames",
+        type=int,
+        default=0,
+        help="Explicit live benchmark warmup count. Full-detection mode detects "
+             "on every warmup frame; hybrid mode detects on the first and uses "
+             "tracker propagation thereafter. Synchronizes, resets tracking, "
+             "then seeks to frame 0. Default 0 performs no preload/warmup.",
+    )
     p.add_argument("--imgsz", type=int, default=504, choices=(504, 1008))
-    p.add_argument("--mig", action="store_true")
-    p.add_argument("--onnx-dir", type=Path, default=Path("onnx_files_504"))
+    mig_group = p.add_mutually_exclusive_group()
+    mig_group.add_argument(
+        "--mig",
+        dest="mig",
+        action="store_true",
+        help="Enable the supported MIGraphX path (default).",
+    )
+    mig_group.add_argument(
+        "--no-mig",
+        dest="mig",
+        action="store_false",
+        help="Use pure PyTorch for diagnosis.",
+    )
+    p.set_defaults(mig=True)
+    parallel = p.add_mutually_exclusive_group()
+    parallel.add_argument(
+        "--parallel-tail",
+        dest="parallel_tail",
+        action="store_true",
+        help="Enable detector/tracker HIP-stream overlap (default when --mig is set).",
+    )
+    parallel.add_argument(
+        "--no-parallel-tail",
+        dest="parallel_tail",
+        action="store_false",
+        help="Disable detector/tracker overlap for diagnosis or compatibility.",
+    )
+    p.set_defaults(parallel_tail=None)
+    fixed_decoder = p.add_mutually_exclusive_group()
+    fixed_decoder.add_argument(
+        "--fixed-detr-decoder",
+        dest="fixed_detr_decoder",
+        action="store_true",
+        help="Require the fixed 504px direct-MXR DETR decoder artifact.",
+    )
+    fixed_decoder.add_argument(
+        "--no-fixed-detr-decoder",
+        dest="fixed_detr_decoder",
+        action="store_false",
+        help="Use the native PyTorch DETR decoder for diagnosis.",
+    )
+    p.set_defaults(fixed_detr_decoder=None)
+    p.add_argument(
+        "--onnx-dir",
+        type=Path,
+        default=Path(
+            os.environ.get("SAM3_DEFAULT_ONNX_DIR", "onnx_files_504_mgx217")
+        ),
+        help="MIG artifact root (defaults to the supported 2.17 runtime root).",
+    )
     p.add_argument("--dtype", choices=("fp16", "fp32"), default="fp16")
     p.add_argument("--min-score", type=float, default=0.5,
                    help="Filter detections below this score (default 0.5).")
     args = p.parse_args()
     if (args.text is None) == (args.text_set is None):
         sys.exit("Pass exactly one of --text or --text-set.")
+    if args.text is not None:
+        args.text = list(dict.fromkeys(prompt.strip() for prompt in args.text))
+        if not all(args.text):
+            p.error("--text prompts must not be empty")
+    if args.max_objects == -1:
+        args.max_objects = DEFAULT_MAX_OBJECTS_PER_PROMPT
+    if args.max_objects < 0:
+        p.error("--max-objects must be non-negative (or -1 for the default)")
+    if args.max_frames < 0:
+        p.error("--max-frames must be non-negative; 0 reads to the end")
+    if not 0.0 <= args.min_score <= 1.0:
+        p.error("--min-score must be between 0 and 1")
+    if args.parallel_tail is None:
+        args.parallel_tail = args.mig
+    if args.parallel_tail and not args.mig:
+        sys.exit("--parallel-tail requires --mig")
+    if args.fixed_detr_decoder is True and not args.mig:
+        sys.exit("--fixed-detr-decoder requires --mig")
+    if (
+        args.bootstrap_frames > 0
+        and args.mig
+        and args.imgsz == 504
+        and args.fixed_detr_decoder is not False
+    ):
+        sys.exit(
+            "--bootstrap-frames is incompatible with the fixed 32-token DETR "
+            "decoder; pass --no-fixed-detr-decoder for diagnosis"
+        )
+    if args.warmup_frames < 0:
+        sys.exit("--warmup-frames must be >= 0")
+    if args.text_set is not None and args.switch_every > 0:
+        sys.exit(
+            "the default latest-frame scheduler requires prompt changes to "
+            "close/reset/restart the pipeline"
+        )
     return args
 
 
@@ -219,20 +312,41 @@ def overlay(bgr: np.ndarray, result: dict, prompts: list[str],
     return vis
 
 
-def filter_result(result: dict, min_score: float) -> dict:
-    """Drop objects below threshold (in-place on a copy)."""
-    keep = [oid for oid in result["object_ids"]
-            if result["scores"].get(oid, 0.0) >= min_score]
-    keep_set = set(keep)
-    return {
-        "object_ids": keep,
-        "scores": {k: v for k, v in result["scores"].items() if k in keep_set},
-        "masks": {k: v for k, v in result["masks"].items() if k in keep_set},
-        "boxes": {k: v for k, v in result["boxes"].items() if k in keep_set},
-        "prompt_to_obj_ids": {p: [o for o in oids if o in keep_set]
-                              for p, oids in result["prompt_to_obj_ids"].items()},
-        "frame_idx": result["frame_idx"],
-    }
+def _warmup_uses_full_detection(index: int, *, hybrid: bool) -> bool:
+    """Warm full mode every frame; warm hybrid detection then propagation."""
+    return not hybrid or index == 0
+
+
+def _capture_latest_video(cap, pipeline, source_fps: float, max_frames: int,
+                          state: dict) -> None:
+    """Pace a file like a live source and publish frames with latest semantics."""
+    period = 1.0 / source_fps
+    started_at = time.perf_counter()
+    sequence = 0
+    try:
+        while max_frames <= 0 or sequence < max_frames:
+            scheduled_at = started_at + sequence * period
+            delay = scheduled_at - time.perf_counter()
+            if delay > 0:
+                time.sleep(delay)
+            ok, frame_bgr = cap.read()
+            if not ok:
+                break
+            captured_at = time.perf_counter()
+            if not pipeline.submit(
+                frame_bgr,
+                sequence=sequence,
+                captured_at=captured_at,
+            ):
+                break
+            state["captured"] = sequence + 1
+            sequence += 1
+    except BaseException as exc:
+        state["error"] = exc
+        pipeline.abort()
+    finally:
+        state["finished_at"] = time.perf_counter()
+        pipeline.finish_input()
 
 
 def main():
@@ -244,7 +358,6 @@ def main():
     else:
         prompt_sets = [[t.strip() for t in s.split(",") if t.strip()]
                        for s in args.text_set]
-    current_set_idx = 0
     current_prompts = prompt_sets[0]
     print(f"[demo_live] prompt schedule: {prompt_sets}")
     if args.switch_every > 0 and len(prompt_sets) > 1:
@@ -253,11 +366,9 @@ def main():
     import torch
     dtype = torch.float16 if args.dtype == "fp16" else torch.float32
 
-    max_obj = (
-        None if args.max_objects == 0
-        else (args.max_objects if args.max_objects > 0 else 5)
-    )
-    if args.redetect_interval_ms <= 0.0:
+    max_obj = None if args.max_objects == 0 else args.max_objects
+    hybrid_mode = args.redetect_interval_ms > 0.0
+    if not hybrid_mode:
         live = SAM3Live(
             checkpoint=args.checkpoint,
             prompts=current_prompts,
@@ -265,6 +376,8 @@ def main():
             imgsz=args.imgsz,
             dtype=dtype,
             mig=args.mig,
+            parallel_tail=args.parallel_tail,
+            fixed_detr_decoder=args.fixed_detr_decoder,
             redetect_every=1,
             max_objects_per_prompt=max_obj,
             bootstrap_frames=args.bootstrap_frames,
@@ -280,6 +393,8 @@ def main():
             imgsz=args.imgsz,
             dtype=dtype,
             mig=args.mig,
+            parallel_tail=args.parallel_tail,
+            fixed_detr_decoder=args.fixed_detr_decoder,
             redetect_interval_ms=args.redetect_interval_ms,
             max_objects_per_prompt=max_obj,
             bootstrap_frames=args.bootstrap_frames,
@@ -294,6 +409,36 @@ def main():
     W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
+    if args.warmup_frames:
+        warmup_description = (
+            "full detection on frame 0, then detector-skip propagation"
+            if hybrid_mode
+            else "full detection on every frame"
+        )
+        print(
+            f"[demo_live] explicit warmup: {args.warmup_frames} file frame(s), "
+            f"{warmup_description}; these are not live arrivals"
+        )
+        for index in range(args.warmup_frames):
+            ok, warm_frame = cap.read()
+            if not ok:
+                cap.release()
+                live.close()
+                sys.exit(f"Warmup frame {index} unavailable in {args.video}")
+            live.infer(
+                warm_frame,
+                full_detection=_warmup_uses_full_detection(
+                    index,
+                    hybrid=hybrid_mode,
+                ),
+            )
+        torch.cuda.synchronize(device=live.device)
+        live.reset_tracking()
+        if not cap.set(cv2.CAP_PROP_POS_FRAMES, 0):
+            cap.release()
+            live.close()
+            sys.exit(f"Cannot seek {args.video} back to frame 0 after warmup")
+
     # Output path
     if args.output is not None:
         out_path = args.output
@@ -306,49 +451,85 @@ def main():
                              fps_in, (W, H))
 
     print(f"[demo_live] streaming {args.video.name} → {out_path}")
+    print(
+        f"[demo_live] latest-frame source cadence={fps_in:.3f} FPS; "
+        "no next-frame GPU lookahead; output video contains emitted frames "
+        "only and is time-compressed when frames drop"
+    )
     n = 0
     latencies = []  # per-frame infer() wall time, ms
+    frame_ages = []  # source arrival -> completed output, ms
+    completion_times = []
+    source_sequences = []
     t_total = time.perf_counter()
-    while True:
-        ret, frame_bgr = cap.read()
-        if not ret:
-            break
+    pipeline = None
+    capture_thread = None
+    capture_state = {"captured": 0, "error": None, "finished_at": None}
 
-        # Mid-stream prompt switch
-        if (args.switch_every > 0 and len(prompt_sets) > 1
-                and n > 0 and n % args.switch_every == 0):
-            next_idx = (current_set_idx + 1) % len(prompt_sets)
-            current_set_idx = next_idx
-            current_prompts = prompt_sets[next_idx]
-            t_sw = time.perf_counter()
-            live.reset_prompts(current_prompts)
-            print(f"[demo_live] f={n}: switched prompts → {current_prompts} "
-                  f"({(time.perf_counter()-t_sw)*1000:.0f} ms)")
-
-        t_infer = time.perf_counter()
-        result = live.infer(frame_bgr)
-        latency_ms = (time.perf_counter() - t_infer) * 1000
+    def consume_result(frame_bgr, result, latency_ms: float, age_ms: float,
+                       source_sequence: int, completed_at: float) -> None:
+        nonlocal n
         latencies.append(latency_ms)
+        frame_ages.append(age_ms)
+        completion_times.append(completed_at)
+        source_sequences.append(source_sequence)
 
-        result = filter_result(result, args.min_score)
-
-        # Rolling FPS over last 10 frames
-        window = latencies[-10:]
-        live_fps = 1000.0 / (sum(window) / len(window))
-        vis = overlay(frame_bgr, result, current_prompts, n, live_fps, live)
+        filtered = filter_result(result, args.min_score)
+        recent = completion_times[-11:]
+        live_fps = (
+            (len(recent) - 1) / max(recent[-1] - recent[0], 1e-9)
+            if len(recent) >= 2 else 0.0
+        )
+        vis = overlay(frame_bgr, filtered, current_prompts,
+                      source_sequence, live_fps, live)
         writer.write(vis)
 
         if n % 20 == 0:
-            counts = {p: len(result["prompt_to_obj_ids"].get(p, []))
-                      for p in current_prompts}
-            print(f"  f={n}  latency={latency_ms:5.1f} ms  "
-                  f"FPS={live_fps:5.2f}  objs={counts}")
+            counts = {
+                p: len(filtered["prompt_to_obj_ids"].get(p, []))
+                for p in current_prompts
+            }
+            print(
+                f"  out={n} src={source_sequence} latency={latency_ms:5.1f} ms"
+                f"  age={age_ms:5.1f} ms  FPS={live_fps:5.2f}  objs={counts}"
+            )
         n += 1
-        if args.max_frames and n >= args.max_frames:
-            break
 
-    cap.release()
-    writer.release()
+    try:
+        from tracker.latest_frame import LatestFramePipeline
+
+        pipeline = LatestFramePipeline(live)
+        pipeline.start()
+        capture_thread = threading.Thread(
+            target=_capture_latest_video,
+            args=(cap, pipeline, fps_in, args.max_frames, capture_state),
+            name="sam3-latest-frame-capture",
+        )
+        capture_thread.start()
+        while True:
+            item = pipeline.infer_next()
+            if item is None:
+                break
+            consume_result(
+                item.packet.frame_bgr,
+                item.output,
+                item.service_ms,
+                item.age_ms,
+                item.packet.sequence,
+                item.completed_at,
+            )
+        capture_thread.join()
+        if capture_state["error"] is not None:
+            raise RuntimeError("latest-frame video capture failed") from capture_state["error"]
+    finally:
+        if pipeline is not None:
+            pipeline.close()
+        if capture_thread is not None and capture_thread.is_alive():
+            capture_thread.join()
+        cap.release()
+        writer.release()
+        if hasattr(live, "close"):
+            live.close()
     t_total = time.perf_counter() - t_total
 
     # Transcode to H.264 if ffmpeg is available — cv2 writes MPEG-4 Part 2
@@ -388,6 +569,24 @@ def main():
         print(f"  steady-state:        mean={steady.mean():.1f} ms  "
               f"p50={np.median(steady):.1f}  p95={np.percentile(steady,95):.1f}  "
               f"max={steady.max():.1f}")
+        age = np.asarray(frame_ages)
+        cadence = np.diff(np.asarray(completion_times)) * 1000.0
+        stats = pipeline.stats()
+        output_hz = 1000.0 / cadence.mean() if len(cadence) else 0.0
+        source_gaps = np.diff(np.asarray(source_sequences))
+        print(
+            f"  latest-frame output: Hz={output_hz:.2f}  "
+            f"age_p50={np.median(age):.1f} ms  "
+            f"age_p95={np.percentile(age,95):.1f} ms"
+        )
+        print(
+            "  latest-frame drops:  "
+            f"latest={stats['dropped_frames']}  "
+            f"failed={stats['failed_frames']}  "
+            f"abort={stats['aborted_frames']}  "
+            f"drain_failed={stats['drain_failed']}  "
+            f"max_source_gap={int(source_gaps.max()) if len(source_gaps) else 0}"
+        )
     print(f"  saved: {out_path}")
 
 

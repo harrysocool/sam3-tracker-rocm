@@ -60,9 +60,17 @@ def main():
                     help="Input resolution (504 or 1008)")
     ap.add_argument("--mig", action="store_true",
                     help="Use MIGraphX acceleration (requires LD_PRELOAD)")
+    ap.add_argument("--parallel-tail", action="store_true",
+                    help="Overlap detector and tracker tails. Requires --mig.")
+    ap.add_argument("--pipeline-backbone", action="store_true",
+                    help="Prefetch the next MIG backbone. Requires --parallel-tail.")
     ap.add_argument("--onnx-dir", type=Path, default=None,
                     help="ONNX artefacts root (default: onnx_files_<imgsz>)")
     args = ap.parse_args()
+    if args.parallel_tail and not args.mig:
+        ap.error("--parallel-tail requires --mig")
+    if args.pipeline_backbone and not args.parallel_tail:
+        ap.error("--pipeline-backbone requires --parallel-tail")
     if args.onnx_dir is None:
         args.onnx_dir = WORKSPACE / f"onnx_files_{args.imgsz}"
 
@@ -96,14 +104,25 @@ def main():
         from tracker.mig_detr_encoder import patch_sam3_video_model_detr_encoder
         from tracker.mig_memory_attention import patch_sam3_video_model_memory_attention
         det_dir = args.onnx_dir / "backbone_detector"
-        mxr = MIGraphXBackbone(det_dir / "single_simplified.onnx", det_dir / "tuned.mxr")
+        mxr = MIGraphXBackbone(
+            det_dir / "single_simplified.onnx",
+            det_dir / "tuned.mxr",
+            gpu_io_cache_path=det_dir / "tuned_gpuio.mxr",
+        )
         patch_sam3_video_model_with_mig(model, mxr)
         detr_onnx = args.onnx_dir / "detector_modules" / "detr_encoder_simplified.onnx"
         if detr_onnx.exists():
             patch_sam3_video_model_detr_encoder(model, detr_onnx)
-        mem_onnx = args.onnx_dir / "tracker_modules" / "memory_attention_fixed_S7_P32.onnx"
+        ptr_tokens = {504: 64, 1008: 48}.get(args.imgsz, 32)
+        mem_onnx = (
+            args.onnx_dir / "tracker_modules"
+            / f"memory_attention_fixed_S7_P{ptr_tokens}.onnx"
+        )
         if mem_onnx.exists():
             patch_sam3_video_model_memory_attention(model, mem_onnx)
+        if args.parallel_tail:
+            from tracker.parallel_video import patch_parallel_video_tail
+            patch_parallel_video_tail(model)
         print("  MIG patches applied")
 
     print(f"  loaded in {time.perf_counter()-t0:.1f}s\n")
@@ -164,10 +183,17 @@ def main():
                             pred_areas[fi] = int(bm.sum())
 
                 record(0, out0)
-                for fi in range(1, n_frames):
-                    with torch.inference_mode():
-                        out = model(inference_session=session, frame_idx=fi)
-                    record(fi, out)
+                if args.pipeline_backbone and n_frames > 1:
+                    from tracker.backbone_pipeline import BackbonePrefetchPipeline
+
+                    with BackbonePrefetchPipeline(model, session) as pipeline:
+                        for fi, out in pipeline.run(range(1, n_frames)):
+                            record(fi, out)
+                else:
+                    for fi in range(1, n_frames):
+                        with torch.inference_mode():
+                            out = model(inference_session=session, frame_idx=fi)
+                        record(fi, out)
 
         except Exception as e:
             print(f"  ERROR ann {ann['id']} ({noun}): {e}")
