@@ -215,21 +215,21 @@ conda activate sam3-tracker  # if not already active
 
 | Script | Requires | What it checks | Time |
 |---|---|---|---|
-| `eval/probes/probe_text_prompt.py`     | Stage 1 only | Text-prompt detection (pure PyTorch) | ~10 s |
+| `eval/historical/probes/probe_text_prompt.py` | Stage 1 only | Text-prompt detection (pure PyTorch) | ~10 s |
 | `eval/benchmarks/bench_pipeline.py`    | Stage 2 box  | Per-module latency + total FPS       | ~30 s |
-| `eval/probes/probe_text_prompt_mxr.py` | Stage 2 text | Text-prompt with MIGraphX backbone   | ~15 s |
-| `eval/benchmarks/profile_text_prompt.py` | Stage 2 text | Per-stage latency of text-prompt   | ~30 s |
+| `eval/historical/probes/probe_text_prompt_mxr.py` | Stage 2 text | Text-prompt with MIGraphX backbone | ~15 s |
+| `eval/historical/profilers/profile_text_prompt.py` | Stage 2 text | Per-stage latency of text-prompt | ~30 s |
 
 ```bash
 # After Stage 1 only:
-python eval/probes/probe_text_prompt.py --checkpoint model/sam3 --image assets/truck.jpg --text "truck"
+python eval/historical/probes/probe_text_prompt.py --checkpoint model/sam3 --image assets/truck.jpg --text "truck"
 
 # After Stage 2 (box):
 python eval/benchmarks/bench_pipeline.py --checkpoint model/sam3 --onnx-dir onnx_files_504
 
 # After Stage 2 (text):
-python eval/probes/probe_text_prompt_mxr.py --checkpoint model/sam3 --onnx-dir onnx_files_504 --image assets/truck.jpg --text "truck"
-python eval/benchmarks/profile_text_prompt.py --checkpoint model/sam3 --image assets/truck.jpg --text "truck"
+python eval/historical/probes/probe_text_prompt_mxr.py --checkpoint model/sam3 --onnx-dir onnx_files_504 --image assets/truck.jpg --text "truck"
+python eval/historical/profilers/profile_text_prompt.py --checkpoint model/sam3 --image assets/truck.jpg --text "truck"
 ```
 
 ## Native and box benchmark snapshots

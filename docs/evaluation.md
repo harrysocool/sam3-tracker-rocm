@@ -170,6 +170,14 @@ device synchronization hooks: it is not a measurement of default live,
 parallel-tail overlap, or end-to-end camera latency. Do not sum asynchronous
 stage timings to claim a live output rate.
 
+## External datasets
+
+DAVIS and SA-Co datasets are external prerequisites; this repository does not
+distribute them or track a machine-specific `dataset` symlink. The local
+`dataset/` path is ignored. Put the actual files there, or pass an explicit path
+to host-side tools. Inside the supported container, inputs must be under a
+configured mount; an absolute symlink to an unmounted host path is not visible.
+
 ## DAVIS tracker regression
 
 Tracker changes must retain the DAVIS regression in addition to text-path
