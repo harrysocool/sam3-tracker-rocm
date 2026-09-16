@@ -75,6 +75,10 @@ runtime expects the weight file to be named `model.safetensors`. If you already
 have a complete compatible model directory, set `SAM3_MODEL_DIR` to its absolute
 path instead.
 
+The container wrapper supports an absolute weight link through intermediate
+links, including layouts where the final weight file has a different basename.
+A broken absolute weight link fails before the container starts.
+
 To compare your weights with the published validation checkpoint, see the
 optional [checkpoint identity check](docs/evaluation.md#checkpoint-identity).
 

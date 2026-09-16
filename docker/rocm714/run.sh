@@ -6,6 +6,7 @@ IMAGE="${SAM3_DOCKER_IMAGE:-sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc4-local}"
 MODEL_DIR="${SAM3_MODEL_DIR:-${ROOT}/model/sam3}"
 ONNX_DIR="${SAM3_ONNX_DIR:-${ROOT}/onnx_files_504_mgx217}"
 OUTPUT_DIR="${SAM3_OUTPUT_DIR:-}"
+CONTAINER_USER="$(id -un 2>/dev/null || printf 'sam3')"
 STRICT="${SAM3_DOCKER_STRICT:-0}"
 
 case "${STRICT}" in
@@ -60,9 +61,13 @@ weight_link="${MODEL_DIR}/model.safetensors"
 if [[ -L "${weight_link}" ]]; then
     raw_target="$(readlink "${weight_link}")"
     resolved_target="$(readlink -f "${weight_link}" 2>/dev/null || true)"
-    if [[ "${raw_target}" = /* && -f "${resolved_target}" ]]; then
+    if [[ "${raw_target}" = /* ]]; then
+        if [[ ! -f "${resolved_target}" ]]; then
+            echo "model.safetensors absolute symlink does not resolve to a file" >&2
+            exit 1
+        fi
         mount_args+=(
-            -v "$(dirname "${resolved_target}"):$(dirname "${raw_target}"):ro"
+            -v "${resolved_target}:${raw_target}:ro"
         )
     fi
 fi
@@ -96,6 +101,8 @@ exec docker run --pull=never --rm "${tty_args[@]}" \
     "${gpu_args[@]}" \
     --user "$(id -u):$(id -g)" \
     -e HOME=/tmp \
+    -e USER="${CONTAINER_USER}" \
+    -e LOGNAME="${CONTAINER_USER}" \
     -e TRANSFORMERS_OFFLINE=1 \
     -e HF_HUB_OFFLINE=1 \
     -e SAM3_DEFAULT_ONNX_DIR=/models/onnx_files_504 \
