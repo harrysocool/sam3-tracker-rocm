@@ -85,7 +85,7 @@ def test_repository_license_scope_is_explicit():
 
 
 def test_source_release_and_runtime_dependency_versions_are_consistent():
-    source_version = "0.2.0-rc5"
+    source_version = "0.2.0-rc6"
     runtime_version = "0.2.0-rc4"
     assert (ROOT / "VERSION").read_text().strip() == source_version
     release_notes = ROOT / "docs/releases" / f"{source_version}.md"
