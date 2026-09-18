@@ -50,7 +50,6 @@ from typing import Sequence
 import cv2
 import numpy as np
 import torch
-from PIL import Image
 
 from .output_processing import (
     DEFAULT_MAX_OBJECTS_PER_PROMPT,
@@ -60,13 +59,11 @@ from .output_processing import (
 )
 
 
-def _bgr_to_pil(bgr: np.ndarray) -> Image.Image:
-    return Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
-
-
 # Memory-attention pointer-token cap per resolution (must match
 # memory_attention_fixed_S7_P{K}.onnx artifact that was compiled by build.py).
 _K_PER_IMGSZ = {504: 64, 1008: 48}
+# Original SAM3 tracker artifact contract: exact memory shapes S1 through S10.
+_REQUIRED_MEMORY_ATTENTION_SLOTS = tuple(range(1, 11))
 
 
 class SAM3Live:
@@ -401,8 +398,20 @@ class SAM3Live:
                     break
         if mem_attn_onnx.exists():
             from .mig_memory_attention import patch_sam3_video_model_memory_attention
-            patch_sam3_video_model_memory_attention(self.model, mem_attn_onnx)
+
+            patch_sam3_video_model_memory_attention(
+                self.model,
+                mem_attn_onnx,
+                required_spatial_slots=_REQUIRED_MEMORY_ATTENTION_SLOTS,
+                allow_pytorch_fallback=False,
+            )
             print(f"  memory_attention MIG ready ({mem_attn_onnx.name})")
+        else:
+            raise FileNotFoundError(
+                "MIG memory-attention artifact not found for "
+                f"imgsz={imgsz}, pointer-token candidates={(k, 32, 48, 64, 16, 4)} "
+                f"under {onnx_dir / 'tracker_modules'}"
+            )
 
         # batched_mask_decoder patch — previously had an obj-allocation cascade
         # bug when combined with bootstrap box-prompt (produced 4/5 empty masks
@@ -858,10 +867,11 @@ class SAM3Live:
 
         # Preprocess via the same video_processor that init_video_session uses,
         # to guarantee numeric identity with the preloaded-video path.
-        # videos=[pil] → treated as one video of one frame.
-        pil = _bgr_to_pil(frame_bgr)
+        # A batched RGB ndarray avoids BGR->PIL and the image-list decode path.
+        # The video processor output is bit-identical to the PIL input route.
+        rgb_video = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)[None]
         processed = self.processor.video_processor(
-            videos=[pil],
+            videos=[rgb_video],
             device=self.device,
             return_tensors="pt",
         )
