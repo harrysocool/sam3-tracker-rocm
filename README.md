@@ -238,22 +238,24 @@ ORT 1.24.2. The source was paced at 24 FPS for 250 arrivals; not all arrivals
 were processed. Measurements exclude overlay and video encoding.
 
 Both modes ran with the fixed 504px DETR decoder and same-frame
-detector/tracker parallel tail enabled. These are the optimized live defaults
-with the complete MIG artifacts built by Quick start.
+detector/tracker parallel tail enabled. Full mode now also uses a bounded
+three-frame tracker-memory horizon and at most one conditioning frame in
+memory attention. Hybrid mode retains its validated seven-frame/four-
+conditioning-frame memory defaults.
 
 | Detection policy | Mean service time | Output rate | Emitted / captured |
 |---|---:|---:|---:|
-| **Full detection on every consumed frame (default)** | **109.53 ms** | **9.13 Hz** | 96 / 250 |
+| **Full detection on every consumed frame (current default)** | **98.96 / 99.00 / 99.63 ms** | **10.10 / 10.10 / 10.04 Hz** | 106 / 250 per run |
+| Previous full-detection S7/C4-memory default | 109.53 ms | 9.13 Hz | 96 / 250 |
 | Hybrid, 1000 ms detection interval (opt-in) | 95.43–95.48 ms | 10.47 Hz | 110 / 250 per run |
 
 Service time measures processing of a selected frame, including preprocessing,
 model inference, and output postprocessing. Output rate counts completed results.
 
-These are September 1–2, 2026 reference measurements, **not a new release
-benchmark or a paired full-versus-hybrid speedup claim**. The full-mode
-statistics exclude the first five outputs; the hybrid statistics include all
-outputs after explicit prewarm. These rates are not input FPS or a real-time
-deadline guarantee.
+These are September 1–2 and September 17, 2026 reference measurements, **not a
+paired full-versus-hybrid speedup claim**. The full-mode statistics exclude the
+first five outputs; the hybrid statistics include all outputs after explicit
+prewarm. These rates are not input FPS or a real-time deadline guarantee.
 
 [Performance details](docs/performance.md) record the measurement windows,
 multi-object scaling, fixed-decoder A/B, and correctness checks. Offline

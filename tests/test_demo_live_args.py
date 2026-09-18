@@ -38,6 +38,8 @@ def test_live_defaults_to_mig_parallel_tail_and_fixed_auto(monkeypatch):
     assert args.redetect_interval_ms == 0.0
     assert args.max_objects == 5
     assert args.max_frames == 0
+    assert args.num_maskmem is None
+    assert args.max_cond_frames is None
 
 
 def test_parallel_tail_can_be_disabled_explicitly(monkeypatch):
@@ -92,6 +94,8 @@ def test_bootstrap_requires_native_decoder_diagnostic(monkeypatch):
 def test_live_api_defaults_parallel_tail_to_auto():
     assert inspect.signature(SAM3Live).parameters["mig"].default is True
     assert inspect.signature(SAM3Live).parameters["parallel_tail"].default is None
+    assert inspect.signature(SAM3Live).parameters["num_maskmem"].default == 3
+    assert inspect.signature(SAM3Live).parameters["max_cond_frame_num"].default == 1
     assert (
         inspect.signature(SAM3Live).parameters["fixed_detr_decoder"].default
         is None
@@ -112,6 +116,8 @@ def test_live_api_rejects_bootstrap_with_default_fixed_decoder(tmp_path):
         is None
     )
     assert inspect.signature(SAM3HybridLive).parameters["mig"].default is True
+    assert inspect.signature(SAM3HybridLive).parameters["num_maskmem"].default == 7
+    assert inspect.signature(SAM3HybridLive).parameters["max_cond_frame_num"].default == 4
     assert (
         inspect.signature(SAM3HybridLive).parameters["fixed_detr_decoder"].default
         is None
@@ -176,6 +182,16 @@ def test_live_prompt_normalization(monkeypatch, prompts, expected):
 @pytest.mark.parametrize(("value", "expected"), [("0", 0), ("2", 2), ("-1", 5)])
 def test_live_object_limit_semantics(monkeypatch, value, expected):
     assert _parse(monkeypatch, "--max-objects", value).max_objects == expected
+
+
+def test_live_memory_horizon_overrides(monkeypatch):
+    args = _parse(
+        monkeypatch,
+        "--num-maskmem", "5",
+        "--max-cond-frames", "2",
+    )
+    assert args.num_maskmem == 5
+    assert args.max_cond_frames == 2
 
 
 @pytest.mark.parametrize("flags", [

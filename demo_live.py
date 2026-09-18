@@ -88,6 +88,16 @@ def parse_args():
     p.add_argument("--max-objects", type=int, default=DEFAULT_MAX_OBJECTS_PER_PROMPT,
                    help="Maximum tracked objects per prompt (default 5; 0 = unlimited). "
                         "The legacy -1 value also selects the default.")
+    p.add_argument(
+        "--num-maskmem", type=int, choices=range(1, 8), default=None,
+        help="Tracker spatial-memory horizon. Default: 3 in full mode and 7 "
+             "in hybrid mode.",
+    )
+    p.add_argument(
+        "--max-cond-frames", type=int, default=None,
+        help="Maximum conditioning frames used by tracker memory attention. "
+             "Default: 1 in full mode and 4 in hybrid mode.",
+    )
     p.add_argument("--output", type=Path, default=None,
                    help="Output mp4. Default: results/<video-stem>_live_<ts>.mp4")
     p.add_argument("--max-frames", type=int, default=0,
@@ -368,6 +378,11 @@ def main():
 
     max_obj = None if args.max_objects == 0 else args.max_objects
     hybrid_mode = args.redetect_interval_ms > 0.0
+    memory_kwargs = {}
+    if args.num_maskmem is not None:
+        memory_kwargs["num_maskmem"] = args.num_maskmem
+    if args.max_cond_frames is not None:
+        memory_kwargs["max_cond_frame_num"] = args.max_cond_frames
     if not hybrid_mode:
         live = SAM3Live(
             checkpoint=args.checkpoint,
@@ -383,6 +398,7 @@ def main():
             bootstrap_frames=args.bootstrap_frames,
             bootstrap_min_score=args.bootstrap_min_score,
             periodic_rebootstrap_seconds=args.periodic_rebootstrap_seconds,
+            **memory_kwargs,
         )
     else:
         from tracker.hybrid_inference import SAM3HybridLive
@@ -400,6 +416,7 @@ def main():
             bootstrap_frames=args.bootstrap_frames,
             bootstrap_min_score=args.bootstrap_min_score,
             periodic_rebootstrap_seconds=args.periodic_rebootstrap_seconds,
+            **memory_kwargs,
         )
 
     cap = cv2.VideoCapture(str(args.video))

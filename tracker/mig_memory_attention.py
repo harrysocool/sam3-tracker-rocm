@@ -45,6 +45,23 @@ from .ort_gpu_io import GpuIoExecutionError, run_float32_gpu
 DEFAULT_PTR_TOKENS = 64  # only the export-script default; runtime reads from ONNX
 
 
+def required_memory_attention_slots(
+    num_maskmem: int,
+    max_cond_frame_num: int,
+) -> tuple[int, ...] | None:
+    """Return the exact spatial-slot coverage required by a tracker config."""
+    num_maskmem = int(num_maskmem)
+    max_cond_frame_num = int(max_cond_frame_num)
+    if num_maskmem < 1:
+        raise ValueError("num_maskmem must be at least 1")
+    if max_cond_frame_num == -1:
+        return None
+    if max_cond_frame_num < 1:
+        raise ValueError("max_cond_frame_num must be -1 or at least 1")
+    max_slots = num_maskmem + max_cond_frame_num - 1
+    return tuple(range(1, max_slots + 1))
+
+
 class MIGMemoryAttention(nn.Module):
     """ORT MIG EP shim for tracker_model.memory_attention.
 

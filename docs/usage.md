@@ -104,6 +104,8 @@ Full output fields, recovery reasons, and reset rules are documented in the
 | `--redetect-interval-ms` | 0: full detection on every consumed frame; positive: opt-in hybrid |
 | `--min-score` | 0.5: output confidence filter |
 | `--max-objects` | 5 per prompt; positive values set a persistent per-prompt cap; 0 explicitly removes the cap |
+| `--num-maskmem` | Full mode defaults to 3 tracker-memory frames; hybrid retains 7; pass 7 to restore the previous full-mode horizon |
+| `--max-cond-frames` | Full mode defaults to the nearest conditioning frame only; hybrid retains its previous four-conditioning-frame horizon |
 | `--max-frames` | 0: whole input; otherwise cap source frames, not outputs |
 | `--warmup-frames` | 0: no explicit prewarm; positive values pre-run file frames, reset tracking, and seek back |
 | `--output` | Override the emitted-frame MP4 path |

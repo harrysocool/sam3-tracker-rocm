@@ -92,6 +92,8 @@ class SAM3Live:
         parallel_tail: bool | None = None,
         fixed_detr_decoder: bool | None = None,
         max_vision_features_cache_size: int = 1,
+        num_maskmem: int = 3,
+        max_cond_frame_num: int = 1,
         keep_recent_frames: int = 0,
         redetect_every: int = 1,
         max_objects_per_prompt: int | dict[str, int] | None = DEFAULT_MAX_OBJECTS_PER_PROMPT,
@@ -123,6 +125,10 @@ class SAM3Live:
                 Pass ``False`` to force the native decoder.
             max_vision_features_cache_size: HF vision-feature LRU size. Default 1
                 — only keeps the most recent frame's features.
+            num_maskmem: maximum tracker spatial-memory frames. Default 3 keeps
+                a short memory horizon for low-latency full-detection live use.
+            max_cond_frame_num: maximum conditioning frames included in spatial
+                memory attention. Default 1 keeps the most relevant frame.
             keep_recent_frames: bound on number of past raw frame tensors kept
                 in the session. **Default 0 = no pruning** because the SAM3
                 tracker maintains per-frame state in output_dict_per_obj that
@@ -298,6 +304,20 @@ class SAM3Live:
             Sam3VideoModel.from_pretrained(str(checkpoint), config=config)
             .to(device).to(dtype).eval()
         )
+        num_maskmem = int(num_maskmem)
+        max_cond_frame_num = int(max_cond_frame_num)
+        if not 1 <= num_maskmem <= 7:
+            raise ValueError("num_maskmem must be between 1 and 7")
+        if max_cond_frame_num != -1 and max_cond_frame_num < 1:
+            raise ValueError("max_cond_frame_num must be -1 or at least 1")
+        tracker_model = self.model.tracker_model
+        tracker_model.num_maskmem = num_maskmem
+        tracker_model.config.num_maskmem = num_maskmem
+        tracker_model.config.max_cond_frame_num = max_cond_frame_num
+        print(
+            "[SAM3Live] tracker memory horizon: "
+            f"num_maskmem={num_maskmem}, max_cond_frame_num={max_cond_frame_num}"
+        )
         if device.type == "cuda":
             torch.cuda.synchronize()
         print(f"[SAM3Live] model loaded in {time.perf_counter() - t:.1f}s "
@@ -400,7 +420,28 @@ class SAM3Live:
                     mem_attn_onnx = alt_path
                     break
         if mem_attn_onnx.exists():
-            from .mig_memory_attention import patch_sam3_video_model_memory_attention
+            from .mig_memory_attention import (
+                patch_sam3_video_model_memory_attention,
+                required_memory_attention_slots,
+            )
+
+            required_slots = required_memory_attention_slots(
+                self.model.tracker_model.num_maskmem,
+                self.model.tracker_model.config.max_cond_frame_num,
+            )
+            if required_slots is not None:
+                missing_slots = [
+                    slot for slot in required_slots
+                    if not (
+                        onnx_dir / "tracker_modules"
+                        / f"memory_attention_fixed_S{slot}_P{k}.onnx"
+                    ).is_file()
+                ]
+                if missing_slots:
+                    raise RuntimeError(
+                        "incomplete memory-attention artifact coverage for "
+                        f"the selected memory horizon: missing S={missing_slots}"
+                    )
             patch_sam3_video_model_memory_attention(self.model, mem_attn_onnx)
             print(f"  memory_attention MIG ready ({mem_attn_onnx.name})")
 

@@ -25,7 +25,43 @@ Do not derive service time by inverting camera FPS, or interpret an age p95 as
 a hard maximum. Use pose/TF at sensor exposure time and enforce an application
 result-age budget separately.
 
-## Default full-detection live reference
+## Current bounded-memory full-detection live reference
+
+Recorded September 17, 2026 on the same gfx1151 ROCm 7.14 runtime and
+`blackswan.mp4` / `swan` workload described below. Full detection still runs
+on every consumed frame, same-frame parallel tails remain enabled, and no N+1
+GPU work is launched. The default live tracker uses three spatial memory
+frames and at most one conditioning frame in memory attention. Input
+preprocessing is unchanged from the released live path.
+
+| Run | Mean service | Output rate | Emitted / captured | Service p95 |
+|---|---:|---:|---:|---:|
+| 1 | **98.96 ms** | **10.102 Hz** | 106 / 250 | 106.07 ms |
+| 2 | **99.00 ms** | **10.098 Hz** | 106 / 250 | 106.15 ms |
+| 3 | **99.63 ms** | **10.035 Hz** | 106 / 250 | 106.24 ms |
+
+The pooled service mean is **99.20 ms** and the median run rate is
+**10.098 Hz**. A position-balanced C/P/P/C rerun measured 107.86 and
+108.40 ms for the former S7/C4 control versus 99.35 and 99.46 ms for the
+S3/C1 candidate. A 30-frame PT-versus-MIG regression retained mean/minimum mask IoU
+of 0.99215/0.98537 with no frame below 0.95. A 106-output dropped-frame replay
+against the former S7 behavior retained object IDs, prompt ownership, and
+scores, with mean/minimum mask IoU 0.99179/0.96797. The two-prompt,
+three-object check retained no empty-mask mismatch; prompt-union mean/minimum
+IoU was 0.99170/0.96882 for `people` and 0.98477/0.95565 for `dog`.
+Boxes are derived from thresholded masks and are not bit-exact under the
+shorter memory horizon (maximum coordinate delta 148 px in the dropped-frame
+comparison). Consumers that require the former box trajectory can select
+`--num-maskmem 7 --max-cond-frames 4`.
+
+A separate 1000-arrival soak averaged 105.43 ms and ended with a 109.43 ms
+tail interval. The sub-100 ms result is therefore scoped to the canonical
+250-arrival workload; it is not an unbounded-stream latency guarantee.
+
+The historical reference below remains the control provenance for the former
+S7/four-conditioning-frame default.
+
+## Previous full-detection live reference
 
 Recorded September 1, 2026 on Ryzen AI Max+ 395 / Radeon 8060S (`gfx1151`):
 
