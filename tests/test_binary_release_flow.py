@@ -108,13 +108,29 @@ def test_model_build_enables_current_optimizations():
     assert 'sink_env["ROCMLIR_SINK_FINAL_ERF"] = "1"' in source
     assert "export_fixed_detr_decoder.py" in source
     assert "compile_fixed_detr_decoder.py" in source
+    assert "compile_memory_attention.py" in source
+    assert 'env.pop("MIGRAPHX_SKIP_BENCHMARKING", None)' in source
     assert '"--onnx-dir", str(onnx_dir)' in source
+
+    memory_compiler = (
+        ROOT / "export/tracker_modules/compile_memory_attention.py"
+    ).read_text()
+    assert "GENERIC_AUTOTUNE_SLOTS = frozenset({8})" in memory_compiler
+    assert 'env.pop("MIGRAPHX_SKIP_BENCHMARKING", None)' in memory_compiler
+    assert '"--worker-slot"' in memory_compiler
+
+    assert "--performance-build" in (ROOT / "setup.sh").read_text()
+    assert "--performance-build" in (
+        ROOT / "tools/docker_test_runner.sh"
+    ).read_text()
 
 
 def test_locally_compiled_decoder_uses_its_checksum_sidecar():
     compiler = (ROOT / "export/detector/compile_fixed_detr_decoder.py").read_text()
     runtime = (ROOT / "tracker/mig_detr_decoder.py").read_text()
     assert 'with_suffix(args.output.suffix + ".sha256")' in compiler
+    assert 'os.environ.pop("MIGRAPHX_SKIP_BENCHMARKING", None)' in compiler
+    assert 'os.environ.pop("MIGRAPHX_MLIR_USE_SPECIFIC_OPS", None)' in compiler
     assert 'with_suffix(self.mxr_path.suffix + ".sha256")' in runtime
 
 

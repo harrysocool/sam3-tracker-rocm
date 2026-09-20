@@ -39,10 +39,17 @@ fi
 mount_mode=""
 network="host"
 strict_args=()
+optional_env_args=()
 if [[ "${STRICT}" == 1 ]]; then
     mount_mode=":ro"
     network="none"
     strict_args+=(--read-only --tmpfs /tmp:rw,exec,nosuid,size=4g)
+fi
+if [[ -n "${SAM3_EC_POWER_MODE:-}" ]]; then
+    optional_env_args+=(-e "SAM3_EC_POWER_MODE=${SAM3_EC_POWER_MODE}")
+fi
+if [[ -n "${SAM3_EC_POWER_MODE_PATH:-}" ]]; then
+    optional_env_args+=(-e "SAM3_EC_POWER_MODE_PATH=${SAM3_EC_POWER_MODE_PATH}")
 fi
 
 mount_args=(
@@ -107,6 +114,7 @@ exec docker run --pull=never --rm "${tty_args[@]}" \
     -e HF_HUB_OFFLINE=1 \
     -e SAM3_DEFAULT_ONNX_DIR=/models/onnx_files_504 \
     -e PYTHONPATH=/workspace:/opt/migraphx-develop/lib \
+    "${optional_env_args[@]}" \
     "${mount_args[@]}" \
     -w /workspace \
     "${IMAGE}" "$@"

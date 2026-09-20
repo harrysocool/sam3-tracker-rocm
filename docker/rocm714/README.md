@@ -73,8 +73,18 @@ The command above checks that the variable is set; it does not replace it.
 
 For an existing build, reuse its actual paths instead of choosing a new
 directory. The model command exports ONNX and compiles the 504px artifacts;
-successful completion reports `ALL OK`. First-use ORT caches are populated by
-the installation smoke or subsequent inference.
+successful completion reports `ALL OK`. It independently autotunes the S1--S10
+memory-attention caches with full benchmarking enabled; S8 uses the validated
+generic policy and the remaining shapes use attention-specific MLIR tuning.
+
+The standard model command requires EC `performance` mode because build-time
+kernel measurements affect the selected MXR programs. The EVO-X2 mode is read
+from `/sys/class/ec_su_axb35/apu/power_mode`. If another gfx1151 platform has
+no compatible sysfs interface, verify its BIOS performance setting and run:
+
+```bash
+SAM3_EC_POWER_MODE=performance ./setup.sh --models "$SAM3_MODEL_DIR"
+```
 
 | Host location or setting | Container location / purpose |
 |---|---|

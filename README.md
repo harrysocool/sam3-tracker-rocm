@@ -111,10 +111,27 @@ export SAM3_ONNX_DIR="$SAM3_MODEL_BUILD_ROOT/onnx_files_504"
 ```
 
 This exports ONNX and builds the 504px model artifacts inside the container,
-including the GPU-I/O backbone and fixed DETR decoder. The initial build is a
-one-time compilation step; completed export / compile steps are skipped on
-rerun. ORT modules also compile and cache graphs on first use, so the first demo
-startup can take longer than later runs.
+including the GPU-I/O backbone, fixed DETR decoder, and independently
+autotuned S1--S10 memory-attention caches. The validated memory policy uses
+attention-specific MLIR tuning for S1--S7/S9--S10 and generic tuning for S8.
+The initial build is a one-time compilation step; completed export / compile
+steps are skipped on rerun when their recorded memory-cache policy still
+matches. Other ORT modules may still populate caches during the first smoke.
+
+`setup.sh --models` is a performance build and requires the current EC power
+mode to be `performance`. On the EVO-X2 this is read from
+`/sys/class/ec_su_axb35/apu/power_mode`. On another gfx1151 platform without
+that interface, verify the equivalent BIOS setting first and pass the explicit
+attestation below:
+
+```bash
+SAM3_EC_POWER_MODE=performance ./setup.sh --models "$SAM3_MODEL_DIR"
+```
+
+The build always removes `MIGRAPHX_SKIP_BENCHMARKING` and compiles each memory
+shape in a separate process. Do not use the attestation to bypass an unknown or
+balanced power policy: autotuning is hardware-measured and the selected MXR
+kernels can change with the available power budget.
 
 **Keep both runtime directory variables set when running demos.** The wrapper
 mounts host `SAM3_MODEL_DIR` at `/models/sam3` and host `SAM3_ONNX_DIR` at

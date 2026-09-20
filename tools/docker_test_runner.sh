@@ -75,10 +75,11 @@ runtime=(env
 )
 
 "${runtime[@]}" python export/build_text_prompt_mig.py \
-    --imgsz 504 --checkpoint /models/sam3 --onnx-root /models
+    --imgsz 504 --checkpoint /models/sam3 --onnx-root /models \
+    --performance-build
 
-# The first writable run creates the DETR/memory ORT caches, just as the
-# original release's demo stage did after export/build.py.
+# The first writable run creates the DETR ORT cache and exercises the already
+# independently autotuned memory caches before strict read-only validation.
 "${runtime[@]}" python tools/smoke_live_release.py \
     --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
     --video assets/blackswan.mp4 --text swan --frames 3 --mode full \
