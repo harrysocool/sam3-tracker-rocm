@@ -3,6 +3,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from export.tracker_modules import compile_memory_attention as compiler
 
 
@@ -76,3 +78,18 @@ def test_compile_all_rejects_incomplete_onnx_coverage(tmp_path):
         assert "memory_attention_fixed_S10_P64.onnx" in str(exc)
     else:
         raise AssertionError("incomplete ONNX coverage was accepted")
+
+
+def test_unverified_cache_is_preserved_without_force(tmp_path):
+    _write_graphs(tmp_path)
+    cache = compiler.cache_path(tmp_path)
+    cache.mkdir(parents=True)
+    existing = cache / "legacy.mxr"
+    existing.write_bytes(b"do-not-delete")
+
+    with pytest.raises(RuntimeError, match="refusing to delete"):
+        compiler.compile_all(
+            tmp_path, ptr_tokens=64, max_spatial_slots=10, force=False
+        )
+
+    assert existing.read_bytes() == b"do-not-delete"

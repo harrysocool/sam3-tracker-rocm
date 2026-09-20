@@ -35,6 +35,14 @@ import time
 from pathlib import Path
 
 WORKSPACE = Path(__file__).resolve().parent.parent
+if str(WORKSPACE) not in sys.path:
+    sys.path.insert(0, str(WORKSPACE))
+
+from export.write_artifact_manifest import (
+    invalidate_artifact_manifest,
+    prepare_build_root,
+)
+
 DEFAULT_EC_POWER_MODE_PATH = Path("/sys/class/ec_su_axb35/apu/power_mode")
 
 
@@ -90,6 +98,16 @@ def verify_ec_power_mode(*, required: bool, environ=None,
     if required:
         raise RuntimeError(message)
     print(f"WARNING: {message}", file=sys.stderr)
+
+
+def verify_source_clean(*, required: bool, environ=None) -> None:
+    env = os.environ if environ is None else environ
+    dirty = env.get("SAM3_SOURCE_DIRTY", "unknown")
+    if required and dirty != "0":
+        raise RuntimeError(
+            "performance artifact builds require a verified clean source "
+            f"checkout, got SAM3_SOURCE_DIRTY={dirty!r}"
+        )
 
 
 def parse_args():
@@ -169,6 +187,16 @@ def build_for_imgsz(imgsz: int, args) -> bool:
     steps = set(args.steps)
     run_all = "all" in steps
     ok = True
+    prepare_build_root(
+        onnx_dir,
+        args.checkpoint / "model.safetensors",
+        imgsz=imgsz,
+        ptr_tokens=ptr_tokens,
+        max_spatial_slots=args.max_spatial_slots,
+        reset_full_build=bool(args.force and run_all),
+    )
+    if steps != {"manifest"}:
+        invalidate_artifact_manifest(onnx_dir)
 
     # ── Step 1: export backbone ONNX ─────────────────────────────────────
     if run_all or "backbone" in steps:
@@ -315,6 +343,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
 
 def main():
     args = parse_args()
+    verify_source_clean(required=args.performance_build)
     verify_ec_power_mode(required=args.performance_build)
     t_start = time.perf_counter()
     all_ok = True

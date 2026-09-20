@@ -14,7 +14,7 @@ import os
 import threading
 import time
 import traceback
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from tracker.rocm_env import apply as _apply_rocm_env
 
@@ -27,6 +27,15 @@ import torch
 
 from tracker.latest_frame import LatestFramePipeline
 from tracker.live_inference import SAM3Live
+
+
+ARTIFACT_SUBDIRS = (
+    "backbone_detector",
+    "detector_modules",
+    "detr_decoder_fixed",
+    "tracker_modules",
+)
+ROOT_ARTIFACT_FILES = {"BUILD_PROVENANCE.json"}
 
 
 def _sha256(path: Path) -> str:
@@ -50,8 +59,77 @@ def _summary(values: list[float]) -> dict[str, float | int | None]:
     }
 
 
+def _actual_artifact_paths(onnx_dir: Path) -> set[str]:
+    paths = {
+        name for name in ROOT_ARTIFACT_FILES if (onnx_dir / name).is_file()
+    }
+    for subdir in ARTIFACT_SUBDIRS:
+        logical_root = onnx_dir / subdir
+        if not logical_root.exists():
+            continue
+        physical_root = logical_root.resolve()
+        paths.update(
+            str(Path(subdir) / path.relative_to(physical_root))
+            for path in physical_root.rglob("*") if path.is_file()
+        )
+    return paths
+
+
+def _verify_manifest_files(onnx_dir: Path, manifest: dict) -> dict[str, dict]:
+    rows = {}
+    for row in manifest.get("files", []):
+        if not isinstance(row, dict):
+            raise RuntimeError("artifact manifest contains a non-object file row")
+        logical_name = row.get("path")
+        logical = PurePosixPath(logical_name or "")
+        if not logical_name or logical.is_absolute() or ".." in logical.parts:
+            raise RuntimeError(f"unsafe artifact path in manifest: {logical_name!r}")
+        if logical_name in rows:
+            raise RuntimeError(f"duplicate artifact path in manifest: {logical_name}")
+        rows[logical_name] = row
+
+    actual_paths = _actual_artifact_paths(onnx_dir)
+    if set(rows) != actual_paths:
+        missing = sorted(set(rows) - actual_paths)
+        unrecorded = sorted(actual_paths - set(rows))
+        raise RuntimeError(
+            "artifact file set does not match manifest: "
+            f"missing={missing}, unrecorded={unrecorded}"
+        )
+
+    for logical_name, row in rows.items():
+        path = onnx_dir / logical_name
+        if path.stat().st_size != row.get("size"):
+            raise RuntimeError(f"artifact size mismatch: {logical_name}")
+        if _sha256(path) != row.get("sha256"):
+            raise RuntimeError(f"artifact SHA256 mismatch: {logical_name}")
+
+    expected_sums = "".join(
+        f"{row['sha256']}  {row['path']}\n" for row in manifest["files"]
+    )
+    sums_path = onnx_dir / "SHA256SUMS"
+    try:
+        actual_sums = sums_path.read_text(encoding="ascii")
+    except OSError as exc:
+        raise RuntimeError(f"missing artifact checksum list: {sums_path}") from exc
+    if actual_sums != expected_sums:
+        raise RuntimeError("SHA256SUMS does not match artifact manifest")
+    return rows
+
+
 def _load_artifact_identity(onnx_dir: Path) -> tuple[dict, str]:
     manifest_path = onnx_dir / "ARTIFACT_MANIFEST.json"
+    manifest_hash_path = onnx_dir / "ARTIFACT_MANIFEST.sha256"
+    try:
+        recorded_digest, recorded_name = manifest_hash_path.read_text(
+            encoding="ascii"
+        ).split()
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(
+            f"missing or invalid manifest checksum: {manifest_hash_path}"
+        ) from exc
+    if recorded_name != manifest_path.name or recorded_digest != _sha256(manifest_path):
+        raise RuntimeError("ARTIFACT_MANIFEST.json checksum mismatch")
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -64,11 +142,14 @@ def _load_artifact_identity(onnx_dir: Path) -> tuple[dict, str]:
         )
     if manifest.get("source", {}).get("dirty") is not False:
         raise RuntimeError("canonical benchmark refuses artifacts built from dirty source")
+    started = time.perf_counter()
+    rows = _verify_manifest_files(onnx_dir, manifest)
+    print(
+        f"verified {len(rows)} artifact files in "
+        f"{time.perf_counter() - started:.1f}s",
+        flush=True,
+    )
     logical = "backbone_detector/tuned_gpuio.mxr"
-    rows = {
-        row.get("path"): row for row in manifest.get("files", [])
-        if isinstance(row, dict)
-    }
     try:
         expected = rows[logical]["sha256"]
     except (KeyError, TypeError) as exc:

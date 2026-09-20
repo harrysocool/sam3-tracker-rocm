@@ -10,6 +10,15 @@ from export.tracker_modules import compile_memory_attention as memory_compiler
 
 
 def _fixture(root: Path, checkpoint: Path) -> None:
+    checkpoint.write_bytes(b"checkpoint")
+    artifact_manifest.prepare_build_root(
+        root,
+        checkpoint,
+        imgsz=504,
+        ptr_tokens=64,
+        max_spatial_slots=10,
+        reset_full_build=False,
+    )
     required = (
         "backbone_detector/single_simplified.onnx",
         "backbone_detector/tuned.mxr",
@@ -41,18 +50,21 @@ def _fixture(root: Path, checkpoint: Path) -> None:
         files.append({"name": path.name, "size": path.stat().st_size})
     policy["cache_files"] = files
     (cache / memory_compiler.POLICY_FILENAME).write_text(json.dumps(policy))
-    checkpoint.write_bytes(b"checkpoint")
 
 
-def test_manifest_records_complete_identity(monkeypatch, tmp_path):
-    root = tmp_path / "artifacts"
-    checkpoint = tmp_path / "model.safetensors"
-    _fixture(root, checkpoint)
+def _identity_env(monkeypatch) -> None:
     monkeypatch.setenv("SAM3_SOURCE_COMMIT", "a" * 40)
     monkeypatch.setenv("SAM3_SOURCE_DIRTY", "0")
     monkeypatch.setenv("SAM3_DOCKER_IMAGE_REF", "sam3:test")
     monkeypatch.setenv("SAM3_DOCKER_IMAGE_ID", "sha256:" + "b" * 64)
     monkeypatch.setenv("SAM3_EC_POWER_MODE", "performance")
+
+
+def test_manifest_records_complete_identity(monkeypatch, tmp_path):
+    root = tmp_path / "artifacts"
+    checkpoint = tmp_path / "model.safetensors"
+    _identity_env(monkeypatch)
+    _fixture(root, checkpoint)
     monkeypatch.setattr(
         artifact_manifest,
         "runtime_metadata",
@@ -75,6 +87,7 @@ def test_manifest_records_complete_identity(monkeypatch, tmp_path):
     assert manifest["build"]["image_id"] == "sha256:" + "b" * 64
     assert manifest["build"]["ec_power_mode"] == "performance"
     paths = {row["path"] for row in manifest["files"]}
+    assert artifact_manifest.BUILD_PROVENANCE_FILENAME in paths
     assert "tracker_modules/ort_cache_mem_attn/compile_policy.json" in paths
     assert len([path for path in paths if path.endswith(".mxr")]) == 13
     assert (root / "ARTIFACT_MANIFEST.json").is_file()
@@ -82,12 +95,83 @@ def test_manifest_records_complete_identity(monkeypatch, tmp_path):
     assert (root / "SHA256SUMS").is_file()
 
 
-def test_manifest_rejects_missing_memory_cache(tmp_path):
+def test_manifest_rejects_missing_memory_cache(monkeypatch, tmp_path):
     root = tmp_path / "artifacts"
     checkpoint = tmp_path / "model.safetensors"
+    _identity_env(monkeypatch)
     _fixture(root, checkpoint)
     (memory_compiler.cache_path(root) / "S10.mxr").unlink()
     with pytest.raises(RuntimeError, match="expected 10, found 9"):
         artifact_manifest.validate_required_artifacts(
             root, ptr_tokens=64, max_spatial_slots=10
         )
+
+
+def test_nonempty_root_without_provenance_is_rejected(monkeypatch, tmp_path):
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    legacy = root / "legacy.bin"
+    legacy.write_bytes(b"preserve")
+    checkpoint = tmp_path / "model.safetensors"
+    checkpoint.write_bytes(b"checkpoint")
+    _identity_env(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="build provenance does not match"):
+        artifact_manifest.prepare_build_root(
+            root,
+            checkpoint,
+            imgsz=504,
+            ptr_tokens=64,
+            max_spatial_slots=10,
+            reset_full_build=False,
+        )
+
+    assert legacy.read_bytes() == b"preserve"
+
+
+def test_resume_rejects_changed_checkpoint(monkeypatch, tmp_path):
+    root = tmp_path / "artifacts"
+    checkpoint = tmp_path / "model.safetensors"
+    checkpoint.write_bytes(b"first")
+    _identity_env(monkeypatch)
+    artifact_manifest.prepare_build_root(
+        root,
+        checkpoint,
+        imgsz=504,
+        ptr_tokens=64,
+        max_spatial_slots=10,
+        reset_full_build=False,
+    )
+    checkpoint.write_bytes(b"second")
+
+    with pytest.raises(RuntimeError, match="build provenance does not match"):
+        artifact_manifest.prepare_build_root(
+            root,
+            checkpoint,
+            imgsz=504,
+            ptr_tokens=64,
+            max_spatial_slots=10,
+            reset_full_build=False,
+        )
+
+
+def test_explicit_full_force_resets_generated_artifacts(monkeypatch, tmp_path):
+    root = tmp_path / "artifacts"
+    generated = root / "backbone_detector/old.mxr"
+    generated.parent.mkdir(parents=True)
+    generated.write_bytes(b"old")
+    checkpoint = tmp_path / "model.safetensors"
+    checkpoint.write_bytes(b"checkpoint")
+    _identity_env(monkeypatch)
+
+    artifact_manifest.prepare_build_root(
+        root,
+        checkpoint,
+        imgsz=504,
+        ptr_tokens=64,
+        max_spatial_slots=10,
+        reset_full_build=True,
+    )
+
+    assert not generated.exists()
+    assert (root / artifact_manifest.BUILD_PROVENANCE_FILENAME).is_file()

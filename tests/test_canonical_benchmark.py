@@ -7,27 +7,75 @@ import pytest
 from eval.benchmarks import benchmark_latest_frame_canonical as benchmark
 
 
-def test_manifest_supplies_backbone_identity(tmp_path):
+def _write_manifest(tmp_path, *, dirty=False, extra_files=None):
+    files = {"backbone_detector/tuned_gpuio.mxr": b"backbone"}
+    files.update(extra_files or {})
+    rows = []
+    for name, content in files.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        rows.append(
+            {
+                "path": name,
+                "size": len(content),
+                "sha256": benchmark._sha256(path),
+            }
+        )
     manifest = {
         "schema": 2,
-        "source": {"commit": "a" * 40, "dirty": False},
-        "files": [
-            {
-                "path": "backbone_detector/tuned_gpuio.mxr",
-                "sha256": "b" * 64,
-            }
-        ],
+        "source": {"commit": "a" * 40, "dirty": dirty},
+        "files": rows,
     }
-    (tmp_path / "ARTIFACT_MANIFEST.json").write_text(json.dumps(manifest))
+    manifest_path = tmp_path / "ARTIFACT_MANIFEST.json"
+    manifest_path.write_text(json.dumps(manifest))
+    (tmp_path / "ARTIFACT_MANIFEST.sha256").write_text(
+        f"{benchmark._sha256(manifest_path)}  {manifest_path.name}\n"
+    )
+    (tmp_path / "SHA256SUMS").write_text(
+        "".join(f"{row['sha256']}  {row['path']}\n" for row in rows)
+    )
+    return manifest
+
+
+def test_manifest_supplies_backbone_identity(tmp_path):
+    manifest = _write_manifest(tmp_path)
     loaded, digest = benchmark._load_artifact_identity(tmp_path)
     assert loaded == manifest
-    assert digest == "b" * 64
+    assert digest == manifest["files"][0]["sha256"]
 
 
 def test_dirty_artifact_manifest_is_rejected(tmp_path):
-    manifest = {"schema": 2, "source": {"dirty": True}, "files": []}
-    (tmp_path / "ARTIFACT_MANIFEST.json").write_text(json.dumps(manifest))
+    _write_manifest(tmp_path, dirty=True)
     with pytest.raises(RuntimeError, match="dirty source"):
+        benchmark._load_artifact_identity(tmp_path)
+
+
+def test_non_backbone_artifact_tampering_is_rejected(tmp_path):
+    _write_manifest(
+        tmp_path,
+        extra_files={"tracker_modules/ort_cache_mem_attn/S8.mxr": b"correct"},
+    )
+    (tmp_path / "tracker_modules/ort_cache_mem_attn/S8.mxr").write_bytes(
+        b"changed"
+    )
+    with pytest.raises(RuntimeError, match="artifact SHA256 mismatch"):
+        benchmark._load_artifact_identity(tmp_path)
+
+
+def test_unrecorded_artifact_is_rejected(tmp_path):
+    _write_manifest(tmp_path)
+    extra = tmp_path / "tracker_modules/unrecorded.mxr"
+    extra.parent.mkdir(parents=True, exist_ok=True)
+    extra.write_bytes(b"extra")
+    with pytest.raises(RuntimeError, match="unrecorded"):
+        benchmark._load_artifact_identity(tmp_path)
+
+
+def test_manifest_checksum_mismatch_is_rejected(tmp_path):
+    _write_manifest(tmp_path)
+    (tmp_path / "ARTIFACT_MANIFEST.json").write_text("{}")
+    with pytest.raises(RuntimeError, match="checksum mismatch"):
         benchmark._load_artifact_identity(tmp_path)
 
 

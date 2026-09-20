@@ -96,9 +96,10 @@ negative-evidence, and reset-lifecycle checks, not just a high mean IoU.
 
 The canonical harness requires a schema-2 `ARTIFACT_MANIFEST.json`, rejects
 dirty-source artifacts and tracker-memory environment overrides, verifies the
-GPU-I/O backbone hash, and requires ONNX Runtime 1.24.2 with MIGraphX as the
-primary provider. It always uses original SAM3 S7/C4, full detection on every
-consumed frame, same-frame parallel tail, and no N+1 lookahead.
+manifest checksum plus every recorded artifact hash, and rejects unrecorded
+files. It also requires ONNX Runtime 1.24.2 with MIGraphX as the primary
+provider. It always uses original SAM3 S7/C4, full detection on every consumed
+frame, same-frame parallel tail, and no N+1 lookahead.
 
 Run three 250-arrival repetitions:
 

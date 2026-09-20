@@ -60,3 +60,17 @@ def test_invalid_ec_override_is_rejected(tmp_path):
             environ={"SAM3_EC_POWER_MODE": "turbo"},
             power_mode_path=tmp_path / "missing",
         )
+
+
+def test_performance_build_rejects_dirty_or_unknown_source():
+    for value in ("1", "unknown"):
+        with pytest.raises(RuntimeError, match="verified clean source"):
+            builder.verify_source_clean(
+                required=True, environ={"SAM3_SOURCE_DIRTY": value}
+            )
+
+
+def test_performance_build_accepts_clean_source():
+    builder.verify_source_clean(
+        required=True, environ={"SAM3_SOURCE_DIRTY": "0"}
+    )

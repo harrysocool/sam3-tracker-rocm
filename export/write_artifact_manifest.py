@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import shutil
 
 ARTIFACT_SUBDIRS = (
     "backbone_detector",
@@ -21,6 +22,7 @@ EXCLUDED_ROOT_FILES = {
     "ARTIFACT_MANIFEST.sha256",
     "SHA256SUMS",
 }
+BUILD_PROVENANCE_FILENAME = "BUILD_PROVENANCE.json"
 
 
 def sha256(path: Path) -> str:
@@ -62,9 +64,133 @@ def runtime_metadata() -> dict:
     }
 
 
+def source_version() -> str:
+    version_path = Path(__file__).resolve().parent.parent / "VERSION"
+    return (
+        version_path.read_text(encoding="utf-8").strip()
+        if version_path.is_file() else "unknown"
+    )
+
+
+def current_build_provenance(
+    checkpoint: Path,
+    *,
+    imgsz: int,
+    ptr_tokens: int,
+    max_spatial_slots: int,
+) -> dict:
+    checkpoint = checkpoint.resolve()
+    if not checkpoint.is_file():
+        raise FileNotFoundError(checkpoint)
+    source_commit = os.environ.get("SAM3_SOURCE_COMMIT", "").strip()
+    source_dirty = os.environ.get("SAM3_SOURCE_DIRTY", "unknown").strip()
+    image_id = os.environ.get("SAM3_DOCKER_IMAGE_ID", "").strip()
+    image_ref = os.environ.get("SAM3_DOCKER_IMAGE_REF", "").strip()
+    if not source_commit:
+        raise RuntimeError("SAM3_SOURCE_COMMIT was not supplied by the launcher")
+    if source_dirty not in {"0", "1"}:
+        raise RuntimeError("SAM3_SOURCE_DIRTY must be 0 or 1")
+    if not image_id:
+        raise RuntimeError("SAM3_DOCKER_IMAGE_ID was not supplied by the launcher")
+    mode, mode_source = read_ec_power_mode()
+    return {
+        "schema": 1,
+        "source": {
+            "commit": source_commit,
+            "dirty": source_dirty == "1",
+            "version": source_version(),
+        },
+        "checkpoint": {
+            "size": checkpoint.stat().st_size,
+            "sha256": sha256(checkpoint),
+        },
+        "build": {
+            "image_ref": image_ref,
+            "image_id": image_id,
+            "imgsz": imgsz,
+            "ptr_tokens": ptr_tokens,
+            "max_spatial_slots": max_spatial_slots,
+            "ec_power_mode": mode,
+            "ec_power_mode_source": mode_source,
+        },
+    }
+
+
+def _write_json_atomic(path: Path, value: dict) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(value, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
+def _clear_generated_artifacts(root: Path) -> None:
+    for name in (*ARTIFACT_SUBDIRS, BUILD_PROVENANCE_FILENAME,
+                 *EXCLUDED_ROOT_FILES):
+        path = root / name
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+        elif path.is_dir():
+            shutil.rmtree(path)
+
+
+def prepare_build_root(
+    root: Path,
+    checkpoint: Path,
+    *,
+    imgsz: int,
+    ptr_tokens: int,
+    max_spatial_slots: int,
+    reset_full_build: bool,
+) -> dict:
+    """Initialize or validate the immutable inputs for a resumable build."""
+    root.mkdir(parents=True, exist_ok=True)
+    expected = current_build_provenance(
+        checkpoint,
+        imgsz=imgsz,
+        ptr_tokens=ptr_tokens,
+        max_spatial_slots=max_spatial_slots,
+    )
+    provenance_path = root / BUILD_PROVENANCE_FILENAME
+    try:
+        recorded = json.loads(provenance_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        recorded = None
+
+    populated = any(root.iterdir())
+    if reset_full_build:
+        _clear_generated_artifacts(root)
+        root.mkdir(parents=True, exist_ok=True)
+    elif populated and recorded != expected:
+        raise RuntimeError(
+            "artifact root is non-empty but its build provenance does not "
+            f"match the current source/checkpoint/image: {root}. Select a new "
+            "directory, or use --force with --steps all for an explicit reset."
+        )
+
+    _write_json_atomic(provenance_path, expected)
+    return expected
+
+
+def invalidate_artifact_manifest(root: Path) -> None:
+    for name in EXCLUDED_ROOT_FILES:
+        (root / name).unlink(missing_ok=True)
+
+
 def collect_files(root: Path) -> list[dict]:
     records = []
     seen = set()
+    provenance = root / BUILD_PROVENANCE_FILENAME
+    if provenance.is_file():
+        records.append(
+            {
+                "path": provenance.name,
+                "size": provenance.stat().st_size,
+                "sha256": sha256(provenance),
+            }
+        )
+        seen.add(provenance.name)
     for subdir in ARTIFACT_SUBDIRS:
         logical_root = root / subdir
         if not logical_root.exists():
@@ -178,28 +304,31 @@ def build_manifest(
 ) -> dict:
     root = root.resolve()
     checkpoint = checkpoint.resolve()
+    expected_provenance = current_build_provenance(
+        checkpoint,
+        imgsz=imgsz,
+        ptr_tokens=ptr_tokens,
+        max_spatial_slots=max_spatial_slots,
+    )
+    provenance_path = root / BUILD_PROVENANCE_FILENAME
+    try:
+        recorded_provenance = json.loads(
+            provenance_path.read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"missing or invalid build provenance: {provenance_path}"
+        ) from exc
+    if recorded_provenance != expected_provenance:
+        raise RuntimeError(
+            "artifact files were not built from the current "
+            "source/checkpoint/image identity"
+        )
     policy = validate_required_artifacts(
         root,
         ptr_tokens=ptr_tokens,
         max_spatial_slots=max_spatial_slots,
     )
-    mode, mode_source = read_ec_power_mode()
-    source_commit = os.environ.get("SAM3_SOURCE_COMMIT", "").strip()
-    source_dirty = os.environ.get("SAM3_SOURCE_DIRTY", "unknown").strip()
-    image_id = os.environ.get("SAM3_DOCKER_IMAGE_ID", "").strip()
-    image_ref = os.environ.get("SAM3_DOCKER_IMAGE_REF", "").strip()
-    version_path = Path(__file__).resolve().parent.parent / "VERSION"
-    source_version = (
-        version_path.read_text(encoding="utf-8").strip()
-        if version_path.is_file() else "unknown"
-    )
-    if not source_commit:
-        raise RuntimeError("SAM3_SOURCE_COMMIT was not supplied by the launcher")
-    if not image_id:
-        raise RuntimeError("SAM3_DOCKER_IMAGE_ID was not supplied by the launcher")
-    if not checkpoint.is_file():
-        raise FileNotFoundError(checkpoint)
-
     stack = runtime_metadata()
     if not stack["providers"] or stack["providers"][0] != "MIGraphXExecutionProvider":
         raise RuntimeError(
@@ -211,24 +340,16 @@ def build_manifest(
         "schema": 2,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "artifact_root": str(root),
-        "source": {
-            "commit": source_commit,
-            "dirty": source_dirty == "1",
-            "version": source_version,
-        },
+        "source": recorded_provenance["source"],
         "checkpoint": {
             "path": str(checkpoint),
-            "size": checkpoint.stat().st_size,
-            "sha256": sha256(checkpoint),
+            **recorded_provenance["checkpoint"],
         },
         "build": {
-            "image_ref": image_ref,
-            "image_id": image_id,
+            **recorded_provenance["build"],
             "platform": platform.platform(),
-            "imgsz": imgsz,
-            "ec_power_mode": mode,
-            "ec_power_mode_source": mode_source,
         },
+        "build_provenance": recorded_provenance,
         "stack": stack,
         "memory_attention": policy,
         "files": collect_files(root),

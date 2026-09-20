@@ -117,6 +117,10 @@ attention-specific MLIR tuning for S1--S7/S9--S10 and generic tuning for S8.
 The initial build is a one-time compilation step; completed export / compile
 steps are skipped on rerun when their recorded memory-cache policy still
 matches. Other ORT modules may still populate caches during the first smoke.
+Each root also receives `BUILD_PROVENANCE.json` before the first export. A
+non-empty root is resumable only when its source, checkpoint, image, EC mode,
+and shape parameters match. Otherwise the build fails without deleting files;
+only an explicit full `--force` build may reset generated artifacts.
 
 `setup.sh --models` is a performance build and requires the current EC power
 mode to be `performance`. On the EVO-X2 this is read from

@@ -214,16 +214,22 @@ def compile_all(
 
     expected = expected_policy(onnx_dir, ptr_tokens, max_spatial_slots)
     cache = cache_path(onnx_dir)
-    if cache.exists() and not force and verified_existing_cache(cache, expected):
-        print(
-            f"memory-attention cache already matches the recorded full-autotune "
-            f"policy: {cache}"
-        )
-        return
     if cache.exists():
-        reason = "--force" if force else "missing or mismatched compile policy"
-        print(f"resetting memory-attention cache ({reason}): {cache}")
-        shutil.rmtree(cache)
+        if not force and verified_existing_cache(cache, expected):
+            print(
+                "memory-attention cache already matches the recorded "
+                f"full-autotune policy: {cache}"
+            )
+            return
+        if not force and any(cache.iterdir()):
+            raise RuntimeError(
+                "refusing to delete an unverified memory-attention cache "
+                f"without --force: {cache}. Select a new artifact root or "
+                "rerun explicitly with --force."
+            )
+        if force:
+            print(f"resetting memory-attention cache (--force): {cache}")
+            shutil.rmtree(cache)
     cache.mkdir(parents=True, exist_ok=True)
 
     script = Path(__file__).resolve()
