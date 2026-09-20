@@ -42,7 +42,25 @@ def test_nonperformance_build_warns_when_ec_is_unknown(tmp_path, capsys):
         environ={},
         power_mode_path=tmp_path / "missing",
     )
-    assert "WARNING: cannot verify EC power mode" in capsys.readouterr().err
+    warning = capsys.readouterr().err
+    assert "WARNING: cannot automatically verify EC power mode" in warning
+    assert "set the BIOS power mode to Performance" in warning
+    assert "SAM3_EC_POWER_MODE=performance" in warning
+    assert "Optional EC power-mode verification" in warning
+
+
+def test_performance_build_missing_ec_has_actionable_error(tmp_path):
+    with pytest.raises(RuntimeError) as caught:
+        builder.verify_ec_power_mode(
+            required=True,
+            environ={},
+            power_mode_path=tmp_path / "missing",
+        )
+    message = str(caught.value)
+    assert "set the BIOS power mode to Performance" in message
+    assert "autotuning can select different kernels" in message
+    assert "SAM3_EC_POWER_MODE=performance" in message
+    assert "Optional EC power-mode verification" in message
 
 
 def test_verified_bios_override_supports_platforms_without_sysfs(tmp_path):

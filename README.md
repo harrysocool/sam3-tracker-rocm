@@ -134,6 +134,38 @@ attestation below:
 SAM3_EC_POWER_MODE=performance ./setup.sh --models "$SAM3_MODEL_DIR"
 ```
 
+#### Optional EC power-mode verification
+
+The `/sys/class/ec_su_axb35/` interface is not provided by a stock Linux
+installation. It appears only when the optional third-party Sixunited
+AXB35-02 EC driver is installed and loaded. The driver is not a SAM3 runtime
+dependency and `setup.sh` never installs a kernel module automatically.
+
+The default path is to select **Performance** in the BIOS and use the explicit
+`SAM3_EC_POWER_MODE=performance` attestation above. EVO-X2 users who want Linux
+to verify the setting automatically can review and install the driver from:
+
+```text
+https://github.com/cmetz/ec-su_axb35-linux
+```
+
+The validated upstream revision used during this work was:
+
+```text
+f62c2c228959a08683273a26ef3afd8991e69f6d
+```
+
+Follow that project's build/install instructions, then verify:
+
+```bash
+cat /sys/class/ec_su_axb35/apu/power_mode
+```
+
+It must print `performance` before `setup.sh --models` is run. This is an
+out-of-tree driver with root-level EC write access; kernel headers and possibly
+Secure Boot module signing are required. Install it only on a supported board
+and review its source first.
+
 The build always removes `MIGRAPHX_SKIP_BENCHMARKING` and compiles each memory
 shape in a separate process. Do not use the attestation to bypass an unknown or
 balanced power policy: autotuning is hardware-measured and the selected MXR

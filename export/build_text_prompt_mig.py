@@ -88,13 +88,20 @@ def verify_ec_power_mode(*, required: bool, environ=None,
 
     if mode is None:
         message = (
-            "cannot verify EC power mode; install/expose the platform EC driver "
-            "or set SAM3_EC_POWER_MODE=performance only after verifying the BIOS"
+            "cannot automatically verify EC power mode because no readable "
+            f"interface was found at {source}. Before building performance "
+            "artifacts, set the BIOS power mode to Performance; otherwise "
+            "autotuning can select different kernels and produce slower "
+            "latency. After checking the BIOS, rerun with "
+            "SAM3_EC_POWER_MODE=performance. Alternatively, install the "
+            "optional EVO-X2 EC driver described in README.md under "
+            "'Optional EC power-mode verification'."
         )
     else:
         message = (
             f"EC power mode is {mode!r} via {source}; performance autotuning "
-            "requires 'performance'"
+            "requires 'performance'. Change the BIOS/EC setting before "
+            "building because the power mode affects autotuning and latency."
         )
     if required:
         raise RuntimeError(message)
