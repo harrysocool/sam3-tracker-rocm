@@ -11,6 +11,7 @@ Runs the complete local model-build pipeline for the text-prompt MIG path:
   7. compile_memory_attention — independent, fully autotuned S1..S10 MXRs
   8. export_fixed_detr_decoder — fixed 504px decoder ONNX
   9. compile_fixed_detr_decoder — direct-I/O decoder MXR + checksum
+ 10. write_artifact_manifest — source/model/runtime identity + file hashes
 
 Each step skips if its output file already exists (use --force to rebuild).
 
@@ -106,7 +107,8 @@ def parse_args():
     p.add_argument("--force", action="store_true",
                    help="Rebuild even if output files already exist")
     p.add_argument("--steps", nargs="+",
-                   choices=["backbone", "detr_encoder", "memory_attention", "fixed_decoder", "all"],
+                   choices=["backbone", "detr_encoder", "memory_attention",
+                            "fixed_decoder", "manifest", "all"],
                    default=["all"],
                    help="Which steps to run (default: all)")
     p.add_argument("--ptr-tokens", type=int, default=None,
@@ -159,6 +161,10 @@ def build_for_imgsz(imgsz: int, args) -> bool:
     mod_dir = onnx_dir / "detector_modules"
     trk_dir = onnx_dir / "tracker_modules"
     fixed_dir = onnx_dir / "detr_decoder_fixed"
+    ptr_tokens = (
+        args.ptr_tokens if args.ptr_tokens is not None
+        else {504: 64, 1008: 48}.get(imgsz, 32)
+    )
 
     steps = set(args.steps)
     run_all = "all" in steps
@@ -177,7 +183,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "--backbone-source", "detector",
                 "--checkpoint", str(args.checkpoint),
                 "--onnx-dir", str(onnx_dir),
-            ], f"[1/9] Export backbone ONNX @{imgsz}px")
+            ], f"[1/10] Export backbone ONNX @{imgsz}px")
 
         # ── Step 2: simplify backbone ─────────────────────────────────────
         out = det_dir / "single_simplified.onnx"
@@ -188,7 +194,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "--onnx-dir", str(onnx_dir),
                 "--imgsz", str(imgsz),
                 "--backbone-source", "detector",
-            ], f"[2/9] Simplify backbone @{imgsz}px")
+            ], f"[2/10] Simplify backbone @{imgsz}px")
 
         # ── Step 3: compile .mxr ─────────────────────────────────────────
         out = det_dir / "tuned.mxr"
@@ -200,7 +206,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "--imgsz", str(imgsz),
                 "--backbone-source", "detector",
                 "--skip-verify",
-            ], f"[3/9] Compile backbone .mxr @{imgsz}px  (~12 min at 1008px)",
+            ], f"[3/10] Compile backbone .mxr @{imgsz}px  (~12 min at 1008px)",
                 env=full_autotune_env())
 
         # Keep the established host-I/O artifact as a portable fallback and
@@ -216,7 +222,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "--backbone-source", "detector",
                 "--gpu-io",
                 "--skip-verify",
-            ], f"[4/9] Compile FC1-sink GPU-I/O backbone .mxr @{imgsz}px", env=sink_env)
+            ], f"[4/10] Compile FC1-sink GPU-I/O backbone .mxr @{imgsz}px", env=sink_env)
 
     # ── Step 4: export DETR encoder ───────────────────────────────────────
     if run_all or "detr_encoder" in steps:
@@ -228,12 +234,11 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "--imgsz", str(imgsz),
                 "--checkpoint", str(args.checkpoint),
                 "--onnx-dir", str(onnx_dir),
-            ], f"[5/9] Export DETR encoder @{imgsz}px", env=full_autotune_env())
+            ], f"[5/10] Export DETR encoder @{imgsz}px", env=full_autotune_env())
 
     # ── Step 5: export memory_attention ──────────────────────────────────
     if run_all or "memory_attention" in steps:
         # Resolve None default per imgsz (504→64, 1008→48 — kernel cliff aware)
-        ptr_tokens = args.ptr_tokens if args.ptr_tokens is not None else {504: 64, 1008: 48}.get(imgsz, 32)
         for spatial_slots in range(1, args.max_spatial_slots + 1):
             name = f"memory_attention_fixed_S{spatial_slots}_P{ptr_tokens}.onnx"
             out = trk_dir / name
@@ -246,7 +251,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                     "--ptr-tokens", str(ptr_tokens),
                     "--checkpoint", str(args.checkpoint),
                     "--onnx-dir", str(onnx_dir),
-                ], f"[6/9] Export memory_attention (S{spatial_slots}_P{ptr_tokens}) @{imgsz}px")
+                ], f"[6/10] Export memory_attention (S{spatial_slots}_P{ptr_tokens}) @{imgsz}px")
 
         command = [
             sys.executable,
@@ -259,7 +264,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
             command.append("--force")
         ok = ok and run(
             command,
-            f"[7/9] Compile independently autotuned memory_attention S1-S{args.max_spatial_slots} @{imgsz}px",
+            f"[7/10] Compile independently autotuned memory_attention S1-S{args.max_spatial_slots} @{imgsz}px",
             env=full_autotune_env(),
         )
 
@@ -274,7 +279,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "export/detector/export_fixed_detr_decoder.py",
                 "--checkpoint", str(args.checkpoint),
                 "--output-dir", str(fixed_dir),
-            ], "[8/9] Export fixed DETR decoder")
+            ], "[8/10] Export fixed DETR decoder")
         fixed_mxr = fixed_dir / "direct_gpuio.mxr"
         if not exists(fixed_mxr, "fixed decoder MXR", args.force):
             command = [
@@ -287,9 +292,23 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 command.append("--force")
             ok = ok and run(
                 command,
-                "[9/9] Compile fixed DETR decoder MXR",
+                "[9/10] Compile fixed DETR decoder MXR",
                 env=full_autotune_env(),
             )
+
+    if run_all or "manifest" in steps:
+        ok = ok and run(
+            [
+                sys.executable,
+                "export/write_artifact_manifest.py",
+                "--root", str(onnx_dir),
+                "--checkpoint", str(args.checkpoint / "model.safetensors"),
+                "--imgsz", str(imgsz),
+                "--ptr-tokens", str(ptr_tokens),
+                "--max-spatial-slots", str(args.max_spatial_slots),
+            ],
+            f"[10/10] Write artifact manifest @{imgsz}px",
+        )
 
     return ok
 

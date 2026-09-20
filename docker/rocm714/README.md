@@ -86,6 +86,10 @@ no compatible sysfs interface, verify its BIOS performance setting and run:
 SAM3_EC_POWER_MODE=performance ./setup.sh --models "$SAM3_MODEL_DIR"
 ```
 
+The completed root contains `ARTIFACT_MANIFEST.json`,
+`ARTIFACT_MANIFEST.sha256`, and `SHA256SUMS`. The clean-environment runner
+refreshes this manifest after writable ORT prewarm and before strict smoke.
+
 | Host location or setting | Container location / purpose |
 |---|---|
 | Repository checkout | `/workspace`, the container working directory |

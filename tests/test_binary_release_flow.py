@@ -109,6 +109,7 @@ def test_model_build_enables_current_optimizations():
     assert "export_fixed_detr_decoder.py" in source
     assert "compile_fixed_detr_decoder.py" in source
     assert "compile_memory_attention.py" in source
+    assert "write_artifact_manifest.py" in source
     assert 'env.pop("MIGRAPHX_SKIP_BENCHMARKING", None)' in source
     assert '"--onnx-dir", str(onnx_dir)' in source
 
@@ -118,6 +119,20 @@ def test_model_build_enables_current_optimizations():
     assert "GENERIC_AUTOTUNE_SLOTS = frozenset({8})" in memory_compiler
     assert 'env.pop("MIGRAPHX_SKIP_BENCHMARKING", None)' in memory_compiler
     assert '"--worker-slot"' in memory_compiler
+
+    manifest = (ROOT / "export/write_artifact_manifest.py").read_text()
+    for field in (
+        "SAM3_SOURCE_COMMIT", "SAM3_DOCKER_IMAGE_ID", "checkpoint",
+        "ec_power_mode", "specific_ops_by_slot", "SHA256SUMS",
+    ):
+        assert field in manifest
+
+    benchmark = (
+        ROOT / "eval/benchmarks/benchmark_latest_frame_canonical.py"
+    ).read_text()
+    assert "ARTIFACT_MANIFEST.json" in benchmark
+    assert "BENCH_NUM_MASKMEM" in benchmark
+    assert "pytorch_fallback_calls" in benchmark
 
     assert "--performance-build" in (ROOT / "setup.sh").read_text()
     assert "--performance-build" in (

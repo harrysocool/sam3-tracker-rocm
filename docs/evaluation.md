@@ -12,6 +12,7 @@ Keep outputs under ignored `results/perf/` or an external artifact directory.
 | Provider / CLI check | Correct imported runtime and accepted arguments | Loaded model correctness or speed |
 | Installation smoke | Full/hybrid execution, non-empty masks, default decoder and parallel-tail loading | Mask equivalence or source-paced throughput |
 | PT-vs-MIG mask regression | Offline backbone/ORT mask agreement | Fixed-decoder equivalence, hybrid behavior, or map safety |
+| Canonical latest-frame benchmark | Reproducible 250/1000-arrival service latency and output cadence | Robot-wide latency or an unbounded thermal guarantee |
 | Serial/parallel A/B | Offline output equivalence and schedule timing | Default live frame age |
 | Source-paced integration check | Latest-frame ownership, drops, service, and age on that input | Original benchmark reproduction or robot-wide latency |
 | DAVIS box regression | Tracker quality under a fixed dataset/prompt protocol | Text detection quality or current full-model throughput |
@@ -91,6 +92,43 @@ records those checks; the generic PT-vs-MIG script alone does not cover them.
 Hybrid changes also need clean-keyframe, object-loss/recovery, public-ID,
 negative-evidence, and reset-lifecycle checks, not just a high mean IoU.
 
+## Canonical latest-frame benchmark
+
+The canonical harness requires a schema-2 `ARTIFACT_MANIFEST.json`, rejects
+dirty-source artifacts and tracker-memory environment overrides, verifies the
+GPU-I/O backbone hash, and requires ONNX Runtime 1.24.2 with MIGraphX as the
+primary provider. It always uses original SAM3 S7/C4, full detection on every
+consumed frame, same-frame parallel tail, and no N+1 lookahead.
+
+Run three 250-arrival repetitions:
+
+```bash
+mkdir -p results/perf/canonical
+for run in 1 2 3; do
+  ./docker/rocm714/run.sh \
+    python eval/benchmarks/benchmark_latest_frame_canonical.py \
+      --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
+      --video assets/blackswan.mp4 --text swan \
+      --loops 5 --capture-fps 24 --warm-outputs 5 --tail-outputs 20 \
+      --out "results/perf/canonical/250-r${run}.json"
+done
+```
+
+Run the 1000-arrival soak:
+
+```bash
+./docker/rocm714/run.sh \
+  python eval/benchmarks/benchmark_latest_frame_canonical.py \
+    --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
+    --video assets/blackswan.mp4 --text swan \
+    --loops 20 --capture-fps 24 --warm-outputs 5 --tail-outputs 50 \
+    --out results/perf/canonical/1000.json
+```
+
+The output JSON contains every selected source sequence and its queue, service,
+and result-age timings. Compare service means only across the same arrival,
+warmup, model, power, and artifact conditions.
+
 ## Offline serial-versus-parallel A/B
 
 ```bash
@@ -134,10 +172,8 @@ rejected results. Neither includes downstream ROS transport or rendering.
 short file.
 
 The [published live reference](performance.md#default-full-detection-live-reference)
-used a separate looped, headless 250-arrival harness and a defined warm window.
-Neither this check nor a rendered `demo_live.py` run exactly reproduces it.
-The original harness is retained in maintainer artifact storage; this checkout
-does not provide a one-command reproduction of that historical run.
+uses the canonical harness above. Neither this ROS integration check nor a
+rendered `demo_live.py` run exactly reproduces it.
 
 For new live results, record at least:
 

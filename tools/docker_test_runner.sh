@@ -85,6 +85,12 @@ runtime=(env
     --video assets/blackswan.mp4 --text swan --frames 3 --mode full \
     --output /output/prewarm-smoke.json
 
+# Refresh the manifest after writable prewarm so any generated ORT cache is
+# included before the artifact root is tested read-only.
+"${runtime[@]}" python export/write_artifact_manifest.py \
+    --root /models/onnx_files_504 --checkpoint /models/sam3/model.safetensors \
+    --imgsz 504 --ptr-tokens 64 --max-spatial-slots 10
+
 SAM3_DOCKER_STRICT=1 "${runtime[@]}" python tools/smoke_live_release.py \
     --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
     --video assets/blackswan.mp4 --text swan --frames "${FRAMES}" --mode both \

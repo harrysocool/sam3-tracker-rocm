@@ -133,6 +133,11 @@ shape in a separate process. Do not use the attestation to bypass an unknown or
 balanced power policy: autotuning is hardware-measured and the selected MXR
 kernels can change with the available power budget.
 
+Successful completion also writes `ARTIFACT_MANIFEST.json`, its checksum
+sidecar, and `SHA256SUMS` into `onnx_files_504`. The manifest records the source
+revision, checkpoint hash, container image identity, runtime versions, EC mode,
+memory compile policy, and every generated artifact hash.
+
 **Keep both runtime directory variables set when running demos.** The wrapper
 mounts host `SAM3_MODEL_DIR` at `/models/sam3` and host `SAM3_ONNX_DIR` at
 `/models/onnx_files_504`. In a new shell, re-export those two absolute paths.
