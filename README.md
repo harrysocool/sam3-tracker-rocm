@@ -116,7 +116,9 @@ autotuned S1--S10 memory-attention caches. The validated memory policy uses
 attention-specific MLIR tuning for S1--S7/S9--S10 and generic tuning for S8.
 The initial build is a one-time compilation step; completed export / compile
 steps are skipped on rerun when their recorded memory-cache policy still
-matches. Other ORT modules may still populate caches during the first smoke.
+matches. A three-frame writable prewarm populates the DETR runtime cache before
+the final manifest is written, so later smoke and benchmark runs do not add
+unrecorded artifact files.
 Each root also receives `BUILD_PROVENANCE.json` before the first export. A
 non-empty root is resumable only when its source, checkpoint, image, EC mode,
 and shape parameters match. Otherwise the build fails without deleting files;

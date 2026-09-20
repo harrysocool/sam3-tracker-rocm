@@ -78,8 +78,8 @@ runtime=(env
     --imgsz 504 --checkpoint /models/sam3 --onnx-root /models \
     --performance-build
 
-# The first writable run creates the DETR ORT cache and exercises the already
-# independently autotuned memory caches before strict read-only validation.
+# Re-run the short writable smoke as an independent lifecycle check. The model
+# build has already populated DETR and memory caches before writing its manifest.
 "${runtime[@]}" python tools/smoke_live_release.py \
     --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
     --video assets/blackswan.mp4 --text swan --frames 3 --mode full \

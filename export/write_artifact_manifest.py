@@ -281,6 +281,16 @@ def validate_required_artifacts(
     if recorded_cache != actual_cache:
         raise RuntimeError("memory compile policy cache-file mismatch")
 
+    detector_cache = sorted(
+        (root / "detector_modules/ort_cache").glob("*.mxr")
+    )
+    if len(detector_cache) != 1:
+        raise RuntimeError(
+            "DETR encoder cache coverage mismatch: expected 1 MXR, found "
+            f"{len(detector_cache)} under "
+            f"{root / 'detector_modules/ort_cache'}"
+        )
+
     decoder = root / "detr_decoder_fixed/direct_gpuio.mxr"
     sidecar = decoder.with_suffix(decoder.suffix + ".sha256")
     try:

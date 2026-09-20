@@ -32,6 +32,9 @@ def _fixture(root: Path, checkpoint: Path) -> None:
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(name.encode())
+    detector_cache = root / "detector_modules/ort_cache/detr.mxr"
+    detector_cache.parent.mkdir(parents=True, exist_ok=True)
+    detector_cache.write_bytes(b"detr-cache")
     decoder = root / "detr_decoder_fixed/direct_gpuio.mxr"
     decoder.with_suffix(decoder.suffix + ".sha256").write_text(
         f"{artifact_manifest.sha256(decoder)}  {decoder.name}\n"
@@ -89,7 +92,7 @@ def test_manifest_records_complete_identity(monkeypatch, tmp_path):
     paths = {row["path"] for row in manifest["files"]}
     assert artifact_manifest.BUILD_PROVENANCE_FILENAME in paths
     assert "tracker_modules/ort_cache_mem_attn/compile_policy.json" in paths
-    assert len([path for path in paths if path.endswith(".mxr")]) == 13
+    assert len([path for path in paths if path.endswith(".mxr")]) == 14
     assert (root / "ARTIFACT_MANIFEST.json").is_file()
     assert (root / "ARTIFACT_MANIFEST.sha256").is_file()
     assert (root / "SHA256SUMS").is_file()
@@ -102,6 +105,18 @@ def test_manifest_rejects_missing_memory_cache(monkeypatch, tmp_path):
     _fixture(root, checkpoint)
     (memory_compiler.cache_path(root) / "S10.mxr").unlink()
     with pytest.raises(RuntimeError, match="expected 10, found 9"):
+        artifact_manifest.validate_required_artifacts(
+            root, ptr_tokens=64, max_spatial_slots=10
+        )
+
+
+def test_manifest_rejects_missing_detr_cache(monkeypatch, tmp_path):
+    root = tmp_path / "artifacts"
+    checkpoint = tmp_path / "model.safetensors"
+    _identity_env(monkeypatch)
+    _fixture(root, checkpoint)
+    (root / "detector_modules/ort_cache/detr.mxr").unlink()
+    with pytest.raises(RuntimeError, match="DETR encoder cache coverage"):
         artifact_manifest.validate_required_artifacts(
             root, ptr_tokens=64, max_spatial_slots=10
         )

@@ -110,6 +110,10 @@ def test_model_build_enables_current_optimizations():
     assert "compile_fixed_detr_decoder.py" in source
     assert "compile_memory_attention.py" in source
     assert "write_artifact_manifest.py" in source
+    assert "smoke_live_release.py" in source
+    assert source.index("smoke_live_release.py") < source.index(
+        '"[11/11] Write artifact manifest'
+    )
     assert 'env.pop("MIGRAPHX_SKIP_BENCHMARKING", None)' in source
     assert '"--onnx-dir", str(onnx_dir)' in source
 
