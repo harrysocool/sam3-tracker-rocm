@@ -253,9 +253,10 @@ ORT prewarming, and full/hybrid installation smoke together:
   --output "$HOME/sam3-artifacts/gpu/clean-validation-0.3.0-rc1"
 ```
 
-By default Docker may reuse matching cached layers. Add `--no-cache` only when
-the Dockerfile, pinned runtime inputs, or runtime binary bundle changed and a
-full image rebuild is required.
+The normal release path rebuilds the image with Docker cache disabled. For a
+source-only release whose Dockerfile and pinned runtime inputs are unchanged,
+`--reuse-runtime` explicitly reuses the selected existing image after verifying
+its exact Torch/HIP/MIGraphX/ORT versions, primary provider, and GPU architecture.
 
 Choose a **new** output directory; use `--resume` only for the same interrupted
 build. This is a model-building workflow, not a lightweight documentation
@@ -280,13 +281,15 @@ export SAM3_SLOW_PPT_LIMIT_W=120
 
 ./tools/release_gate.sh \
   --checkpoint "$SAM3_MODEL_DIR" \
-  --output "$HOME/sam3-artifacts/gpu/release-gate-0.3.0-rc1"
+  --output "$HOME/sam3-artifacts/gpu/release-gate-0.3.0-rc1" \
+  --reuse-runtime
 ```
 
-By default the release gate allows Docker to reuse the existing matching image
-layers. Pass `--no-cache` to the gate only when a full runtime-image rebuild is
-required. The preflight requires 15 GiB free for the cached path and 30 GiB
-when `--no-cache` is selected or the requested image does not yet exist.
+Normal releases omit `--reuse-runtime` and rebuild the runtime image from
+scratch. The flag above is the documented `0.3.0-rc1` exception because its
+Dockerfile and pinned runtime inputs are unchanged from rc4. A missing or
+mismatched image is an error in reuse mode. The preflight requires 15 GiB free
+for this exception and 30 GiB for the normal full-rebuild path.
 
 If the optional EC driver is unavailable, verify Performance mode in BIOS and
 also export `SAM3_EC_POWER_MODE=performance`. The script does not modify EC,

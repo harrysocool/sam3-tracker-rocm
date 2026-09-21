@@ -7,7 +7,7 @@ DEFAULT_IMAGE="sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc4-local"
 CANONICAL_CHECKPOINT_SHA256="6d06f0a5f84e435071fe6603e61d0b4cc7b40e0d39d487cfd4d67d8cc11cc14a"
 CANONICAL_VIDEO_SHA256="aaf37f0db4eba8d0058fd48b03391a742ded0d7f7db747378bec8459229476b9"
 PYTEST_REQUIREMENT="pytest==9.0.3"
-MIN_CACHED_FREE_GIB=15
+MIN_REUSE_FREE_GIB=15
 MIN_NO_CACHE_FREE_GIB=30
 MAX_CANONICAL_MEAN_MS=100.0
 MAX_SOAK_MEAN_MS=100.0
@@ -20,7 +20,7 @@ IMAGE="${SAM3_DOCKER_IMAGE:-${DEFAULT_IMAGE}}"
 MGX_ARCHIVE=""
 ORT_WHEEL=""
 PREFLIGHT_ONLY=false
-NO_CACHE=false
+REUSE_RUNTIME=false
 CURRENT_STAGE="argument parsing"
 OUTPUT_READY=false
 
@@ -40,14 +40,14 @@ Options:
   --image TAG                Runtime image tag (default: pinned rc4-local tag)
   --migraphx-archive FILE    Local MIGraphX release archive for runtime assembly
   --ort-wheel FILE           Local ONNX Runtime wheel for runtime assembly
-  --no-cache                Force a full Docker image rebuild; default uses cache
+  --reuse-runtime           Reuse verified IMAGE; default is a no-cache rebuild
   --preflight-only           Validate inputs without creating output or running work
   -h, --help
 
 The gate is intentionally fixed. It requires:
   * clean dev or release/rcN source at the versioned commit;
   * EC Performance mode and 120/140/120 W power-policy attestations;
-  * at least 15 GiB free with an existing image, or 30 GiB for a full rebuild;
+  * 30 GiB free for the normal full rebuild, or 15 GiB with --reuse-runtime;
   * a clean runtime/model build and strict full+hybrid smoke;
   * the complete pytest suite in the target runtime plus host wrapper tests;
   * manifest/SHA validation, PT-vs-MIG mask regression;
@@ -76,7 +76,7 @@ while [[ $# -gt 0 ]]; do
         --image) value "$@"; IMAGE="$2"; shift 2 ;;
         --migraphx-archive) value "$@"; MGX_ARCHIVE="$2"; shift 2 ;;
         --ort-wheel) value "$@"; ORT_WHEEL="$2"; shift 2 ;;
-        --no-cache) NO_CACHE=true; shift ;;
+        --reuse-runtime) REUSE_RUNTIME=true; shift ;;
         --preflight-only) PREFLIGHT_ONLY=true; shift ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown argument: $1" ;;
@@ -95,6 +95,9 @@ done
     die "--migraphx-archive must be a file"
 [[ -z "${ORT_WHEEL}" || -f "${ORT_WHEEL}" ]] || \
     die "--ort-wheel must be a file"
+if [[ "${REUSE_RUNTIME}" == true && ( -n "${MGX_ARCHIVE}" || -n "${ORT_WHEEL}" ) ]]; then
+    die "--migraphx-archive and --ort-wheel cannot be used with --reuse-runtime"
+fi
 
 CHECKPOINT="$(readlink -f -- "${CHECKPOINT}")"
 OUTPUT="$(readlink -m -- "${OUTPUT}")"
@@ -178,17 +181,16 @@ done
 
 [[ -e /dev/kfd && -d /dev/dri ]] || die "ROCm devices /dev/kfd and /dev/dri are required"
 docker info >/dev/null
-docker buildx version >/dev/null
 
-if [[ "${NO_CACHE}" == true ]]; then
+if [[ "${REUSE_RUNTIME}" != true ]]; then
+    docker buildx version >/dev/null
     min_free_gib=${MIN_NO_CACHE_FREE_GIB}
     runtime_build_mode="no-cache"
-elif docker image inspect "${IMAGE}" >/dev/null 2>&1; then
-    min_free_gib=${MIN_CACHED_FREE_GIB}
-    runtime_build_mode="cached"
 else
-    min_free_gib=${MIN_NO_CACHE_FREE_GIB}
-    runtime_build_mode="cache-allowed-image-missing"
+    docker image inspect "${IMAGE}" >/dev/null 2>&1 || \
+        die "runtime image not found: ${IMAGE}; omit --reuse-runtime to rebuild it"
+    min_free_gib=${MIN_REUSE_FREE_GIB}
+    runtime_build_mode="existing-image"
 fi
 required_kib=$((min_free_gib * 1024 * 1024))
 check_free_space() {
@@ -306,7 +308,7 @@ runner=(
 )
 [[ -z "${MGX_ARCHIVE}" ]] || runner+=(--migraphx-archive "${MGX_ARCHIVE}")
 [[ -z "${ORT_WHEEL}" ]] || runner+=(--ort-wheel "${ORT_WHEEL}")
-[[ "${NO_CACHE}" != true ]] || runner+=(--no-cache)
+[[ "${REUSE_RUNTIME}" != true ]] || runner+=(--reuse-runtime)
 run_stage clean-build "${runner[@]}"
 assert_source_unchanged
 

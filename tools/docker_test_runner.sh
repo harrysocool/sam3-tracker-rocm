@@ -11,7 +11,7 @@ FRAMES=12
 MGX_ARCHIVE=""
 ORT_WHEEL=""
 RESUME=false
-NO_CACHE=false
+REUSE_RUNTIME=false
 
 usage() {
     cat <<'EOF'
@@ -21,14 +21,17 @@ Options:
   --migraphx-archive FILE  Use a local release tar instead of downloading it
   --ort-wheel FILE         Use a local release wheel instead of downloading it
   --image TAG              Local assembled image tag
-  --no-cache               Force a full Docker image rebuild; default uses cache
+  --reuse-runtime          Reuse and verify IMAGE instead of rebuilding it
   --frames N               Final full/hybrid smoke frames (default: 12)
   --resume                 Reuse an existing output after an interrupted build
   -h, --help
 
-The runner assembles Docker from released binaries, compiles SAM3 model graphs
-locally, prewarms ORT caches, then runs an offline/read-only full+hybrid smoke.
-It never compiles rocMLIR, MIGraphX, ONNX Runtime, or PyTorch.
+By default the runner rebuilds the image from released binaries with Docker
+cache disabled. --reuse-runtime is an explicit exception for a source release
+whose runtime inputs are unchanged. It verifies the selected image before
+compiling SAM3 model graphs, prewarming ORT caches, and running an offline,
+read-only full+hybrid smoke. It never compiles rocMLIR, MIGraphX, ONNX Runtime,
+or PyTorch from source.
 EOF
 }
 
@@ -42,7 +45,7 @@ while [[ $# -gt 0 ]]; do
         --migraphx-archive) value "$@"; MGX_ARCHIVE="$2"; shift 2 ;;
         --ort-wheel) value "$@"; ORT_WHEEL="$2"; shift 2 ;;
         --image) value "$@"; IMAGE="$2"; shift 2 ;;
-        --no-cache) NO_CACHE=true; shift ;;
+        --reuse-runtime) REUSE_RUNTIME=true; shift ;;
         --frames) value "$@"; FRAMES="$2"; shift 2 ;;
         --resume) RESUME=true; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -58,18 +61,27 @@ if [[ -e "${OUTPUT}" && "${RESUME}" != true ]]; then
 fi
 [[ ! -e "${OUTPUT}" || -d "${OUTPUT}" ]] || die "--output must be a directory"
 [[ "${FRAMES}" =~ ^[0-9]+$ && "${FRAMES}" -ge 3 ]] || die "--frames must be at least 3"
+if [[ "${REUSE_RUNTIME}" == true && ( -n "${MGX_ARCHIVE}" || -n "${ORT_WHEEL}" ) ]]; then
+    die "--migraphx-archive and --ort-wheel cannot be used with --reuse-runtime"
+fi
+if [[ "${REUSE_RUNTIME}" == true ]]; then
+    docker image inspect "${IMAGE}" >/dev/null 2>&1 || \
+        die "runtime image not found: ${IMAGE}; omit --reuse-runtime to rebuild it"
+fi
 
 CHECKPOINT="$(readlink -f -- "${CHECKPOINT}")"
 OUTPUT="$(readlink -m -- "${OUTPUT}")"
 mkdir -p "${OUTPUT}/onnx_files_504"
 exec > >(tee "${OUTPUT}/clean-build.log") 2>&1
 
-build_env=("RUNTIME_IMAGE=${IMAGE}")
-runtime_build_args=()
-"${NO_CACHE}" && runtime_build_args+=(--no-cache)
-[[ -z "${MGX_ARCHIVE}" ]] || build_env+=("MIGRAPHX_ARCHIVE=$(readlink -f -- "${MGX_ARCHIVE}")")
-[[ -z "${ORT_WHEEL}" ]] || build_env+=("ORT_WHEEL_PATH=$(readlink -f -- "${ORT_WHEEL}")")
-env "${build_env[@]}" "${ROOT}/docker/rocm714/build.sh" "${runtime_build_args[@]}"
+if [[ "${REUSE_RUNTIME}" != true ]]; then
+    build_env=("RUNTIME_IMAGE=${IMAGE}")
+    [[ -z "${MGX_ARCHIVE}" ]] || build_env+=("MIGRAPHX_ARCHIVE=$(readlink -f -- "${MGX_ARCHIVE}")")
+    [[ -z "${ORT_WHEEL}" ]] || build_env+=("ORT_WHEEL_PATH=$(readlink -f -- "${ORT_WHEEL}")")
+    env "${build_env[@]}" "${ROOT}/docker/rocm714/build.sh" --no-cache
+else
+    echo "Reusing existing runtime image (--reuse-runtime): ${IMAGE}"
+fi
 
 runtime=(env
     "SAM3_DOCKER_IMAGE=${IMAGE}"
@@ -78,6 +90,23 @@ runtime=(env
     "SAM3_OUTPUT_DIR=${OUTPUT}"
     "${ROOT}/docker/rocm714/run.sh"
 )
+
+"${runtime[@]}" python -c '
+import migraphx
+import onnxruntime as ort
+import torch
+
+assert torch.__version__ == "2.11.0+rocm7.13.0", torch.__version__
+assert torch.version.hip == "7.13.99004", torch.version.hip
+assert str(migraphx.__version__) == "2.17.0.dev+2e9924db6", migraphx.__version__
+assert ort.__version__ == "1.24.2", ort.__version__
+providers = ort.get_available_providers()
+assert providers and providers[0] == "MIGraphXExecutionProvider", providers
+arch = torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
+assert arch == "gfx1151", arch
+print("Runtime image verification PASS", torch.__version__, torch.version.hip,
+      migraphx.__version__, ort.__version__, providers, arch)
+'
 
 "${runtime[@]}" python export/build_text_prompt_mig.py \
     --imgsz 504 --checkpoint /models/sam3 --onnx-root /models \

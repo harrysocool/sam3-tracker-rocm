@@ -30,8 +30,10 @@ def test_help_entrypoints_do_not_start_work():
     assert "--runtime" in run(ROOT / "setup.sh").stdout
     assert "--models" in run(ROOT / "setup.sh").stdout
     assert "--resume" in run(ROOT / "tools/docker_test_runner.sh", "--help").stdout
-    assert "--no-cache" in run(ROOT / "tools/docker_test_runner.sh", "--help").stdout
-    assert "--no-cache" in run(ROOT / "tools/release_gate.sh", "--help").stdout
+    assert "--reuse-runtime" in run(
+        ROOT / "tools/docker_test_runner.sh", "--help"
+    ).stdout
+    assert "--reuse-runtime" in run(ROOT / "tools/release_gate.sh", "--help").stdout
 
 
 def test_runtime_assembly_contains_no_source_build_commands():
@@ -47,9 +49,11 @@ def test_runtime_assembly_contains_no_source_build_commands():
     assert "COPY --from=migraphx" in dockerfile
     assert "COPY --from=ort" in dockerfile
     runner = (ROOT / "tools/docker_test_runner.sh").read_text()
-    assert "runtime_build_args=()" in runner
-    assert "runtime_build_args+=(--no-cache)" in runner
-    assert 'build.sh" "${runtime_build_args[@]}"' in runner
+    assert 'build.sh" --no-cache' in runner
+    assert "Reusing existing runtime image (--reuse-runtime)" in runner
+    assert 'docker image inspect "${IMAGE}"' in runner
+    assert 'torch.__version__ == "2.11.0+rocm7.13.0"' in runner
+    assert 'str(migraphx.__version__) == "2.17.0.dev+2e9924db6"' in runner
 
 
 def test_runtime_binary_locations_and_hashes_are_pinned():
@@ -163,7 +167,7 @@ def test_release_gate_pins_the_complete_acceptance_contract():
         "MAX_SOAK_MEAN_MS=100.0",
         "MIN_MASK_MEAN_IOU=0.99",
         "MIN_MASK_IOU=0.98",
-        "MIN_CACHED_FREE_GIB=15",
+        "MIN_REUSE_FREE_GIB=15",
         "MIN_NO_CACHE_FREE_GIB=30",
         "docker_test_runner.sh",
         "mask_diff_pt_vs_mig.py",
@@ -181,7 +185,9 @@ def test_release_gate_pins_the_complete_acceptance_contract():
     assert "SAM3_STAPM_LIMIT_W:120" in source
     assert "SAM3_FAST_PPT_LIMIT_W:140" in source
     assert "SAM3_SLOW_PPT_LIMIT_W:120" in source
-    assert 'runner+=(--no-cache)' in source
+    assert 'runner+=(--reuse-runtime)' in source
+    assert 'runtime_build_mode="existing-image"' in source
+    assert 'runtime image not found: ${IMAGE}; omit --reuse-runtime' in source
 
 
 def test_mask_regression_disables_memory_attention_fallback():
