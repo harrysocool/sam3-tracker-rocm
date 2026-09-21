@@ -253,6 +253,10 @@ ORT prewarming, and full/hybrid installation smoke together:
   --output "$HOME/sam3-artifacts/gpu/clean-validation-0.3.0-rc1"
 ```
 
+By default Docker may reuse matching cached layers. Add `--no-cache` only when
+the Dockerfile, pinned runtime inputs, or runtime binary bundle changed and a
+full image rebuild is required.
+
 Choose a **new** output directory; use `--resume` only for the same interrupted
 build. This is a model-building workflow, not a lightweight documentation
 check. It downloads precompiled runtime dependencies and compiles SAM3 models
@@ -279,11 +283,16 @@ export SAM3_SLOW_PPT_LIMIT_W=120
   --output "$HOME/sam3-artifacts/gpu/release-gate-0.3.0-rc1"
 ```
 
+By default the release gate allows Docker to reuse the existing matching image
+layers. Pass `--no-cache` to the gate only when a full runtime-image rebuild is
+required. The preflight requires 15 GiB free for the cached path and 30 GiB
+when `--no-cache` is selected or the requested image does not yet exist.
+
 If the optional EC driver is unavailable, verify Performance mode in BIOS and
 also export `SAM3_EC_POWER_MODE=performance`. The script does not modify EC,
 fan, or SMU settings. It validates a clean source revision, canonical input
-hashes, at least 30 GiB free space, and the 120/140/120 W power attestation
-before starting expensive work.
+hashes, sufficient free space, and the 120/140/120 W power attestation before
+starting expensive work.
 
 The fixed gate then runs the clean runtime/model build, strict installation
 smoke, target-runtime unit suite, host Docker-wrapper tests, artifact checksum

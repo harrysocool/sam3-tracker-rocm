@@ -11,6 +11,7 @@ FRAMES=12
 MGX_ARCHIVE=""
 ORT_WHEEL=""
 RESUME=false
+NO_CACHE=false
 
 usage() {
     cat <<'EOF'
@@ -20,6 +21,7 @@ Options:
   --migraphx-archive FILE  Use a local release tar instead of downloading it
   --ort-wheel FILE         Use a local release wheel instead of downloading it
   --image TAG              Local assembled image tag
+  --no-cache               Force a full Docker image rebuild; default uses cache
   --frames N               Final full/hybrid smoke frames (default: 12)
   --resume                 Reuse an existing output after an interrupted build
   -h, --help
@@ -40,6 +42,7 @@ while [[ $# -gt 0 ]]; do
         --migraphx-archive) value "$@"; MGX_ARCHIVE="$2"; shift 2 ;;
         --ort-wheel) value "$@"; ORT_WHEEL="$2"; shift 2 ;;
         --image) value "$@"; IMAGE="$2"; shift 2 ;;
+        --no-cache) NO_CACHE=true; shift ;;
         --frames) value "$@"; FRAMES="$2"; shift 2 ;;
         --resume) RESUME=true; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -62,9 +65,11 @@ mkdir -p "${OUTPUT}/onnx_files_504"
 exec > >(tee "${OUTPUT}/clean-build.log") 2>&1
 
 build_env=("RUNTIME_IMAGE=${IMAGE}")
+runtime_build_args=()
+"${NO_CACHE}" && runtime_build_args+=(--no-cache)
 [[ -z "${MGX_ARCHIVE}" ]] || build_env+=("MIGRAPHX_ARCHIVE=$(readlink -f -- "${MGX_ARCHIVE}")")
 [[ -z "${ORT_WHEEL}" ]] || build_env+=("ORT_WHEEL_PATH=$(readlink -f -- "${ORT_WHEEL}")")
-env "${build_env[@]}" "${ROOT}/docker/rocm714/build.sh" --no-cache
+env "${build_env[@]}" "${ROOT}/docker/rocm714/build.sh" "${runtime_build_args[@]}"
 
 runtime=(env
     "SAM3_DOCKER_IMAGE=${IMAGE}"

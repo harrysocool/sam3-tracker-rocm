@@ -7,7 +7,8 @@ DEFAULT_IMAGE="sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc4-local"
 CANONICAL_CHECKPOINT_SHA256="6d06f0a5f84e435071fe6603e61d0b4cc7b40e0d39d487cfd4d67d8cc11cc14a"
 CANONICAL_VIDEO_SHA256="aaf37f0db4eba8d0058fd48b03391a742ded0d7f7db747378bec8459229476b9"
 PYTEST_REQUIREMENT="pytest==9.0.3"
-MIN_FREE_GIB=30
+MIN_CACHED_FREE_GIB=15
+MIN_NO_CACHE_FREE_GIB=30
 MAX_CANONICAL_MEAN_MS=100.0
 MAX_SOAK_MEAN_MS=100.0
 MIN_MASK_MEAN_IOU=0.99
@@ -19,6 +20,7 @@ IMAGE="${SAM3_DOCKER_IMAGE:-${DEFAULT_IMAGE}}"
 MGX_ARCHIVE=""
 ORT_WHEEL=""
 PREFLIGHT_ONLY=false
+NO_CACHE=false
 CURRENT_STAGE="argument parsing"
 OUTPUT_READY=false
 
@@ -38,13 +40,14 @@ Options:
   --image TAG                Runtime image tag (default: pinned rc4-local tag)
   --migraphx-archive FILE    Local MIGraphX release archive for runtime assembly
   --ort-wheel FILE           Local ONNX Runtime wheel for runtime assembly
+  --no-cache                Force a full Docker image rebuild; default uses cache
   --preflight-only           Validate inputs without creating output or running work
   -h, --help
 
 The gate is intentionally fixed. It requires:
   * clean dev or release/rcN source at the versioned commit;
   * EC Performance mode and 120/140/120 W power-policy attestations;
-  * at least 30 GiB free on the output filesystem;
+  * at least 15 GiB free with an existing image, or 30 GiB for a full rebuild;
   * a clean runtime/model build and strict full+hybrid smoke;
   * the complete pytest suite in the target runtime plus host wrapper tests;
   * manifest/SHA validation, PT-vs-MIG mask regression;
@@ -73,6 +76,7 @@ while [[ $# -gt 0 ]]; do
         --image) value "$@"; IMAGE="$2"; shift 2 ;;
         --migraphx-archive) value "$@"; MGX_ARCHIVE="$2"; shift 2 ;;
         --ort-wheel) value "$@"; ORT_WHEEL="$2"; shift 2 ;;
+        --no-cache) NO_CACHE=true; shift ;;
         --preflight-only) PREFLIGHT_ONLY=true; shift ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown argument: $1" ;;
@@ -176,7 +180,17 @@ done
 docker info >/dev/null
 docker buildx version >/dev/null
 
-required_kib=$((MIN_FREE_GIB * 1024 * 1024))
+if [[ "${NO_CACHE}" == true ]]; then
+    min_free_gib=${MIN_NO_CACHE_FREE_GIB}
+    runtime_build_mode="no-cache"
+elif docker image inspect "${IMAGE}" >/dev/null 2>&1; then
+    min_free_gib=${MIN_CACHED_FREE_GIB}
+    runtime_build_mode="cached"
+else
+    min_free_gib=${MIN_NO_CACHE_FREE_GIB}
+    runtime_build_mode="cache-allowed-image-missing"
+fi
+required_kib=$((min_free_gib * 1024 * 1024))
 check_free_space() {
     local label="$1"
     local path="$2"
@@ -189,7 +203,7 @@ check_free_space() {
     local available
     available="$(df -Pk "${path}" | awk 'NR==2 {print $4}')"
     (( available >= required_kib )) || \
-        die "at least ${MIN_FREE_GIB} GiB free is required on ${label} (${path})"
+        die "at least ${min_free_gib} GiB free is required on ${label} (${path})"
     printf '%s' "$((available / 1024 / 1024))"
 }
 output_free_gib="$(check_free_space "the output filesystem" "$(dirname -- "${OUTPUT}")")"
@@ -200,6 +214,7 @@ printf 'Preflight PASS: %s at %s (%s)\n' "${version}" "${commit}" "${branch}"
 printf '  EC=%s; STAPM/Fast/Slow PPT=120/140/120 W\n' "${ec_mode}"
 printf '  free space: output=%s GiB; Docker=%s GiB\n' \
     "${output_free_gib}" "${docker_free_gib}"
+printf '  runtime build mode: %s\n' "${runtime_build_mode}"
 if [[ "${PREFLIGHT_ONLY}" == true ]]; then
     exit 0
 fi
@@ -246,13 +261,13 @@ write_context() {
     local image_id="${1:-}"
     python3 - "${OUTPUT}/gate-context.json" "${version}" "${commit}" \
         "${branch}" "${IMAGE}" "${image_id}" "${checkpoint_sha}" \
-        "${video_sha}" "${STARTED_AT}" <<'PY'
+        "${video_sha}" "${STARTED_AT}" "${runtime_build_mode}" <<'PY'
 import json
 import os
 import sys
 
 (path, version, commit, branch, image_ref, image_id, checkpoint_sha,
- video_sha, started_at) = sys.argv[1:]
+ video_sha, started_at, runtime_build_mode) = sys.argv[1:]
 payload = {
     "schema": 1,
     "version": version,
@@ -261,6 +276,7 @@ payload = {
     "source_dirty": False,
     "runtime_image_ref": image_ref,
     "runtime_image_id": image_id or None,
+    "runtime_build_mode": runtime_build_mode,
     "checkpoint_sha256": checkpoint_sha,
     "canonical_video_sha256": video_sha,
     "build_host_id": os.environ["SAM3_BUILD_HOST_ID"],
@@ -290,6 +306,7 @@ runner=(
 )
 [[ -z "${MGX_ARCHIVE}" ]] || runner+=(--migraphx-archive "${MGX_ARCHIVE}")
 [[ -z "${ORT_WHEEL}" ]] || runner+=(--ort-wheel "${ORT_WHEEL}")
+[[ "${NO_CACHE}" != true ]] || runner+=(--no-cache)
 run_stage clean-build "${runner[@]}"
 assert_source_unchanged
 
@@ -490,7 +507,7 @@ assert_source_unchanged
 
 CURRENT_STAGE="summary"
 python3 - "${OUTPUT}" "${version}" "${commit}" "${branch}" \
-    "${image_id}" "${STARTED_AT}" <<'PY'
+    "${image_id}" "${STARTED_AT}" "${runtime_build_mode}" <<'PY'
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -498,7 +515,7 @@ from pathlib import Path
 import sys
 
 root = Path(sys.argv[1])
-version, commit, branch, image_id, started_at = sys.argv[2:]
+version, commit, branch, image_id, started_at, runtime_build_mode = sys.argv[2:]
 
 def load(relative):
     with (root / relative).open(encoding="utf-8") as stream:
@@ -532,6 +549,7 @@ summary = {
     "source_commit": commit,
     "source_branch": branch,
     "runtime_image_id": image_id,
+    "runtime_build_mode": runtime_build_mode,
     "started_at": started_at,
     "finished_at": datetime.now(timezone.utc).isoformat(),
     "thresholds": {
