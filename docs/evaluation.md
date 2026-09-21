@@ -232,10 +232,10 @@ configured mount; an absolute symlink to an unmounted host path is not visible.
 
 ## DAVIS tracker regression
 
-Tracker changes must retain the DAVIS regression in addition to text-path
-checks. Use DAVIS 2017 val with the same initial-box protocol, resolution,
-and matching box-tracker artifacts. The text/live model build does not supply
-the separate box artifact set.
+Changes to the historical box-tracker path must retain the DAVIS regression.
+Use DAVIS 2017 val with the same initial-box protocol, resolution, and matching
+box-tracker artifacts. The text/live model build does not supply that separate
+artifact set, so DAVIS is not a gate for a text/live-only release.
 
 The [historical evaluation instructions](historical/legacy-runtime.md#davis-and-box-evaluation)
 preserve the dataset source, commands, and original runtime context. The saved
@@ -266,8 +266,7 @@ host MIGraphX 2.16.
 
 Maintainers should qualify one clean `dev` or matching `release/rcN` commit
 with the single release-gate entry point. The gate requires a new output
-directory outside the checkout, the canonical checkpoint, DAVIS 2017 val, and
-the separate 504px box-tracker artifacts used by the DAVIS evaluator:
+directory outside the checkout and the canonical checkpoint:
 
 ```bash
 export SAM3_BUILD_HOST_ID=harry-evo-x2
@@ -277,9 +276,7 @@ export SAM3_SLOW_PPT_LIMIT_W=120
 
 ./tools/release_gate.sh \
   --checkpoint "$SAM3_MODEL_DIR" \
-  --output "$HOME/sam3-artifacts/gpu/release-gate-0.3.0-rc1" \
-  --davis-root "$PWD/dataset/DAVIS" \
-  --davis-onnx-dir "$HOME/sam3-artifacts/gpu/box-onnx-files-504"
+  --output "$HOME/sam3-artifacts/gpu/release-gate-0.3.0-rc1"
 ```
 
 If the optional EC driver is unavailable, verify Performance mode in BIOS and
@@ -291,8 +288,14 @@ before starting expensive work.
 The fixed gate then runs the clean runtime/model build, strict installation
 smoke, target-runtime unit suite, host Docker-wrapper tests, artifact checksum
 verification, 30-frame PT-vs-MIG mask regression, three `canonical-250`
-profiles, one `soak-1000` profile, and DAVIS 2017 val. Acceptance thresholds
-are encoded in the script and cannot be weakened with command-line options.
+profiles, and one `soak-1000` profile. Acceptance thresholds are encoded in
+the script and cannot be weakened with command-line options.
 Success writes `RELEASE_GATE_PASS.json`; a failure writes
 `RELEASE_GATE_FAILED` with the failed stage. Neither result creates a branch,
 commit, tag, release, or published artifact.
+
+Box-prompt artifact generation and DAVIS regression are not part of the
+`0.3.0-rc1` gate. The current local model build produces only the supported
+text/live artifact profile; a reproducible box build and box-specific manifest
+are deferred to a later release candidate. Historical DAVIS results must not
+be presented as validation of a newly built rc1 artifact root.

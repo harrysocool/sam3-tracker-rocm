@@ -12,12 +12,9 @@ MAX_CANONICAL_MEAN_MS=100.0
 MAX_SOAK_MEAN_MS=100.0
 MIN_MASK_MEAN_IOU=0.99
 MIN_MASK_IOU=0.98
-MIN_DAVIS_J=0.80
 
 CHECKPOINT=""
 OUTPUT=""
-DAVIS_ROOT=""
-DAVIS_ONNX_DIR=""
 IMAGE="${SAM3_DOCKER_IMAGE:-${DEFAULT_IMAGE}}"
 MGX_ARCHIVE=""
 ORT_WHEEL=""
@@ -31,15 +28,11 @@ Usage:
   tools/release_gate.sh \
     --checkpoint DIR \
     --output NEW_DIR \
-    --davis-root DIR \
-    --davis-onnx-dir DIR \
     [OPTIONS]
 
 Required inputs:
   --checkpoint DIR       Canonical SAM3 model directory
   --output NEW_DIR       New evidence directory outside the Git checkout
-  --davis-root DIR       DAVIS root containing ImageSets/2017/val.txt
-  --davis-onnx-dir DIR   Matching 504px box-tracker artifact root
 
 Options:
   --image TAG                Runtime image tag (default: pinned rc4-local tag)
@@ -55,7 +48,9 @@ The gate is intentionally fixed. It requires:
   * a clean runtime/model build and strict full+hybrid smoke;
   * the complete pytest suite in the target runtime plus host wrapper tests;
   * manifest/SHA validation, PT-vs-MIG mask regression;
-  * three canonical-250 runs, one soak-1000 run, and DAVIS 2017 val.
+  * three canonical-250 runs and one soak-1000 run.
+
+Box-prompt artifact generation and DAVIS validation are outside the rc1 gate.
 
 It never changes EC/SMU settings, deletes an existing output directory, merges,
 tags, or publishes anything. A failed run leaves logs and RELEASE_GATE_FAILED.
@@ -75,8 +70,6 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --checkpoint) value "$@"; CHECKPOINT="$2"; shift 2 ;;
         --output) value "$@"; OUTPUT="$2"; shift 2 ;;
-        --davis-root) value "$@"; DAVIS_ROOT="$2"; shift 2 ;;
-        --davis-onnx-dir) value "$@"; DAVIS_ONNX_DIR="$2"; shift 2 ;;
         --image) value "$@"; IMAGE="$2"; shift 2 ;;
         --migraphx-archive) value "$@"; MGX_ARCHIVE="$2"; shift 2 ;;
         --ort-wheel) value "$@"; ORT_WHEEL="$2"; shift 2 ;;
@@ -92,25 +85,14 @@ done
 
 [[ -n "${CHECKPOINT}" ]] || die "--checkpoint is required"
 [[ -n "${OUTPUT}" ]] || die "--output is required"
-[[ -n "${DAVIS_ROOT}" ]] || die "--davis-root is required"
-[[ -n "${DAVIS_ONNX_DIR}" ]] || die "--davis-onnx-dir is required"
 [[ -d "${CHECKPOINT}" && -f "${CHECKPOINT}/model.safetensors" ]] || \
     die "--checkpoint must contain model.safetensors"
-[[ -d "${DAVIS_ROOT}" ]] || die "--davis-root must be an existing directory"
-[[ -f "${DAVIS_ROOT}/ImageSets/2017/val.txt" ]] || \
-    die "--davis-root must contain ImageSets/2017/val.txt"
-[[ -d "${DAVIS_ROOT}/JPEGImages/480p" && -d "${DAVIS_ROOT}/Annotations/480p" ]] || \
-    die "--davis-root is missing JPEGImages/480p or Annotations/480p"
-[[ -d "${DAVIS_ONNX_DIR}/tracker_modules" ]] || \
-    die "--davis-onnx-dir must contain tracker_modules"
 [[ -z "${MGX_ARCHIVE}" || -f "${MGX_ARCHIVE}" ]] || \
     die "--migraphx-archive must be a file"
 [[ -z "${ORT_WHEEL}" || -f "${ORT_WHEEL}" ]] || \
     die "--ort-wheel must be a file"
 
 CHECKPOINT="$(readlink -f -- "${CHECKPOINT}")"
-DAVIS_ROOT="$(readlink -f -- "${DAVIS_ROOT}")"
-DAVIS_ONNX_DIR="$(readlink -f -- "${DAVIS_ONNX_DIR}")"
 OUTPUT="$(readlink -m -- "${OUTPUT}")"
 
 case "${OUTPUT}" in
@@ -213,11 +195,6 @@ check_free_space() {
 output_free_gib="$(check_free_space "the output filesystem" "$(dirname -- "${OUTPUT}")")"
 docker_root="$(docker info --format '{{.DockerRootDir}}')"
 docker_free_gib="$(check_free_space "the Docker filesystem" "${docker_root}")"
-
-case "${DAVIS_ROOT}" in
-    "${ROOT}"/*) davis_container="/workspace/${DAVIS_ROOT#"${ROOT}"/}" ;;
-    *) die "DAVIS must be a real directory under the checkout so the container can read it" ;;
-esac
 
 printf 'Preflight PASS: %s at %s (%s)\n' "${version}" "${commit}" "${branch}"
 printf '  EC=%s; STAPM/Fast/Slow PPT=120/140/120 W\n' "${ec_mode}"
@@ -509,44 +486,6 @@ run_stage soak-1000 env SAM3_DOCKER_STRICT=1 "${runtime[@]}" \
 run_stage soak-1000-threshold validate_canonical \
     "${OUTPUT}/canonical/1000.json" soak-1000 "${MAX_SOAK_MEAN_MS}"
 
-davis_runtime=(env
-    "SAM3_DOCKER_IMAGE=${IMAGE}"
-    "SAM3_MODEL_DIR=${CHECKPOINT}"
-    "SAM3_ONNX_DIR=${DAVIS_ONNX_DIR}"
-    "SAM3_OUTPUT_DIR=${OUTPUT}"
-    "${ROOT}/docker/rocm714/run.sh"
-)
-run_stage davis-2017-val env SAM3_DOCKER_STRICT=1 "${davis_runtime[@]}" \
-    python eval/datasets/eval_davis.py \
-    --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
-    --davis "${davis_container}" --imgsz 504 --num-maskmem 7 \
-    --split val --out /output/davis-2017-val.json
-
-validate_davis() {
-    python3 - "${OUTPUT}/davis-2017-val.json" <<PY
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as stream:
-    result = json.load(stream)
-errors = []
-if result.get("config", {}).get("dataset") != "DAVIS2017-val":
-    errors.append("dataset identity mismatch")
-if result.get("config", {}).get("imgsz") != 504:
-    errors.append("resolution is not 504")
-if result.get("config", {}).get("num_maskmem") != 7:
-    errors.append("num_maskmem is not 7")
-if len(result.get("sequences", [])) != 30:
-    errors.append(f"expected 30 val sequences, got {len(result.get('sequences', []))}")
-mean_j = result.get("mean_j")
-if mean_j is None or float(mean_j) < ${MIN_DAVIS_J}:
-    errors.append(f"mean J {mean_j!r} < ${MIN_DAVIS_J}")
-if errors:
-    raise SystemExit("DAVIS regression failed: " + "; ".join(errors))
-print(f"DAVIS PASS: mean J={float(mean_j):.6f}")
-PY
-}
-run_stage davis-threshold validate_davis
 assert_source_unchanged
 
 CURRENT_STAGE="summary"
@@ -585,7 +524,6 @@ for run in range(1, 4):
         "sha256": digest(relative),
     })
 soak = load("canonical/1000.json")
-davis = load("davis-2017-val.json")
 manifest_relative = "model-build/onnx_files_504/ARTIFACT_MANIFEST.json"
 summary = {
     "schema": 1,
@@ -601,7 +539,6 @@ summary = {
         "soak_mean_service_ms_max": 100.0,
         "mask_mean_iou_min": 0.99,
         "mask_iou_min": 0.98,
-        "davis_mean_j_min": 0.80,
     },
     "mask_regression": {
         "mean_iou": mask["iou_mean"],
@@ -614,11 +551,6 @@ summary = {
         "p95_service_ms": soak["warm_service_ms"]["p95"],
         "output_frames": soak["output_frames"],
         "sha256": digest("canonical/1000.json"),
-    },
-    "davis_2017_val": {
-        "mean_j": davis["mean_j"],
-        "sequence_count": len(davis["sequences"]),
-        "sha256": digest("davis-2017-val.json"),
     },
     "artifact_manifest_sha256": digest(manifest_relative),
 }

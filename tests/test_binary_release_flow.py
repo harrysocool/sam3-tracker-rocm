@@ -160,20 +160,19 @@ def test_release_gate_pins_the_complete_acceptance_contract():
         "MAX_SOAK_MEAN_MS=100.0",
         "MIN_MASK_MEAN_IOU=0.99",
         "MIN_MASK_IOU=0.98",
-        "MIN_DAVIS_J=0.80",
         "docker_test_runner.sh",
         "mask_diff_pt_vs_mig.py",
         "canonical-250",
         "soak-1000",
-        "eval_davis.py",
         "ARTIFACT_MANIFEST.sha256",
         "SHA256SUMS",
         "RELEASE_GATE_PASS.json",
     ):
         assert required in source
 
-    assert "--davis-root is required" in source
-    assert "--davis-onnx-dir is required" in source
+    assert "eval_davis.py" not in source
+    assert "--davis-root" not in source
+    assert "--davis-onnx-dir" not in source
     assert "SAM3_STAPM_LIMIT_W:120" in source
     assert "SAM3_FAST_PPT_LIMIT_W:140" in source
     assert "SAM3_SLOW_PPT_LIMIT_W:120" in source
