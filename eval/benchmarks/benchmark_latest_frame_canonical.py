@@ -536,6 +536,12 @@ def main() -> int:
         errors.append(
             "final source sequence does not match the canonical arrival count"
         )
+    minimum_outputs = warm_outputs + tail_outputs
+    if len(records) < minimum_outputs:
+        errors.append(
+            f"insufficient measured outputs: expected at least {minimum_outputs}, "
+            f"got {len(records)}"
+        )
     report = {
         "runtime": {
             "torch": torch.__version__,

@@ -23,6 +23,7 @@ def test_help_entrypoints_do_not_start_work():
         (ROOT / "setup.sh", ()),
         (ROOT / "docker/rocm714/build.sh", ("--help",)),
         (ROOT / "tools/docker_test_runner.sh", ("--help",)),
+        (ROOT / "tools/release_gate.sh", ("--help",)),
     ):
         result = run(path, *args)
         assert result.returncode == 0, result.stderr
@@ -142,6 +143,7 @@ def test_model_build_enables_current_optimizations():
     assert "CANONICAL_VIDEO_SHA256" in benchmark
     assert "SAM3_BUILD_HOST_ID" in benchmark
     assert "SAM3_SLOW_PPT_LIMIT_W" in benchmark
+    assert "insufficient measured outputs" in benchmark
     assert 'parser.add_argument("--video"' not in benchmark
     assert 'parser.add_argument("--loops"' not in benchmark
 
@@ -149,6 +151,39 @@ def test_model_build_enables_current_optimizations():
     assert "--performance-build" in (
         ROOT / "tools/docker_test_runner.sh"
     ).read_text()
+
+
+def test_release_gate_pins_the_complete_acceptance_contract():
+    source = (ROOT / "tools/release_gate.sh").read_text()
+    for required in (
+        "MAX_CANONICAL_MEAN_MS=100.0",
+        "MAX_SOAK_MEAN_MS=100.0",
+        "MIN_MASK_MEAN_IOU=0.99",
+        "MIN_MASK_IOU=0.98",
+        "MIN_DAVIS_J=0.80",
+        "docker_test_runner.sh",
+        "mask_diff_pt_vs_mig.py",
+        "canonical-250",
+        "soak-1000",
+        "eval_davis.py",
+        "ARTIFACT_MANIFEST.sha256",
+        "SHA256SUMS",
+        "RELEASE_GATE_PASS.json",
+    ):
+        assert required in source
+
+    assert "--davis-root is required" in source
+    assert "--davis-onnx-dir is required" in source
+    assert "SAM3_STAPM_LIMIT_W:120" in source
+    assert "SAM3_FAST_PPT_LIMIT_W:140" in source
+    assert "SAM3_SLOW_PPT_LIMIT_W:120" in source
+
+
+def test_mask_regression_disables_memory_attention_fallback():
+    source = (ROOT / "eval/datasets/mask_diff_pt_vs_mig.py").read_text()
+    assert "required_spatial_slots=range(1, 11)" in source
+    assert "allow_pytorch_fallback=False" in source
+    assert '"pytorch_fallback_calls"' in source
 
 
 def test_locally_compiled_decoder_uses_its_checksum_sidecar():
@@ -169,5 +204,6 @@ def test_shell_syntax():
     for path in (
         ROOT / "setup.sh", ROOT / "docker/rocm714/build.sh",
         ROOT / "docker/rocm714/run.sh", ROOT / "tools/docker_test_runner.sh",
+        ROOT / "tools/release_gate.sh",
     ):
         assert subprocess.run([BASH, "-n", str(path)], check=False).returncode == 0

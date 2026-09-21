@@ -261,3 +261,38 @@ locally; it does not build ROCm/MIGraphX/ORT/Torch from source.
 Use `--migraphx-archive` and `--ort-wheel` for local binary release files.
 Do not overwrite immutable baseline `tuned.mxr` files or reuse caches from
 host MIGraphX 2.16.
+
+## Final release gate
+
+Maintainers should qualify one clean `dev` or matching `release/rcN` commit
+with the single release-gate entry point. The gate requires a new output
+directory outside the checkout, the canonical checkpoint, DAVIS 2017 val, and
+the separate 504px box-tracker artifacts used by the DAVIS evaluator:
+
+```bash
+export SAM3_BUILD_HOST_ID=harry-evo-x2
+export SAM3_STAPM_LIMIT_W=120
+export SAM3_FAST_PPT_LIMIT_W=140
+export SAM3_SLOW_PPT_LIMIT_W=120
+
+./tools/release_gate.sh \
+  --checkpoint "$SAM3_MODEL_DIR" \
+  --output "$HOME/sam3-artifacts/gpu/release-gate-0.3.0-rc1" \
+  --davis-root "$PWD/dataset/DAVIS" \
+  --davis-onnx-dir "$HOME/sam3-artifacts/gpu/box-onnx-files-504"
+```
+
+If the optional EC driver is unavailable, verify Performance mode in BIOS and
+also export `SAM3_EC_POWER_MODE=performance`. The script does not modify EC,
+fan, or SMU settings. It validates a clean source revision, canonical input
+hashes, at least 30 GiB free space, and the 120/140/120 W power attestation
+before starting expensive work.
+
+The fixed gate then runs the clean runtime/model build, strict installation
+smoke, target-runtime unit suite, host Docker-wrapper tests, artifact checksum
+verification, 30-frame PT-vs-MIG mask regression, three `canonical-250`
+profiles, one `soak-1000` profile, and DAVIS 2017 val. Acceptance thresholds
+are encoded in the script and cannot be weakened with command-line options.
+Success writes `RELEASE_GATE_PASS.json`; a failure writes
+`RELEASE_GATE_FAILED` with the failed stage. Neither result creates a branch,
+commit, tag, release, or published artifact.
