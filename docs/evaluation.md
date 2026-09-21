@@ -131,6 +131,20 @@ The output JSON contains every selected source sequence and its queue, service,
 and result-age timings. Compare service means only across the same arrival,
 warmup, model, power, and artifact conditions.
 
+For release/reference runs, label the machine and attest the measured power
+policy before invoking either profile:
+
+```bash
+export SAM3_BUILD_HOST_ID=harry-evo-x2
+export SAM3_STAPM_LIMIT_W=120
+export SAM3_FAST_PPT_LIMIT_W=140
+export SAM3_SLOW_PPT_LIMIT_W=120
+```
+
+These values are recorded in the result JSON; the benchmark does not request
+root access or modify SMU limits. If any value is omitted, the report marks the
+power policy as `not_fully_reported` rather than inventing a value.
+
 ## Offline serial-versus-parallel A/B
 
 ```bash

@@ -61,6 +61,7 @@ def _identity_env(monkeypatch) -> None:
     monkeypatch.setenv("SAM3_DOCKER_IMAGE_REF", "sam3:test")
     monkeypatch.setenv("SAM3_DOCKER_IMAGE_ID", "sha256:" + "b" * 64)
     monkeypatch.setenv("SAM3_EC_POWER_MODE", "performance")
+    monkeypatch.setenv("SAM3_BUILD_HOST_ID", "test-evo-x2")
 
 
 def test_manifest_records_complete_identity(monkeypatch, tmp_path):
@@ -75,6 +76,8 @@ def test_manifest_records_complete_identity(monkeypatch, tmp_path):
             "torch": "test", "torch_hip": "test", "onnxruntime": "1.24.2",
             "migraphx": "2.17", "migraphx_module": "/test/migraphx.so",
             "providers": ["MIGraphXExecutionProvider", "CPUExecutionProvider"],
+            "gpu_name": "test-gpu", "gpu_arch": "gfx1151",
+            "gpu_arch_detail": "gfx1151:sramecc+:xnack-",
         },
     )
 
@@ -89,6 +92,8 @@ def test_manifest_records_complete_identity(monkeypatch, tmp_path):
     assert manifest["checkpoint"]["sha256"] == artifact_manifest.sha256(checkpoint)
     assert manifest["build"]["image_id"] == "sha256:" + "b" * 64
     assert manifest["build"]["ec_power_mode"] == "performance"
+    assert manifest["hardware"]["build_host_id"] == "test-evo-x2"
+    assert manifest["hardware"]["gpu_arch"] == "gfx1151"
     paths = {row["path"] for row in manifest["files"]}
     assert artifact_manifest.BUILD_PROVENANCE_FILENAME in paths
     assert "tracker_modules/ort_cache_mem_attn/compile_policy.json" in paths

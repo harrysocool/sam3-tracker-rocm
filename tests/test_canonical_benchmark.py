@@ -31,6 +31,53 @@ def test_canonical_profile_rejects_changed_video(tmp_path):
         benchmark._resolve_profile("canonical-250", changed)
 
 
+def test_power_policy_records_complete_attestation():
+    policy = benchmark._power_policy(
+        {
+            "SAM3_STAPM_LIMIT_W": "120",
+            "SAM3_FAST_PPT_LIMIT_W": "140",
+            "SAM3_SLOW_PPT_LIMIT_W": "120",
+        }
+    )
+    assert policy == {
+        "stapm_limit_w": 120.0,
+        "fast_ppt_limit_w": 140.0,
+        "slow_ppt_limit_w": 120.0,
+        "complete": True,
+        "source": "environment_attestation",
+    }
+
+
+def test_power_policy_marks_missing_values_incomplete():
+    policy = benchmark._power_policy({"SAM3_SLOW_PPT_LIMIT_W": "120"})
+    assert policy["slow_ppt_limit_w"] == 120.0
+    assert policy["complete"] is False
+    assert policy["source"] == "not_fully_reported"
+
+
+def test_power_policy_rejects_invalid_values():
+    with pytest.raises(ValueError, match="SAM3_SLOW_PPT_LIMIT_W"):
+        benchmark._power_policy({"SAM3_SLOW_PPT_LIMIT_W": "invalid"})
+
+
+def test_execution_hardware_records_safe_host_fields(monkeypatch, tmp_path):
+    for name, value in {
+        "sys_vendor": "GMKtec",
+        "product_name": "NucBox_EVO-X2",
+        "bios_version": "test-bios",
+    }.items():
+        (tmp_path / name).write_text(value)
+    monkeypatch.setattr(benchmark.torch.cuda, "is_available", lambda: False)
+    hardware = benchmark._execution_hardware(
+        {"SAM3_BUILD_HOST_ID": "harry-evo-x2"}, tmp_path
+    )
+    assert hardware["build_host_id"] == "harry-evo-x2"
+    assert hardware["system_vendor"] == "GMKtec"
+    assert hardware["product_name"] == "NucBox_EVO-X2"
+    assert hardware["bios_version"] == "test-bios"
+    assert hardware["gpu_arch"] is None
+
+
 def test_legacy_custom_timing_arguments_are_rejected(monkeypatch):
     monkeypatch.setattr(
         sys,

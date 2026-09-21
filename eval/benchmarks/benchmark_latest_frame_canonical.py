@@ -104,6 +104,57 @@ def _resolve_profile(name: str, video: Path = CANONICAL_VIDEO) -> dict:
     return profile
 
 
+def _read_optional_text(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def _execution_hardware(environ=None, dmi_root: Path | None = None) -> dict:
+    env = os.environ if environ is None else environ
+    dmi = dmi_root or Path("/sys/class/dmi/id")
+    properties = torch.cuda.get_device_properties(0) if torch.cuda.is_available() else None
+    arch_detail = getattr(properties, "gcnArchName", None)
+    return {
+        "build_host_id": env.get("SAM3_BUILD_HOST_ID") or None,
+        "system_vendor": _read_optional_text(dmi / "sys_vendor"),
+        "product_name": _read_optional_text(dmi / "product_name"),
+        "bios_version": _read_optional_text(dmi / "bios_version"),
+        "gpu_name": getattr(properties, "name", None),
+        "gpu_arch": arch_detail.split(":", 1)[0] if arch_detail else None,
+        "gpu_arch_detail": arch_detail,
+    }
+
+
+def _power_policy(environ=None) -> dict:
+    env = os.environ if environ is None else environ
+    names = {
+        "stapm_limit_w": "SAM3_STAPM_LIMIT_W",
+        "fast_ppt_limit_w": "SAM3_FAST_PPT_LIMIT_W",
+        "slow_ppt_limit_w": "SAM3_SLOW_PPT_LIMIT_W",
+    }
+    values = {}
+    for field, name in names.items():
+        raw = env.get(name, "").strip()
+        if not raw:
+            values[field] = None
+            continue
+        try:
+            value = float(raw)
+        except ValueError as exc:
+            raise ValueError(f"{name} must be a positive number of watts") from exc
+        if value <= 0:
+            raise ValueError(f"{name} must be a positive number of watts")
+        values[field] = value
+    complete = all(value is not None for value in values.values())
+    return {
+        **values,
+        "complete": complete,
+        "source": "environment_attestation" if complete else "not_fully_reported",
+    }
+
+
 def _actual_artifact_paths(onnx_dir: Path) -> set[str]:
     paths = {
         name for name in ROOT_ARTIFACT_FILES if (onnx_dir / name).is_file()
@@ -515,7 +566,10 @@ def main() -> int:
             "source": manifest["source"],
             "checkpoint": manifest["checkpoint"],
             "build": manifest["build"],
+            "build_hardware": manifest.get("hardware"),
         },
+        "execution_hardware": _execution_hardware(),
+        "power_policy": _power_policy(),
         "captured_frames": state["captured"],
         "output_frames": len(records),
         "pipeline_stats": pipeline_stats,
@@ -566,6 +620,7 @@ def main() -> int:
                 "service_p95_ms": report["warm_service_ms"]["p95"],
                 "stats": pipeline_stats,
                 "memory_attention": report["memory_attention"],
+                "power_policy": report["power_policy"],
                 "errors": errors,
             },
             indent=2,

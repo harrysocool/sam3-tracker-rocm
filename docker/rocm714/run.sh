@@ -62,6 +62,15 @@ fi
 if [[ -n "${SAM3_EC_POWER_MODE_PATH:-}" ]]; then
     optional_env_args+=(-e "SAM3_EC_POWER_MODE_PATH=${SAM3_EC_POWER_MODE_PATH}")
 fi
+for name in \
+    SAM3_BUILD_HOST_ID \
+    SAM3_STAPM_LIMIT_W \
+    SAM3_FAST_PPT_LIMIT_W \
+    SAM3_SLOW_PPT_LIMIT_W; do
+    if [[ -n "${!name:-}" ]]; then
+        optional_env_args+=(-e "${name}=${!name}")
+    fi
+done
 
 mount_args=(
     -v "${ROOT}:/workspace${mount_mode}"

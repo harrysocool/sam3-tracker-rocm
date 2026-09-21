@@ -140,6 +140,8 @@ def test_model_build_enables_current_optimizations():
     assert '"canonical-250"' in benchmark
     assert '"soak-1000"' in benchmark
     assert "CANONICAL_VIDEO_SHA256" in benchmark
+    assert "SAM3_BUILD_HOST_ID" in benchmark
+    assert "SAM3_SLOW_PPT_LIMIT_W" in benchmark
     assert 'parser.add_argument("--video"' not in benchmark
     assert 'parser.add_argument("--loops"' not in benchmark
 

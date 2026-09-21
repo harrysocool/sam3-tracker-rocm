@@ -54,6 +54,8 @@ def runtime_metadata() -> dict:
     import onnxruntime
     import torch
 
+    properties = torch.cuda.get_device_properties(0) if torch.cuda.is_available() else None
+    arch_detail = getattr(properties, "gcnArchName", None)
     return {
         "torch": torch.__version__,
         "torch_hip": torch.version.hip,
@@ -61,6 +63,29 @@ def runtime_metadata() -> dict:
         "migraphx": getattr(migraphx, "__version__", "unknown"),
         "migraphx_module": str(Path(migraphx.__file__).resolve()),
         "providers": onnxruntime.get_available_providers(),
+        "gpu_name": getattr(properties, "name", None),
+        "gpu_arch": arch_detail.split(":", 1)[0] if arch_detail else None,
+        "gpu_arch_detail": arch_detail,
+    }
+
+
+def _read_optional_text(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def hardware_metadata(stack: dict) -> dict:
+    dmi = Path("/sys/class/dmi/id")
+    return {
+        "build_host_id": os.environ.get("SAM3_BUILD_HOST_ID") or None,
+        "system_vendor": _read_optional_text(dmi / "sys_vendor"),
+        "product_name": _read_optional_text(dmi / "product_name"),
+        "bios_version": _read_optional_text(dmi / "bios_version"),
+        "gpu_name": stack.get("gpu_name"),
+        "gpu_arch": stack.get("gpu_arch"),
+        "gpu_arch_detail": stack.get("gpu_arch_detail"),
     }
 
 
@@ -361,6 +386,7 @@ def build_manifest(
         },
         "build_provenance": recorded_provenance,
         "stack": stack,
+        "hardware": hardware_metadata(stack),
         "memory_attention": policy,
         "files": collect_files(root),
     }

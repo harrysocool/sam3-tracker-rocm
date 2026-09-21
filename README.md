@@ -174,7 +174,9 @@ kernels can change with the available power budget.
 Successful completion also writes `ARTIFACT_MANIFEST.json`, its checksum
 sidecar, and `SHA256SUMS` into `onnx_files_504`. The manifest records the source
 revision, checkpoint hash, container image identity, runtime versions, EC mode,
-memory compile policy, and every generated artifact hash.
+GPU name/architecture, optional `SAM3_BUILD_HOST_ID`, memory compile policy,
+and every generated artifact hash. It does not record hostname or hardware
+serial numbers.
 
 **Keep both runtime directory variables set when running demos.** The wrapper
 mounts host `SAM3_MODEL_DIR` at `/models/sam3` and host `SAM3_ONNX_DIR` at
