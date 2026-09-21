@@ -36,6 +36,27 @@ ARTIFACT_SUBDIRS = (
     "tracker_modules",
 )
 ROOT_ARTIFACT_FILES = {"BUILD_PROVENANCE.json"}
+WORKSPACE = Path(__file__).resolve().parents[2]
+CANONICAL_VIDEO = WORKSPACE / "assets/blackswan.mp4"
+CANONICAL_VIDEO_SHA256 = (
+    "aaf37f0db4eba8d0058fd48b03391a742ded0d7f7db747378bec8459229476b9"
+)
+PROFILE_CONFIGS = {
+    "canonical-250": {
+        "loops": 5,
+        "capture_fps": 24.0,
+        "warm_outputs": 5,
+        "tail_outputs": 20,
+        "expected_arrivals": 250,
+    },
+    "soak-1000": {
+        "loops": 20,
+        "capture_fps": 24.0,
+        "warm_outputs": 5,
+        "tail_outputs": 50,
+        "expected_arrivals": 1000,
+    },
+}
 
 
 def _sha256(path: Path) -> str:
@@ -57,6 +78,30 @@ def _summary(values: list[float]) -> dict[str, float | int | None]:
         "p95": float(np.percentile(array, 95)),
         "max": float(array.max()),
     }
+
+
+def _resolve_profile(name: str, video: Path = CANONICAL_VIDEO) -> dict:
+    try:
+        profile = dict(PROFILE_CONFIGS[name])
+    except KeyError as exc:
+        raise ValueError(f"unknown canonical profile: {name}") from exc
+    if not video.is_file():
+        raise FileNotFoundError(video)
+    digest = _sha256(video)
+    if digest != CANONICAL_VIDEO_SHA256:
+        raise RuntimeError(
+            f"canonical input video SHA256 mismatch: {digest} != "
+            f"{CANONICAL_VIDEO_SHA256}"
+        )
+    profile.update(
+        {
+            "name": name,
+            "video": video,
+            "video_sha256": digest,
+            "prompt": "swan",
+        }
+    )
+    return profile
 
 
 def _actual_artifact_paths(onnx_dir: Path) -> set[str]:
@@ -305,20 +350,23 @@ def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--onnx-dir", type=Path, required=True)
-    parser.add_argument("--video", type=Path, required=True)
-    parser.add_argument("--text", default="swan")
-    parser.add_argument("--loops", type=int, default=5)
-    parser.add_argument("--capture-fps", type=float, default=24.0)
-    parser.add_argument("--warm-outputs", type=int, default=5)
-    parser.add_argument("--tail-outputs", type=int, default=20)
+    parser.add_argument(
+        "--profile", required=True, choices=tuple(PROFILE_CONFIGS),
+        help="Fixed canonical workload; custom timing parameters are not accepted.",
+    )
     parser.add_argument("--out", type=Path, required=True)
     return parser.parse_args()
 
 
 def main() -> int:
     args = _parse_args()
-    if args.loops < 1 or args.capture_fps <= 0 or args.warm_outputs < 0:
-        raise ValueError("invalid loop/fps/warm-output configuration")
+    profile = _resolve_profile(args.profile)
+    video = profile["video"]
+    prompt = profile["prompt"]
+    loops = profile["loops"]
+    capture_fps = profile["capture_fps"]
+    warm_outputs = profile["warm_outputs"]
+    tail_outputs = profile["tail_outputs"]
     _reject_noncanonical_environment()
     manifest, expected_backbone_sha = _load_artifact_identity(args.onnx_dir)
     _validate_execution_identity(manifest, args.checkpoint)
@@ -339,7 +387,7 @@ def main() -> int:
 
     live = SAM3Live(
         checkpoint=args.checkpoint,
-        prompts=[args.text],
+        prompts=[prompt],
         onnx_dir=args.onnx_dir,
         imgsz=504,
         dtype=torch.float16,
@@ -362,14 +410,14 @@ def main() -> int:
             f"canonical benchmark requires original S7/C4, got {memory_contract}"
         )
     memory_shim = tracker.memory_attention._mig_shim
-    _warmup_and_reset(live, args.video, args.text)
+    _warmup_and_reset(live, video, prompt)
 
     pipeline = LatestFramePipeline(live)
     pipeline.start()
     state = {"captured": 0, "arrivals": [], "error": None}
     producer = threading.Thread(
         target=_capture,
-        args=(args.video, args.loops, args.capture_fps, pipeline, state),
+        args=(video, loops, capture_fps, pipeline, state),
         name="sam3-latest-frame-benchmark-capture",
     )
     records = []
@@ -405,13 +453,13 @@ def main() -> int:
     if state["error"] is not None:
         raise RuntimeError(f"capture failed: {state['error']}")
 
-    warm = records[min(args.warm_outputs, len(records)) :]
+    warm = records[min(warm_outputs, len(records)) :]
     completion = [record["completed_at"] for record in records]
     intervals = [
         (completion[index] - completion[index - 1]) * 1000.0
-        for index in range(max(1, args.warm_outputs), len(completion))
+        for index in range(max(1, warm_outputs), len(completion))
     ]
-    tail = records[-min(args.tail_outputs, len(records)) :]
+    tail = records[-min(tail_outputs, len(records)) :]
     tail_intervals = [
         (tail[index]["completed_at"] - tail[index - 1]["completed_at"]) * 1000.0
         for index in range(1, len(tail))
@@ -428,6 +476,15 @@ def main() -> int:
         )
     if any(record["object_count"] != 1 for record in records):
         errors.append("expected exactly one tracked object on every output")
+    if state["captured"] != profile["expected_arrivals"]:
+        errors.append(
+            f"expected {profile['expected_arrivals']} arrivals, got "
+            f"{state['captured']}"
+        )
+    if records and records[-1]["source_sequence"] != profile["expected_arrivals"] - 1:
+        errors.append(
+            "final source sequence does not match the canonical arrival count"
+        )
     report = {
         "runtime": {
             "torch": torch.__version__,
@@ -436,10 +493,13 @@ def main() -> int:
             "providers": providers,
         },
         "config": {
-            "video": str(args.video.resolve()),
-            "prompt": args.text,
-            "loops": args.loops,
-            "capture_fps": args.capture_fps,
+            "profile": profile["name"],
+            "video": str(video.resolve()),
+            "video_sha256": profile["video_sha256"],
+            "prompt": prompt,
+            "loops": loops,
+            "capture_fps": capture_fps,
+            "expected_arrivals": profile["expected_arrivals"],
             "copy_frames": True,
             "full_detection_every_consumed_frame": True,
             "nplus1_gpu_work": False,
@@ -467,7 +527,7 @@ def main() -> int:
         "first_source_sequence": records[0]["source_sequence"] if records else None,
         "last_source_sequence": records[-1]["source_sequence"] if records else None,
         "wall_seconds": wall_end - wall_start,
-        "warm_discard_outputs": min(args.warm_outputs, len(records)),
+        "warm_discard_outputs": min(warm_outputs, len(records)),
         "warm_output_interval_ms": interval_summary,
         "warm_output_hz": (
             1000.0 / interval_summary["mean"] if interval_summary["mean"] else None

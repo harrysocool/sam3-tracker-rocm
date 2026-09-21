@@ -137,6 +137,11 @@ def test_model_build_enables_current_optimizations():
     assert "ARTIFACT_MANIFEST.json" in benchmark
     assert "BENCH_NUM_MASKMEM" in benchmark
     assert "pytorch_fallback_calls" in benchmark
+    assert '"canonical-250"' in benchmark
+    assert '"soak-1000"' in benchmark
+    assert "CANONICAL_VIDEO_SHA256" in benchmark
+    assert 'parser.add_argument("--video"' not in benchmark
+    assert 'parser.add_argument("--loops"' not in benchmark
 
     assert "--performance-build" in (ROOT / "setup.sh").read_text()
     assert "--performance-build" in (

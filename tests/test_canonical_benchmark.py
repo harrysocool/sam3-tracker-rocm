@@ -1,10 +1,52 @@
 """CPU-only guards for the canonical latest-frame benchmark contract."""
 
 import json
+import sys
 
 import pytest
 
 from eval.benchmarks import benchmark_latest_frame_canonical as benchmark
+
+
+def test_canonical_profiles_are_fully_pinned():
+    assert benchmark.PROFILE_CONFIGS == {
+        "canonical-250": {
+            "loops": 5, "capture_fps": 24.0, "warm_outputs": 5,
+            "tail_outputs": 20, "expected_arrivals": 250,
+        },
+        "soak-1000": {
+            "loops": 20, "capture_fps": 24.0, "warm_outputs": 5,
+            "tail_outputs": 50, "expected_arrivals": 1000,
+        },
+    }
+    profile = benchmark._resolve_profile("canonical-250")
+    assert profile["prompt"] == "swan"
+    assert profile["video_sha256"] == benchmark.CANONICAL_VIDEO_SHA256
+
+
+def test_canonical_profile_rejects_changed_video(tmp_path):
+    changed = tmp_path / "blackswan.mp4"
+    changed.write_bytes(b"not-the-canonical-input")
+    with pytest.raises(RuntimeError, match="input video SHA256 mismatch"):
+        benchmark._resolve_profile("canonical-250", changed)
+
+
+def test_legacy_custom_timing_arguments_are_rejected(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "benchmark_latest_frame_canonical.py",
+            "--checkpoint", "model",
+            "--onnx-dir", "artifacts",
+            "--profile", "canonical-250",
+            "--out", "result.json",
+            "--loops", "1",
+        ],
+    )
+    with pytest.raises(SystemExit) as caught:
+        benchmark._parse_args()
+    assert caught.value.code == 2
 
 
 def _write_manifest(tmp_path, *, dirty=False, extra_files=None):

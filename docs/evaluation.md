@@ -99,7 +99,10 @@ dirty-source artifacts and tracker-memory environment overrides, verifies the
 manifest checksum plus every recorded artifact hash, and rejects unrecorded
 files. It also requires ONNX Runtime 1.24.2 with MIGraphX as the primary
 provider. It always uses original SAM3 S7/C4, full detection on every consumed
-frame, same-frame parallel tail, and no N+1 lookahead.
+frame, same-frame parallel tail, and no N+1 lookahead. The profile also pins
+`assets/blackswan.mp4` by SHA256, prompt `swan`, 24 FPS, five discarded warm
+outputs, and the complete aggregation window; custom timing arguments are not
+accepted by this harness.
 
 Run three 250-arrival repetitions:
 
@@ -109,8 +112,7 @@ for run in 1 2 3; do
   ./docker/rocm714/run.sh \
     python eval/benchmarks/benchmark_latest_frame_canonical.py \
       --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
-      --video assets/blackswan.mp4 --text swan \
-      --loops 5 --capture-fps 24 --warm-outputs 5 --tail-outputs 20 \
+      --profile canonical-250 \
       --out "results/perf/canonical/250-r${run}.json"
 done
 ```
@@ -121,8 +123,7 @@ Run the 1000-arrival soak:
 ./docker/rocm714/run.sh \
   python eval/benchmarks/benchmark_latest_frame_canonical.py \
     --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
-    --video assets/blackswan.mp4 --text swan \
-    --loops 20 --capture-fps 24 --warm-outputs 5 --tail-outputs 50 \
+    --profile soak-1000 \
     --out results/perf/canonical/1000.json
 ```
 
