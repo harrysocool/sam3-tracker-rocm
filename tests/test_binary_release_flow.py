@@ -85,15 +85,15 @@ def test_repository_license_scope_is_explicit():
 
 
 def test_source_release_and_runtime_dependency_versions_are_consistent():
-    source_version = "0.2.0-rc6"
+    source_version = "0.3.0-rc1"
     runtime_version = "0.2.0-rc4"
     assert (ROOT / "VERSION").read_text().strip() == source_version
     release_notes = ROOT / "docs/releases" / f"{source_version}.md"
     assert release_notes.is_file()
     assert f"SAM3 ROCm {source_version}" in release_notes.read_text()
 
-    # rc5 reuses the checksum-pinned runtime bundle published for rc4. Keep
-    # source-release metadata independent from the binary dependency version.
+    # Source releases continue to reuse the checksum-pinned runtime bundle
+    # published for rc4. Keep source metadata independent from that dependency.
     for path in (
         ROOT / "docker/rocm714/build.sh",
         ROOT / "docker/rocm714/run.sh",

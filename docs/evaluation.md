@@ -250,7 +250,7 @@ ORT prewarming, and full/hybrid installation smoke together:
 ```bash
 ./tools/docker_test_runner.sh \
   --checkpoint "$SAM3_MODEL_DIR" \
-  --output "$HOME/sam3-artifacts/gpu/clean-validation-0.2.0-rc6"
+  --output "$HOME/sam3-artifacts/gpu/clean-validation-0.3.0-rc1"
 ```
 
 Choose a **new** output directory; use `--resume` only for the same interrupted
