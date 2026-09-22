@@ -8,6 +8,17 @@ ONNX_DIR="${SAM3_ONNX_DIR:-${ROOT}/onnx_files_504_mgx217}"
 OUTPUT_DIR="${SAM3_OUTPUT_DIR:-}"
 CONTAINER_USER="$(id -un 2>/dev/null || printf 'sam3')"
 STRICT="${SAM3_DOCKER_STRICT:-0}"
+IMAGE_ID="${SAM3_DOCKER_IMAGE_ID:-$(docker image inspect --format '{{.Id}}' "${IMAGE}" 2>/dev/null || true)}"
+SOURCE_COMMIT="${SAM3_SOURCE_COMMIT:-$(git -C "${ROOT}" rev-parse HEAD 2>/dev/null || true)}"
+if [[ -z "${SOURCE_COMMIT}" && -f "${ROOT}/VERSION" ]]; then
+    SOURCE_COMMIT="version:$(< "${ROOT}/VERSION")"
+fi
+SOURCE_COMMIT="${SOURCE_COMMIT:-unknown}"
+SOURCE_DIRTY="${SAM3_SOURCE_DIRTY:-0}"
+if git -C "${ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1 &&
+   [[ -n "$(git -C "${ROOT}" status --porcelain --untracked-files=normal)" ]]; then
+    SOURCE_DIRTY=1
+fi
 
 case "${STRICT}" in
     0|1) ;;
@@ -39,11 +50,27 @@ fi
 mount_mode=""
 network="host"
 strict_args=()
+optional_env_args=()
 if [[ "${STRICT}" == 1 ]]; then
     mount_mode=":ro"
     network="none"
     strict_args+=(--read-only --tmpfs /tmp:rw,exec,nosuid,size=4g)
 fi
+if [[ -n "${SAM3_EC_POWER_MODE:-}" ]]; then
+    optional_env_args+=(-e "SAM3_EC_POWER_MODE=${SAM3_EC_POWER_MODE}")
+fi
+if [[ -n "${SAM3_EC_POWER_MODE_PATH:-}" ]]; then
+    optional_env_args+=(-e "SAM3_EC_POWER_MODE_PATH=${SAM3_EC_POWER_MODE_PATH}")
+fi
+for name in \
+    SAM3_BUILD_HOST_ID \
+    SAM3_STAPM_LIMIT_W \
+    SAM3_FAST_PPT_LIMIT_W \
+    SAM3_SLOW_PPT_LIMIT_W; do
+    if [[ -n "${!name:-}" ]]; then
+        optional_env_args+=(-e "${name}=${!name}")
+    fi
+done
 
 mount_args=(
     -v "${ROOT}:/workspace${mount_mode}"
@@ -106,7 +133,12 @@ exec docker run --pull=never --rm "${tty_args[@]}" \
     -e TRANSFORMERS_OFFLINE=1 \
     -e HF_HUB_OFFLINE=1 \
     -e SAM3_DEFAULT_ONNX_DIR=/models/onnx_files_504 \
+    -e SAM3_DOCKER_IMAGE_REF="${IMAGE}" \
+    -e SAM3_DOCKER_IMAGE_ID="${IMAGE_ID}" \
+    -e SAM3_SOURCE_COMMIT="${SOURCE_COMMIT}" \
+    -e SAM3_SOURCE_DIRTY="${SOURCE_DIRTY}" \
     -e PYTHONPATH=/workspace:/opt/migraphx-develop/lib \
+    "${optional_env_args[@]}" \
     "${mount_args[@]}" \
     -w /workspace \
     "${IMAGE}" "$@"

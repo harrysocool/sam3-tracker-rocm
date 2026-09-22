@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 from pathlib import Path
 import shutil
+
+# Provider build policy must be fixed before ONNX Runtime loads MIGraphX.
+os.environ.pop("MIGRAPHX_SKIP_BENCHMARKING", None)
+os.environ.pop("MIGRAPHX_MLIR_USE_SPECIFIC_OPS", None)
 
 import numpy as np
 import onnxruntime as ort

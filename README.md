@@ -111,10 +111,72 @@ export SAM3_ONNX_DIR="$SAM3_MODEL_BUILD_ROOT/onnx_files_504"
 ```
 
 This exports ONNX and builds the 504px model artifacts inside the container,
-including the GPU-I/O backbone and fixed DETR decoder. The initial build is a
-one-time compilation step; completed export / compile steps are skipped on
-rerun. ORT modules also compile and cache graphs on first use, so the first demo
-startup can take longer than later runs.
+including the GPU-I/O backbone, fixed DETR decoder, and independently
+autotuned S1--S10 memory-attention caches. The validated memory policy uses
+attention-specific MLIR tuning for S1--S7/S9--S10 and generic tuning for S8.
+The initial build is a one-time compilation step; completed export / compile
+steps are skipped on rerun when their recorded memory-cache policy still
+matches. A three-frame writable prewarm populates the DETR runtime cache before
+the final manifest is written, so later smoke and benchmark runs do not add
+unrecorded artifact files.
+Each root also receives `BUILD_PROVENANCE.json` before the first export. A
+non-empty root is resumable only when its source, checkpoint, image, EC mode,
+and shape parameters match. Otherwise the build fails without deleting files;
+only an explicit full `--force` build may reset generated artifacts.
+
+`setup.sh --models` is a performance build and requires the current EC power
+mode to be `performance`. On the EVO-X2 this is read from
+`/sys/class/ec_su_axb35/apu/power_mode`. On another gfx1151 platform without
+that interface, verify the equivalent BIOS setting first and pass the explicit
+attestation below:
+
+```bash
+SAM3_EC_POWER_MODE=performance ./setup.sh --models "$SAM3_MODEL_DIR"
+```
+
+#### Optional EC power-mode verification
+
+The `/sys/class/ec_su_axb35/` interface is not provided by a stock Linux
+installation. It appears only when the optional third-party Sixunited
+AXB35-02 EC driver is installed and loaded. The driver is not a SAM3 runtime
+dependency and `setup.sh` never installs a kernel module automatically.
+
+The default path is to select **Performance** in the BIOS and use the explicit
+`SAM3_EC_POWER_MODE=performance` attestation above. EVO-X2 users who want Linux
+to verify the setting automatically can review and install the driver from:
+
+```text
+https://github.com/cmetz/ec-su_axb35-linux
+```
+
+The validated upstream revision used during this work was:
+
+```text
+f62c2c228959a08683273a26ef3afd8991e69f6d
+```
+
+Follow that project's build/install instructions, then verify:
+
+```bash
+cat /sys/class/ec_su_axb35/apu/power_mode
+```
+
+It must print `performance` before `setup.sh --models` is run. This is an
+out-of-tree driver with root-level EC write access; kernel headers and possibly
+Secure Boot module signing are required. Install it only on a supported board
+and review its source first.
+
+The build always removes `MIGRAPHX_SKIP_BENCHMARKING` and compiles each memory
+shape in a separate process. Do not use the attestation to bypass an unknown or
+balanced power policy: autotuning is hardware-measured and the selected MXR
+kernels can change with the available power budget.
+
+Successful completion also writes `ARTIFACT_MANIFEST.json`, its checksum
+sidecar, and `SHA256SUMS` into `onnx_files_504`. The manifest records the source
+revision, checkpoint hash, container image identity, runtime versions, EC mode,
+GPU name/architecture, optional `SAM3_BUILD_HOST_ID`, memory compile policy,
+and every generated artifact hash. It does not record hostname or hardware
+serial numbers.
 
 **Keep both runtime directory variables set when running demos.** The wrapper
 mounts host `SAM3_MODEL_DIR` at `/models/sam3` and host `SAM3_ONNX_DIR` at

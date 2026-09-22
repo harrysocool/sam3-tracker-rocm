@@ -8,8 +8,11 @@ Runs the complete local model-build pipeline for the text-prompt MIG path:
   4. compile_backbone_mxr     — Torch GPU-I/O path → tuned_gpuio.mxr
   5. export_detr_encoder      — DETR encoder ONNX + onnxsim
   6. export_memory_attention_padded — S1..S10 memory-attention ONNX
-  7. export_fixed_detr_decoder — fixed 504px decoder ONNX
-  8. compile_fixed_detr_decoder — direct-I/O decoder MXR + checksum
+  7. compile_memory_attention — independent, fully autotuned S1..S10 MXRs
+  8. export_fixed_detr_decoder — fixed 504px decoder ONNX
+  9. compile_fixed_detr_decoder — direct-I/O decoder MXR + checksum
+ 10. smoke_live_release — populate runtime ORT caches with a writable smoke
+ 11. write_artifact_manifest — source/model/runtime identity + file hashes
 
 Each step skips if its output file already exists (use --force to rebuild).
 
@@ -33,6 +36,86 @@ import time
 from pathlib import Path
 
 WORKSPACE = Path(__file__).resolve().parent.parent
+if str(WORKSPACE) not in sys.path:
+    sys.path.insert(0, str(WORKSPACE))
+
+from export.write_artifact_manifest import (
+    invalidate_artifact_manifest,
+    prepare_build_root,
+)
+
+DEFAULT_EC_POWER_MODE_PATH = Path("/sys/class/ec_su_axb35/apu/power_mode")
+
+
+def full_autotune_env(base=None) -> dict[str, str]:
+    """Return a child environment that cannot silently skip benchmarking."""
+    env = dict(os.environ if base is None else base)
+    env.pop("MIGRAPHX_SKIP_BENCHMARKING", None)
+    env.pop("MIGRAPHX_MLIR_USE_SPECIFIC_OPS", None)
+    return env
+
+
+def read_ec_power_mode(*, environ=None, power_mode_path: Path | None = None):
+    """Return ``(mode, source)`` without attempting to modify the EC."""
+    env = os.environ if environ is None else environ
+    override = env.get("SAM3_EC_POWER_MODE", "").strip().lower()
+    if override:
+        if override not in {"quiet", "balanced", "performance"}:
+            raise ValueError(
+                "SAM3_EC_POWER_MODE must be quiet, balanced, or performance"
+            )
+        return override, "SAM3_EC_POWER_MODE"
+
+    path = power_mode_path or Path(
+        env.get("SAM3_EC_POWER_MODE_PATH", str(DEFAULT_EC_POWER_MODE_PATH))
+    )
+    try:
+        mode = path.read_text(encoding="ascii").strip().lower()
+    except OSError:
+        return None, str(path)
+    return mode or None, str(path)
+
+
+def verify_ec_power_mode(*, required: bool, environ=None,
+                         power_mode_path: Path | None = None) -> None:
+    """Check the build-time power policy used by hardware autotuning."""
+    mode, source = read_ec_power_mode(
+        environ=environ, power_mode_path=power_mode_path
+    )
+    if mode == "performance":
+        print(f"  EC power mode: performance ({source})")
+        return
+
+    if mode is None:
+        message = (
+            "cannot automatically verify EC power mode because no readable "
+            f"interface was found at {source}. Before building performance "
+            "artifacts, set the BIOS power mode to Performance; otherwise "
+            "autotuning can select different kernels and produce slower "
+            "latency. After checking the BIOS, rerun with "
+            "SAM3_EC_POWER_MODE=performance. Alternatively, install the "
+            "optional EVO-X2 EC driver described in README.md under "
+            "'Optional EC power-mode verification'."
+        )
+    else:
+        message = (
+            f"EC power mode is {mode!r} via {source}; performance autotuning "
+            "requires 'performance'. Change the BIOS/EC setting before "
+            "building because the power mode affects autotuning and latency."
+        )
+    if required:
+        raise RuntimeError(message)
+    print(f"WARNING: {message}", file=sys.stderr)
+
+
+def verify_source_clean(*, required: bool, environ=None) -> None:
+    env = os.environ if environ is None else environ
+    dirty = env.get("SAM3_SOURCE_DIRTY", "unknown")
+    if required and dirty != "0":
+        raise RuntimeError(
+            "performance artifact builds require a verified clean source "
+            f"checkout, got SAM3_SOURCE_DIRTY={dirty!r}"
+        )
 
 
 def parse_args():
@@ -50,7 +133,8 @@ def parse_args():
     p.add_argument("--force", action="store_true",
                    help="Rebuild even if output files already exist")
     p.add_argument("--steps", nargs="+",
-                   choices=["backbone", "detr_encoder", "memory_attention", "fixed_decoder", "all"],
+                   choices=["backbone", "detr_encoder", "memory_attention",
+                            "fixed_decoder", "prewarm", "manifest", "all"],
                    default=["all"],
                    help="Which steps to run (default: all)")
     p.add_argument("--ptr-tokens", type=int, default=None,
@@ -60,6 +144,11 @@ def parse_args():
     p.add_argument("--max-spatial-slots", type=int, default=10,
                    help="Generate exact memory-attention shapes S1..N. Default 10 "
                         "covers 7 non-conditioning plus up to 4 conditioning frames.")
+    p.add_argument(
+        "--performance-build",
+        action="store_true",
+        help="Require a verified EC performance mode before hardware autotuning.",
+    )
     return p.parse_args()
 
 
@@ -98,14 +187,29 @@ def build_for_imgsz(imgsz: int, args) -> bool:
     mod_dir = onnx_dir / "detector_modules"
     trk_dir = onnx_dir / "tracker_modules"
     fixed_dir = onnx_dir / "detr_decoder_fixed"
+    ptr_tokens = (
+        args.ptr_tokens if args.ptr_tokens is not None
+        else {504: 64, 1008: 48}.get(imgsz, 32)
+    )
 
     steps = set(args.steps)
     run_all = "all" in steps
     ok = True
+    had_manifest = (onnx_dir / "ARTIFACT_MANIFEST.json").is_file()
+    prepare_build_root(
+        onnx_dir,
+        args.checkpoint / "model.safetensors",
+        imgsz=imgsz,
+        ptr_tokens=ptr_tokens,
+        max_spatial_slots=args.max_spatial_slots,
+        reset_full_build=bool(args.force and run_all),
+    )
+    if steps != {"manifest"}:
+        invalidate_artifact_manifest(onnx_dir)
 
     # ── Step 1: export backbone ONNX ─────────────────────────────────────
     if run_all or "backbone" in steps:
-        sink_env = dict(os.environ)
+        sink_env = full_autotune_env()
         sink_env["ROCMLIR_SINK_FINAL_ERF"] = "1"
         out = det_dir / "single_fp32.onnx"
         if not exists(out, "backbone ONNX", args.force):
@@ -116,7 +220,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "--backbone-source", "detector",
                 "--checkpoint", str(args.checkpoint),
                 "--onnx-dir", str(onnx_dir),
-            ], f"[1/8] Export backbone ONNX @{imgsz}px")
+            ], f"[1/11] Export backbone ONNX @{imgsz}px")
 
         # ── Step 2: simplify backbone ─────────────────────────────────────
         out = det_dir / "single_simplified.onnx"
@@ -127,7 +231,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "--onnx-dir", str(onnx_dir),
                 "--imgsz", str(imgsz),
                 "--backbone-source", "detector",
-            ], f"[2/8] Simplify backbone @{imgsz}px")
+            ], f"[2/11] Simplify backbone @{imgsz}px")
 
         # ── Step 3: compile .mxr ─────────────────────────────────────────
         out = det_dir / "tuned.mxr"
@@ -139,7 +243,8 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "--imgsz", str(imgsz),
                 "--backbone-source", "detector",
                 "--skip-verify",
-            ], f"[3/8] Compile backbone .mxr @{imgsz}px  (~12 min at 1008px)")
+            ], f"[3/11] Compile backbone .mxr @{imgsz}px  (~12 min at 1008px)",
+                env=full_autotune_env())
 
         # Keep the established host-I/O artifact as a portable fallback and
         # compile a distinct GPU-resident artifact for the Torch text path.
@@ -154,7 +259,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "--backbone-source", "detector",
                 "--gpu-io",
                 "--skip-verify",
-            ], f"[4/8] Compile FC1-sink GPU-I/O backbone .mxr @{imgsz}px", env=sink_env)
+            ], f"[4/11] Compile FC1-sink GPU-I/O backbone .mxr @{imgsz}px", env=sink_env)
 
     # ── Step 4: export DETR encoder ───────────────────────────────────────
     if run_all or "detr_encoder" in steps:
@@ -166,12 +271,11 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "--imgsz", str(imgsz),
                 "--checkpoint", str(args.checkpoint),
                 "--onnx-dir", str(onnx_dir),
-            ], f"[5/8] Export DETR encoder @{imgsz}px")
+            ], f"[5/11] Export DETR encoder @{imgsz}px", env=full_autotune_env())
 
     # ── Step 5: export memory_attention ──────────────────────────────────
     if run_all or "memory_attention" in steps:
         # Resolve None default per imgsz (504→64, 1008→48 — kernel cliff aware)
-        ptr_tokens = args.ptr_tokens if args.ptr_tokens is not None else {504: 64, 1008: 48}.get(imgsz, 32)
         for spatial_slots in range(1, args.max_spatial_slots + 1):
             name = f"memory_attention_fixed_S{spatial_slots}_P{ptr_tokens}.onnx"
             out = trk_dir / name
@@ -184,7 +288,22 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                     "--ptr-tokens", str(ptr_tokens),
                     "--checkpoint", str(args.checkpoint),
                     "--onnx-dir", str(onnx_dir),
-                ], f"[6/8] Export memory_attention (S{spatial_slots}_P{ptr_tokens}) @{imgsz}px")
+                ], f"[6/11] Export memory_attention (S{spatial_slots}_P{ptr_tokens}) @{imgsz}px")
+
+        command = [
+            sys.executable,
+            "export/tracker_modules/compile_memory_attention.py",
+            "--onnx-dir", str(onnx_dir),
+            "--ptr-tokens", str(ptr_tokens),
+            "--max-spatial-slots", str(args.max_spatial_slots),
+        ]
+        if args.force:
+            command.append("--force")
+        ok = ok and run(
+            command,
+            f"[7/11] Compile independently autotuned memory_attention S1-S{args.max_spatial_slots} @{imgsz}px",
+            env=full_autotune_env(),
+        )
 
     if run_all or "fixed_decoder" in steps:
         if imgsz != 504:
@@ -197,7 +316,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "export/detector/export_fixed_detr_decoder.py",
                 "--checkpoint", str(args.checkpoint),
                 "--output-dir", str(fixed_dir),
-            ], "[7/8] Export fixed DETR decoder")
+            ], "[8/11] Export fixed DETR decoder")
         fixed_mxr = fixed_dir / "direct_gpuio.mxr"
         if not exists(fixed_mxr, "fixed decoder MXR", args.force):
             command = [
@@ -208,13 +327,55 @@ def build_for_imgsz(imgsz: int, args) -> bool:
             ]
             if args.force:
                 command.append("--force")
-            ok = ok and run(command, "[8/8] Compile fixed DETR decoder MXR")
+            ok = ok and run(
+                command,
+                "[9/11] Compile fixed DETR decoder MXR",
+                env=full_autotune_env(),
+            )
+
+    if run_all or "prewarm" in steps:
+        if imgsz != 504:
+            print("  runtime prewarm currently supports only 504px")
+            return False
+        ok = ok and run(
+            [
+                sys.executable,
+                "tools/smoke_live_release.py",
+                "--checkpoint", str(args.checkpoint),
+                "--onnx-dir", str(onnx_dir),
+                "--video", str(WORKSPACE / "assets/blackswan.mp4"),
+                "--text", "swan",
+                "--frames", "3",
+                "--mode", "full",
+                "--output", f"/tmp/sam3-build-prewarm-{imgsz}.json",
+            ],
+            f"[10/11] Prewarm runtime ORT caches @{imgsz}px",
+        )
+
+    write_manifest = (
+        run_all or "manifest" in steps or "prewarm" in steps or had_manifest
+    )
+    if write_manifest:
+        ok = ok and run(
+            [
+                sys.executable,
+                "export/write_artifact_manifest.py",
+                "--root", str(onnx_dir),
+                "--checkpoint", str(args.checkpoint / "model.safetensors"),
+                "--imgsz", str(imgsz),
+                "--ptr-tokens", str(ptr_tokens),
+                "--max-spatial-slots", str(args.max_spatial_slots),
+            ],
+            f"[11/11] Write artifact manifest @{imgsz}px",
+        )
 
     return ok
 
 
 def main():
     args = parse_args()
+    verify_source_clean(required=args.performance_build)
+    verify_ec_power_mode(required=args.performance_build)
     t_start = time.perf_counter()
     all_ok = True
 
@@ -236,8 +397,8 @@ def main():
 
     if all_ok:
         print(f"""
-Next: prewarm ORT caches, then run the live smoke through docker/rocm714/run.sh.
-The clean-environment runner performs both steps automatically:
+Next: run the strict/read-only installation smoke through docker/rocm714/run.sh.
+The clean-environment runner performs this automatically:
   ./tools/docker_test_runner.sh --help
 """)
     return 0 if all_ok else 1

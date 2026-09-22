@@ -13,9 +13,12 @@ Usage:
 assembles the Docker image. It never compiles the runtime stack.
 
 --models runs the model export/MXR compilation inside that image. The checkpoint
-is a separate licensed input. Model outputs default to
-results/build-<version>/onnx_files_504/; override SAM3_MODEL_BUILD_ROOT to use
-another new or resumable build directory.
+is a separate licensed input. Git checkouts default to
+results/build-<version>-<commit>/onnx_files_504/; override
+SAM3_MODEL_BUILD_ROOT to use another new or resumable build directory. This is
+a performance build and
+requires EC performance mode to be visible in sysfs or declared through
+SAM3_EC_POWER_MODE=performance after checking the BIOS.
 EOF
 }
 
@@ -30,11 +33,14 @@ case "${1:-}" in
         checkpoint="$2"
         shift 2
         version="$(< "${ROOT}/VERSION")"
-        build_root="${SAM3_MODEL_BUILD_ROOT:-${ROOT}/results/build-${version}}"
+        revision="$(git -C "${ROOT}" rev-parse --short=12 HEAD 2>/dev/null || true)"
+        default_build="${ROOT}/results/build-${version}${revision:+-${revision}}"
+        build_root="${SAM3_MODEL_BUILD_ROOT:-${default_build}}"
         mkdir -p "${build_root}/onnx_files_504"
         SAM3_MODEL_DIR="${checkpoint}" SAM3_ONNX_DIR="${build_root}/onnx_files_504" \
             exec "${ROOT}/docker/rocm714/run.sh" python export/build_text_prompt_mig.py \
-                --imgsz 504 --checkpoint /models/sam3 --onnx-root /models "$@"
+                --imgsz 504 --checkpoint /models/sam3 --onnx-root /models \
+                --performance-build "$@"
         ;;
     *) echo "setup: unknown argument: $1" >&2; exit 2 ;;
 esac

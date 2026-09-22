@@ -100,7 +100,16 @@ def patch_mig(model, onnx_dir: Path, imgsz: int, parallel_tail: bool = False):
     )
     if mem_attn_onnx.exists():
         from tracker.mig_memory_attention import patch_sam3_video_model_memory_attention
-        patch_sam3_video_model_memory_attention(model, mem_attn_onnx)
+        patch_sam3_video_model_memory_attention(
+            model,
+            mem_attn_onnx,
+            required_spatial_slots=range(1, 11),
+            allow_pytorch_fallback=False,
+        )
+    else:
+        raise FileNotFoundError(
+            f"memory-attention artifact not found: {mem_attn_onnx}"
+        )
     if parallel_tail:
         from tracker.parallel_video import patch_parallel_video_tail
         patch_parallel_video_tail(model)
@@ -231,6 +240,7 @@ def main():
               f"MIG score={ms:.2f} pix={mm.sum():>6}")
 
     ious = [pf["iou"] for pf in per_frame]
+    memory_shim = model2.tracker_model.memory_attention._mig_shim
     summary = {
         "imgsz": args.imgsz,
         "video": str(args.video),
@@ -245,6 +255,10 @@ def main():
         "iou_p10":  float(np.percentile(ious, 10)),
         "first_drop_below_0.95_frame": next((pf["frame"] for pf in per_frame if pf["iou"] < 0.95), -1),
         "first_drop_below_0.80_frame": next((pf["frame"] for pf in per_frame if pf["iou"] < 0.80), -1),
+        "memory_attention": {
+            "mig_calls": int(memory_shim._mig_calls),
+            "pytorch_fallback_calls": int(memory_shim._pt_fallback_calls),
+        },
         "per_frame": per_frame,
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)

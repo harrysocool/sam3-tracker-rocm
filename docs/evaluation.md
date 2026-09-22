@@ -12,6 +12,7 @@ Keep outputs under ignored `results/perf/` or an external artifact directory.
 | Provider / CLI check | Correct imported runtime and accepted arguments | Loaded model correctness or speed |
 | Installation smoke | Full/hybrid execution, non-empty masks, default decoder and parallel-tail loading | Mask equivalence or source-paced throughput |
 | PT-vs-MIG mask regression | Offline backbone/ORT mask agreement | Fixed-decoder equivalence, hybrid behavior, or map safety |
+| Canonical latest-frame benchmark | Reproducible 250/1000-arrival service latency and output cadence | Robot-wide latency or an unbounded thermal guarantee |
 | Serial/parallel A/B | Offline output equivalence and schedule timing | Default live frame age |
 | Source-paced integration check | Latest-frame ownership, drops, service, and age on that input | Original benchmark reproduction or robot-wide latency |
 | DAVIS box regression | Tracker quality under a fixed dataset/prompt protocol | Text detection quality or current full-model throughput |
@@ -91,6 +92,59 @@ records those checks; the generic PT-vs-MIG script alone does not cover them.
 Hybrid changes also need clean-keyframe, object-loss/recovery, public-ID,
 negative-evidence, and reset-lifecycle checks, not just a high mean IoU.
 
+## Canonical latest-frame benchmark
+
+The canonical harness requires a schema-2 `ARTIFACT_MANIFEST.json`, rejects
+dirty-source artifacts and tracker-memory environment overrides, verifies the
+manifest checksum plus every recorded artifact hash, and rejects unrecorded
+files. It also requires ONNX Runtime 1.24.2 with MIGraphX as the primary
+provider. It always uses original SAM3 S7/C4, full detection on every consumed
+frame, same-frame parallel tail, and no N+1 lookahead. The profile also pins
+`assets/blackswan.mp4` by SHA256, prompt `swan`, 24 FPS, five discarded warm
+outputs, and the complete aggregation window; custom timing arguments are not
+accepted by this harness.
+
+Run three 250-arrival repetitions:
+
+```bash
+mkdir -p results/perf/canonical
+for run in 1 2 3; do
+  ./docker/rocm714/run.sh \
+    python eval/benchmarks/benchmark_latest_frame_canonical.py \
+      --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
+      --profile canonical-250 \
+      --out "results/perf/canonical/250-r${run}.json"
+done
+```
+
+Run the 1000-arrival soak:
+
+```bash
+./docker/rocm714/run.sh \
+  python eval/benchmarks/benchmark_latest_frame_canonical.py \
+    --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
+    --profile soak-1000 \
+    --out results/perf/canonical/1000.json
+```
+
+The output JSON contains every selected source sequence and its queue, service,
+and result-age timings. Compare service means only across the same arrival,
+warmup, model, power, and artifact conditions.
+
+For release/reference runs, label the machine and attest the measured power
+policy before invoking either profile:
+
+```bash
+export SAM3_BUILD_HOST_ID=harry-evo-x2
+export SAM3_STAPM_LIMIT_W=120
+export SAM3_FAST_PPT_LIMIT_W=140
+export SAM3_SLOW_PPT_LIMIT_W=120
+```
+
+These values are recorded in the result JSON; the benchmark does not request
+root access or modify SMU limits. If any value is omitted, the report marks the
+power policy as `not_fully_reported` rather than inventing a value.
+
 ## Offline serial-versus-parallel A/B
 
 ```bash
@@ -134,10 +188,8 @@ rejected results. Neither includes downstream ROS transport or rendering.
 short file.
 
 The [published live reference](performance.md#default-full-detection-live-reference)
-used a separate looped, headless 250-arrival harness and a defined warm window.
-Neither this check nor a rendered `demo_live.py` run exactly reproduces it.
-The original harness is retained in maintainer artifact storage; this checkout
-does not provide a one-command reproduction of that historical run.
+uses the canonical harness above. Neither this ROS integration check nor a
+rendered `demo_live.py` run exactly reproduces it.
 
 For new live results, record at least:
 
@@ -180,10 +232,10 @@ configured mount; an absolute symlink to an unmounted host path is not visible.
 
 ## DAVIS tracker regression
 
-Tracker changes must retain the DAVIS regression in addition to text-path
-checks. Use DAVIS 2017 val with the same initial-box protocol, resolution,
-and matching box-tracker artifacts. The text/live model build does not supply
-the separate box artifact set.
+Changes to the historical box-tracker path must retain the DAVIS regression.
+Use DAVIS 2017 val with the same initial-box protocol, resolution, and matching
+box-tracker artifacts. The text/live model build does not supply that separate
+artifact set, so DAVIS is not a gate for a text/live-only release.
 
 The [historical evaluation instructions](historical/legacy-runtime.md#davis-and-box-evaluation)
 preserve the dataset source, commands, and original runtime context. The saved
@@ -198,8 +250,13 @@ ORT prewarming, and full/hybrid installation smoke together:
 ```bash
 ./tools/docker_test_runner.sh \
   --checkpoint "$SAM3_MODEL_DIR" \
-  --output "$HOME/sam3-artifacts/gpu/clean-validation-0.2.0-rc6"
+  --output "$HOME/sam3-artifacts/gpu/clean-validation-0.3.0-rc1"
 ```
+
+The normal release path rebuilds the image with Docker cache disabled. For a
+source-only release whose Dockerfile and pinned runtime inputs are unchanged,
+`--reuse-runtime` explicitly reuses the selected existing image after verifying
+its exact Torch/HIP/MIGraphX/ORT versions, primary provider, and GPU architecture.
 
 Choose a **new** output directory; use `--resume` only for the same interrupted
 build. This is a model-building workflow, not a lightweight documentation
@@ -209,3 +266,48 @@ locally; it does not build ROCm/MIGraphX/ORT/Torch from source.
 Use `--migraphx-archive` and `--ort-wheel` for local binary release files.
 Do not overwrite immutable baseline `tuned.mxr` files or reuse caches from
 host MIGraphX 2.16.
+
+## Final release gate
+
+Maintainers should qualify one clean `dev` or matching `release/rcN` commit
+with the single release-gate entry point. The gate requires a new output
+directory outside the checkout and the canonical checkpoint:
+
+```bash
+export SAM3_BUILD_HOST_ID=harry-evo-x2
+export SAM3_STAPM_LIMIT_W=120
+export SAM3_FAST_PPT_LIMIT_W=140
+export SAM3_SLOW_PPT_LIMIT_W=120
+
+./tools/release_gate.sh \
+  --checkpoint "$SAM3_MODEL_DIR" \
+  --output "$HOME/sam3-artifacts/gpu/release-gate-0.3.0-rc1" \
+  --reuse-runtime
+```
+
+Normal releases omit `--reuse-runtime` and rebuild the runtime image from
+scratch. The flag above is the documented `0.3.0-rc1` exception because its
+Dockerfile and pinned runtime inputs are unchanged from rc4. A missing or
+mismatched image is an error in reuse mode. The preflight requires 15 GiB free
+for this exception and 30 GiB for the normal full-rebuild path.
+
+If the optional EC driver is unavailable, verify Performance mode in BIOS and
+also export `SAM3_EC_POWER_MODE=performance`. The script does not modify EC,
+fan, or SMU settings. It validates a clean source revision, canonical input
+hashes, sufficient free space, and the 120/140/120 W power attestation before
+starting expensive work.
+
+The fixed gate then runs the clean runtime/model build, strict installation
+smoke, target-runtime unit suite, host Docker-wrapper tests, artifact checksum
+verification, 30-frame PT-vs-MIG mask regression, three `canonical-250`
+profiles, and one `soak-1000` profile. Acceptance thresholds are encoded in
+the script and cannot be weakened with command-line options.
+Success writes `RELEASE_GATE_PASS.json`; a failure writes
+`RELEASE_GATE_FAILED` with the failed stage. Neither result creates a branch,
+commit, tag, release, or published artifact.
+
+Box-prompt artifact generation and DAVIS regression are not part of the
+`0.3.0-rc1` gate. The current local model build produces only the supported
+text/live artifact profile; a reproducible box build and box-specific manifest
+are deferred to a later release candidate. Historical DAVIS results must not
+be presented as validation of a newly built rc1 artifact root.
