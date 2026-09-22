@@ -5,6 +5,12 @@ Text-prompted video segmentation and tracking on AMD ROCm, built on
 MIGraphX. Describe a target, such as `"swan"` or `"person on a bike"`, to detect
 and track its masks through video.
 
+> **Current release:** [v0.3.0-rc1](https://github.com/harrysocool/sam3-tracker-rocm/releases/tag/v0.3.0-rc1).
+> It validates the 504px FP16 text/live pipeline on gfx1151 with the pinned
+> ROCm 7.14 / MIGraphX 2.17 / ONNX Runtime 1.24.2 container. This is a
+> source-only release: model weights are obtained separately and ONNX/MXR
+> artifacts are compiled locally. See the [release notes](docs/releases/0.3.0-rc1.md).
+
 The **streaming API prioritizes fresh observations**: it processes the newest
 available frame and runs full text detection on every consumed frame by
 default. It includes a video demo, a [ROS 2 integration skeleton](examples/README.md),
@@ -294,33 +300,32 @@ flags, and additional visual examples.
 
 ## Performance
 
-Recorded live reference runs on **Ryzen AI Max+ 395 / gfx1151**, **504px**,
-`blackswan.mp4`, prompt `swan`, **one object**, with ROCm 7.14 / MIGraphX 2.17 /
-ORT 1.24.2. The source was paced at 24 FPS for 250 arrivals; not all arrivals
-were processed. Measurements exclude overlay and video encoding.
+Release-qualified live reference runs on **Ryzen AI Max+ 395 / gfx1151**,
+**504px**, `blackswan.mp4`, prompt `swan`, and one object, using ROCm 7.14 /
+MIGraphX 2.17 / ONNX Runtime 1.24.2. The source was paced at 24 FPS for 250
+arrivals. Measurements exclude overlay and video encoding.
 
-Both modes ran with the fixed 504px DETR decoder and same-frame
-detector/tracker parallel tail enabled. These are the optimized live defaults
-with the complete MIG artifacts built by Quick start.
+Both modes used the rc1 artifacts, fixed DETR decoder, same-frame
+detector/tracker parallel tail, S7/C4 tracker memory, and latest-frame
+scheduling without N+1 GPU work.
 
 | Detection policy | Mean service time | Output rate | Emitted / captured |
 |---|---:|---:|---:|
-| **Full detection on every consumed frame (default)** | **109.53 ms** | **9.13 Hz** | 96 / 250 |
-| Hybrid, 1000 ms detection interval (opt-in) | 95.43–95.48 ms | 10.47 Hz | 110 / 250 per run |
+| **Full detection on every consumed frame (default)** | **90.73–90.93 ms** | **11.00–11.02 Hz** | 115–116 / 250 |
+| Hybrid, 1000 ms detection interval (opt-in) | 79.34–79.42 ms | 12.60–12.61 Hz | 132 / 250 |
 
-Service time measures processing of a selected frame, including preprocessing,
-model inference, and output postprocessing. Output rate counts completed results.
+Each row summarizes three runs. Full-mode values come from the rc1 final gate;
+hybrid values come from fresh-container reruns with explicit warmup. Every run
+reached the final source frame with no inference failure or abort.
 
-These are September 1–2, 2026 reference measurements, **not a new release
-benchmark or a paired full-versus-hybrid speedup claim**. The full-mode
-statistics exclude the first five outputs; the hybrid statistics include all
-outputs after explicit prewarm. These rates are not input FPS or a real-time
-deadline guarantee.
+Service time measures processing of a selected frame. Output rate counts
+completed results; it is not source FPS or a real-time deadline guarantee.
+The two policies perform different detection work, so their ratio is not a
+controlled optimization speedup.
 
-[Performance details](docs/performance.md) record the measurement windows,
-multi-object scaling, fixed-decoder A/B, and correctness checks. Offline
-throughput and historical results are listed separately.
-Use the [evaluation guide](docs/evaluation.md) for checks and measurement scope.
+[Performance details](docs/performance.md) retain historical results,
+multi-object scaling, fixed-decoder A/B, and correctness checks. See the
+[evaluation guide](docs/evaluation.md) for measurement scope.
 
 ## Documentation
 
@@ -330,7 +335,8 @@ Use the [evaluation guide](docs/evaluation.md) for checks and measurement scope.
 - [Performance records and correctness evidence](docs/performance.md)
 - [Evaluation and regression commands](docs/evaluation.md)
 - [Historical runtime and optimization notes](docs/historical/legacy-runtime.md)
-- [Release notes](docs/releases/)
+- [v0.3.0-rc1 release notes](docs/releases/0.3.0-rc1.md)
+- [Release notes archive](docs/releases/)
 
 ## Known limitations
 
