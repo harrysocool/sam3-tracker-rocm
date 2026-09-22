@@ -22,14 +22,43 @@ and an offline text-prompt inference tool.
 
 ## Contents
 
+- [Performance](#performance)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
 - [Usage](#usage)
-- [Performance](#performance)
 - [Documentation](#documentation)
 - [Known limitations](#known-limitations)
 - [Acknowledgements](#acknowledgements)
 - [License](#license)
+
+## Performance
+
+Release-qualified live reference runs on **Ryzen AI Max+ 395 / gfx1151**,
+**504px**, `blackswan.mp4`, prompt `swan`, and one object, using ROCm 7.14 /
+MIGraphX 2.17 / ONNX Runtime 1.24.2. The source was paced at 24 FPS for 250
+arrivals. Measurements exclude overlay and video encoding.
+
+Both modes used the rc1 artifacts, fixed DETR decoder, same-frame
+detector/tracker parallel tail, S7/C4 tracker memory, and latest-frame
+scheduling without N+1 GPU work.
+
+| Detection policy | Mean service time | Output rate | Emitted / captured |
+|---|---:|---:|---:|
+| **Full detection on every consumed frame (default)** | **90.73–90.93 ms** | **11.00–11.02 Hz** | 115–116 / 250 |
+| Hybrid, 1000 ms detection interval (opt-in) | 79.34–79.42 ms | 12.60–12.61 Hz | 132 / 250 |
+
+Each row summarizes three runs. Full-mode values come from the rc1 final gate;
+hybrid values come from fresh-container reruns with explicit warmup. Every run
+reached the final source frame with no inference failure or abort.
+
+Service time measures processing of a selected frame. Output rate counts
+completed results; it is not source FPS or a real-time deadline guarantee.
+The two policies perform different detection work, so their ratio is not a
+controlled optimization speedup.
+
+[Performance details](docs/performance.md) retain historical results,
+multi-object scaling, fixed-decoder A/B, and correctness checks. See the
+[evaluation guide](docs/evaluation.md) for measurement scope.
 
 ## Requirements
 
@@ -297,35 +326,6 @@ smoke. See the [historical box reference](docs/usage.md#historical-box-prompt-re
 
 See the [usage guide](docs/usage.md) for parameters, output files, diagnostic
 flags, and additional visual examples.
-
-## Performance
-
-Release-qualified live reference runs on **Ryzen AI Max+ 395 / gfx1151**,
-**504px**, `blackswan.mp4`, prompt `swan`, and one object, using ROCm 7.14 /
-MIGraphX 2.17 / ONNX Runtime 1.24.2. The source was paced at 24 FPS for 250
-arrivals. Measurements exclude overlay and video encoding.
-
-Both modes used the rc1 artifacts, fixed DETR decoder, same-frame
-detector/tracker parallel tail, S7/C4 tracker memory, and latest-frame
-scheduling without N+1 GPU work.
-
-| Detection policy | Mean service time | Output rate | Emitted / captured |
-|---|---:|---:|---:|
-| **Full detection on every consumed frame (default)** | **90.73–90.93 ms** | **11.00–11.02 Hz** | 115–116 / 250 |
-| Hybrid, 1000 ms detection interval (opt-in) | 79.34–79.42 ms | 12.60–12.61 Hz | 132 / 250 |
-
-Each row summarizes three runs. Full-mode values come from the rc1 final gate;
-hybrid values come from fresh-container reruns with explicit warmup. Every run
-reached the final source frame with no inference failure or abort.
-
-Service time measures processing of a selected frame. Output rate counts
-completed results; it is not source FPS or a real-time deadline guarantee.
-The two policies perform different detection work, so their ratio is not a
-controlled optimization speedup.
-
-[Performance details](docs/performance.md) retain historical results,
-multi-object scaling, fixed-decoder A/B, and correctness checks. See the
-[evaluation guide](docs/evaluation.md) for measurement scope.
 
 ## Documentation
 
