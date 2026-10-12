@@ -104,8 +104,10 @@ changed since the build, use the existing build directory explicitly rather
 than recomputing its name from the new revision.
 
 The scripts do not persist these variables into your shell. Without an
-override, `run.sh` looks for checkout `model/sam3` and `onnx_files_504_mgx217`.
-The latter is a development-machine symlink and is absent from a fresh clone.
+override, `run.sh` looks for checkout `model/sam3` and
+`inference/production/rocm714-mgx217-504`. The development checkout exposes the
+external artifact tree through an ignored `inference` symlink, which is absent
+from a fresh clone.
 Use the explicit exports above for customer installations.
 
 Inputs must also be accessible through a container mount. See

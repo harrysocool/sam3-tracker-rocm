@@ -21,7 +21,7 @@ Quick start
 
     live = SAM3Live(
         checkpoint="model/sam3",
-        onnx_dir="onnx_files_504_mgx217",
+        onnx_dir="inference/production/rocm714-mgx217-504",
         prompts=["car", "sidewalk", "grass"],
         imgsz=504,
     )

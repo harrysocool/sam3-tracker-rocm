@@ -607,7 +607,7 @@ def parse_args(argv=None):
         "--onnx-dir",
         type=Path,
         default=Path(
-            os.environ.get("SAM3_DEFAULT_ONNX_DIR", "onnx_files_504_mgx217")
+            os.environ.get("SAM3_DEFAULT_ONNX_DIR", "inference/production/rocm714-mgx217-504")
         ),
     )
     parser.add_argument("--video", type=Path, required=True)

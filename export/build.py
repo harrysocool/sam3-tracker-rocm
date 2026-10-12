@@ -83,7 +83,7 @@ def skip_if_exists(path: Path, label: str, force: bool) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_box(imgsz: int, args) -> bool:
-    onnx_dir  = WORKSPACE / f"onnx_files_{imgsz}"
+    onnx_dir  = WORKSPACE / "inference" / "legacy" / f"standalone-tracker-{imgsz}"
     mod_dir   = onnx_dir / "tracker_modules"
     bb_dir    = onnx_dir / "backbone_tracker"
     steps     = set(args.steps)

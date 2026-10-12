@@ -281,7 +281,7 @@ export SAM3_SLOW_PPT_LIMIT_W=120
 
 ./tools/release_gate.sh \
   --checkpoint "$SAM3_MODEL_DIR" \
-  --output "$HOME/sam3-artifacts/gpu/release-gate-0.3.0-rc1" \
+  --output "$HOME/sam3-artifacts/gpu/releases/0.3.0-rc1/validation" \
   --reuse-runtime
 ```
 

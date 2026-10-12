@@ -217,7 +217,8 @@ serial numbers.
 mounts host `SAM3_MODEL_DIR` at `/models/sam3` and host `SAM3_ONNX_DIR` at
 `/models/onnx_files_504`. In a new shell, re-export those two absolute paths.
 This explicit configuration does not depend on the development machine's
-`onnx_files_504_mgx217` symlink. ONNX/MXR artifacts and caches are built locally;
+ignored `inference` symlink or its production artifact directory.
+ONNX/MXR artifacts and caches are built locally;
 no compiled SAM3 model bundle is downloaded.
 
 ### 4. Verify the installation and run the demo

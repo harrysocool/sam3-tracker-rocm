@@ -149,7 +149,7 @@ def parse_args():
         "--onnx-dir",
         type=Path,
         default=Path(
-            os.environ.get("SAM3_DEFAULT_ONNX_DIR", "onnx_files_504_mgx217")
+            os.environ.get("SAM3_DEFAULT_ONNX_DIR", "inference/production/rocm714-mgx217-504")
         ),
         help="MIG artifact root (defaults to the supported 2.17 runtime root).",
     )

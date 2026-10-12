@@ -9,6 +9,7 @@ scores are compared frame by frame.
 from __future__ import annotations
 
 import argparse
+import os
 import hashlib
 import json
 import statistics
@@ -44,7 +45,7 @@ from transformers import AutoProcessor, Sam3VideoConfig, Sam3VideoModel  # noqa:
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", type=Path, default=Path("model/sam3"))
-    parser.add_argument("--onnx-dir", type=Path, default=Path("onnx_files_504"))
+    parser.add_argument("--onnx-dir", type=Path, default=Path(os.environ.get("SAM3_DEFAULT_ONNX_DIR", "inference/production/rocm714-mgx217-504")))
     parser.add_argument("--video", type=Path, required=True)
     parser.add_argument(
         "--text",

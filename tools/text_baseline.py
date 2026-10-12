@@ -132,7 +132,7 @@ def parse_args(argv=None):
     p.set_defaults(pipeline_backbone=None)
     p.add_argument("--onnx-dir", type=Path, default=None,
                    help="MIG artifact root. Defaults to SAM3_DEFAULT_ONNX_DIR "
-                        "from the container wrapper, or onnx_files_504_mgx217.")
+                        "from the container wrapper, or inference/production/rocm714-mgx217-504.")
     args = p.parse_args(argv)
     if (args.image is None) == (args.video is None):
         sys.exit("Pass exactly one of --image or --video")
@@ -167,7 +167,7 @@ def parse_args(argv=None):
         if args.mig and args.imgsz != 504:
             sys.exit("1008px MIG inference requires an explicit --onnx-dir with matching artifacts")
         args.onnx_dir = Path(
-            os.environ.get("SAM3_DEFAULT_ONNX_DIR", "onnx_files_504_mgx217")
+            os.environ.get("SAM3_DEFAULT_ONNX_DIR", "inference/production/rocm714-mgx217-504")
         )
     return args
 

@@ -7,11 +7,11 @@ the first frame, then purely memory-based propagation for all subsequent frames.
 
 Usage:
     # Single image (init frame only):
-    python demo_box.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
+    python demo_box.py --checkpoint model/sam3 --onnx-dir inference/legacy/standalone-tracker-504 \
                    --image assets/truck.jpg --box 100,200,500,600
 
     # Video file:
-    python demo_box.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
+    python demo_box.py --checkpoint model/sam3 --onnx-dir inference/legacy/standalone-tracker-504 \
                    --video my_video.mp4 --box 100,200,500,600 \
                    --output tracked.mp4
 """

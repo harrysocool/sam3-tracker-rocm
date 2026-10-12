@@ -44,7 +44,7 @@ from tracker.rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--onnx-dir", type=Path, default=None,
-                   help="Resolution root (e.g. onnx_files_504). Outputs go to "
+                   help="Resolution root (e.g. inference/legacy/standalone-tracker-504). Outputs go to "
                         "<onnx-dir>/tracker_modules/. Defaults based on --imgsz.")
     p.add_argument("--imgsz", type=int, default=1008)
     p.add_argument("--checkpoint", type=Path, default=LOCAL_HF_MODEL)

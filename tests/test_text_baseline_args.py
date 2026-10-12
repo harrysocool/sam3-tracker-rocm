@@ -24,7 +24,7 @@ def test_accelerated_defaults_select_the_supported_resolution(monkeypatch, video
     assert args.fixed_detr_decoder is True
     assert args.parallel_tail is True
     assert args.pipeline_backbone is video
-    assert args.onnx_dir == Path("onnx_files_504_mgx217")
+    assert args.onnx_dir == Path("inference/production/rocm714-mgx217-504")
     assert args.text == ["swan"]
     assert args.max_objects == 5
     assert args.max_frames == 120

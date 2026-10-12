@@ -34,7 +34,7 @@ def test_live_defaults_to_mig_parallel_tail_and_fixed_auto(monkeypatch):
     assert args.mig is True
     assert args.parallel_tail is True
     assert args.fixed_detr_decoder is None
-    assert str(args.onnx_dir) == "onnx_files_504_mgx217"
+    assert str(args.onnx_dir) == "inference/production/rocm714-mgx217-504"
     assert args.redetect_interval_ms == 0.0
     assert args.max_objects == 5
     assert args.max_frames == 0
