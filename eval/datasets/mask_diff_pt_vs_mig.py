@@ -30,7 +30,7 @@ def parse_args():
     p.add_argument("--checkpoint", type=Path, default=Path("model/sam3"))
     p.add_argument("--video", type=Path, required=True)
     p.add_argument("--text", type=str, required=True)
-    p.add_argument("--imgsz", type=int, default=1008, choices=[504, 1008])
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--max-frames", type=int, default=20)
     p.add_argument("--onnx-dir", type=Path,
                    default=os.environ.get("SAM3_ONNX_DIR") or None,
@@ -96,7 +96,7 @@ def patch_mig(model, onnx_dir: Path, imgsz: int, parallel_tail: bool = False):
     if detr_onnx.exists():
         from tracker.mig_detr_encoder import patch_sam3_video_model_detr_encoder
         patch_sam3_video_model_detr_encoder(model, detr_onnx)
-    ptr_tokens = {504: 64, 1008: 48}.get(imgsz, 32)
+    ptr_tokens = 64
     mem_attn_onnx = (
         onnx_dir / "tracker_modules"
         / f"memory_attention_fixed_S7_P{ptr_tokens}.onnx"

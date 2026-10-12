@@ -56,7 +56,7 @@ def parse_args():
         required=True,
         help="Prompt to add; repeat for a multi-prompt benchmark.",
     )
-    parser.add_argument("--imgsz", type=int, default=504, choices=(504, 1008))
+    parser.add_argument("--imgsz", type=int, default=504, choices=(504,))
     parser.add_argument("--max-frames", type=int, default=50)
     parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument(
@@ -129,7 +129,7 @@ def build_model(args):
         model,
         args.onnx_dir / "detector_modules" / "detr_encoder_simplified.onnx",
     )
-    pointer_tokens = {504: 64, 1008: 48}[args.imgsz]
+    pointer_tokens = 64
     patch_sam3_video_model_memory_attention(
         model,
         args.onnx_dir

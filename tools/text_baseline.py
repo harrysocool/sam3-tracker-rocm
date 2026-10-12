@@ -84,9 +84,8 @@ def parse_args(argv=None):
     p.add_argument("--max-objects", type=int, default=DEFAULT_MAX_OBJECTS_PER_PROMPT,
                    help="Maximum tracked objects per prompt (default 5; 0 = unlimited). "
                         "The legacy -1 value also selects the default.")
-    p.add_argument("--imgsz", type=int, default=504, choices=(504, 1008),
-                   help="Input resolution (default: 504). MIG requires matching "
-                        "artifacts; supply --onnx-dir explicitly for 1008px.")
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,),
+                   help="Input resolution; only the validated 504px path is supported.")
     mig = p.add_mutually_exclusive_group()
     mig.add_argument("--mig", dest="mig", action="store_true",
                      help="Use MIGraphX acceleration (default).")
@@ -169,8 +168,6 @@ def parse_args(argv=None):
     if args.pipeline_backbone and args.video is None:
         sys.exit("--pipeline-backbone requires --video")
     if args.onnx_dir is None:
-        if args.mig and args.imgsz != 504:
-            sys.exit("1008px MIG inference requires an explicit --onnx-dir with matching artifacts")
         configured_dir = os.environ.get("SAM3_ONNX_DIR")
         if configured_dir:
             args.onnx_dir = Path(configured_dir)
@@ -359,12 +356,8 @@ def main():
             print("  Fixed DETR decoder direct-MXR enabled")
 
         # Optional: also MIG-ize memory_attention (steady-state padding).
-        # K (pointer-token cap) is resolution-dependent because the MIGraphX
-        # MLIR attention kernel has a shape-dependent perf cliff:
-        #   504px:  no cliff up to K=64 (deploy K=64 → 16 obj capacity)
-        #   1008px: cliff between K=48 and K=56 (deploy K=48 → 12 obj capacity)
-        _K_PER_IMGSZ = {504: 64, 1008: 48}
-        _k = _K_PER_IMGSZ.get(args.imgsz, 32)
+        # Validated pointer-token cap for the supported 504px artifacts.
+        _k = 64
         mem_attn_onnx = args.onnx_dir / "tracker_modules" / f"memory_attention_fixed_S7_P{_k}.onnx"
         if not mem_attn_onnx.exists():
             # Fall back to whatever P-variant exists for this resolution

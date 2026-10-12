@@ -31,7 +31,7 @@ def parse_args():
     p.add_argument("--checkpoint", type=Path, default=Path("model/sam3"))
     p.add_argument("--video", type=Path, required=True)
     p.add_argument("--text", type=str, required=True)
-    p.add_argument("--imgsz", type=int, default=504, choices=[504, 1008])
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--max-frames", type=int, default=15,
                    help="frames after init to profile (default 15)")
     p.add_argument("--mig", action="store_true", default=True)
@@ -86,7 +86,7 @@ def main():
         detr_onnx = onnx_dir / "detector_modules" / "detr_encoder_simplified.onnx"
         if detr_onnx.exists():
             patch_sam3_video_model_detr_encoder(model, detr_onnx)
-        ptr_tokens = {504: 64, 1008: 48}.get(args.imgsz, 32)
+        ptr_tokens = 64
         mem_onnx = (
             onnx_dir / "tracker_modules"
             / f"memory_attention_fixed_S7_P{ptr_tokens}.onnx"

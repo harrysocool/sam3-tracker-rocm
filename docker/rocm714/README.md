@@ -265,8 +265,9 @@ if a required cache is missing, populate it in writable mode before retrying.
 The wrapper sets `SAM3_ONNX_DIR=/models/onnx_files_504` inside the container.
 Current inference, export, benchmark, and dataset evaluation entry points with
 `--onnx-dir` use it as their artifact-directory default. An explicit
-`--onnx-dir` overrides it. Choose `--imgsz` to match the selected artifacts;
-the directory variable does not change the resolution automatically.
+`--onnx-dir` overrides it. Current entry points support only 504px artifacts.
+The two complete build entry points use 504px without an `--imgsz` option;
+lower-level export and evaluation tools still accept explicit `--imgsz 504`.
 
 ## Runtime versions
 

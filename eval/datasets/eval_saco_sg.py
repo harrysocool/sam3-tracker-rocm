@@ -37,7 +37,7 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--n-seqs", type=int, default=50)
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--imgsz", type=int, default=1008)
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--gt-json", type=Path,
                    default=WORKSPACE_ROOT / "dataset/gt-annotations/saco_veval_smartglasses_val.json")
     p.add_argument("--img-root", type=Path,

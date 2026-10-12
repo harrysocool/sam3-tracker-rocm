@@ -38,7 +38,7 @@ def parse_args():
                    default=os.environ.get("SAM3_ONNX_DIR") or None,
                    required=not bool(os.environ.get("SAM3_ONNX_DIR")),
                    help="Writable artifact root (defaults to SAM3_ONNX_DIR).")
-    p.add_argument("--imgsz", type=int, default=1008)
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--spatial-slots", type=int, default=7,
                    help="Number of spatial memory frames (default 7, matches max_obj_ptrs_in_encoder)")
     p.add_argument("--ptr-tokens", type=int, default=64,

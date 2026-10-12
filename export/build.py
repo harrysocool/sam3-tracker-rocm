@@ -4,10 +4,10 @@
 Two pipelines, pick one or both:
 
   box   — SAM3OnnxTracker (demo_box.py): tracker modules + MIGraphX backbone
-            ~10 min @504px / ~20 min @1008px
+            ~10 min @504px
   text  — Sam3VideoModel: FC1-sink detector backbone + DETR encoder,
             padded memory_attention, and the fixed 504px DETR decoder
-            ~18 min @504px / ~30 min @1008px
+            ~18 min @504px
 
 Usage:
   Run these commands from the repository root in the host terminal.
@@ -17,22 +17,20 @@ Usage:
   The examples below show explicit directory selection.
 
   # Box-prompt only (fastest, good first step)
-  ./docker/rocm714/run.sh python export/build.py --pipeline box --imgsz 504 --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504
+  ./docker/rocm714/run.sh python export/build.py --pipeline box --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504
 
   # Text-prompt MIG only
-  ./docker/rocm714/run.sh python export/build.py --pipeline text --imgsz 504 --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504
+  ./docker/rocm714/run.sh python export/build.py --pipeline text --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504
 
   # Everything at 504px
-  ./docker/rocm714/run.sh python export/build.py --pipeline all --imgsz 504 --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504
-
-  # For 1008px, launch a separate build with its own SAM3_ONNX_DIR.
-  ./docker/rocm714/run.sh python export/build.py --pipeline all --imgsz 1008 --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504
+  ./docker/rocm714/run.sh python export/build.py --pipeline all --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504
 
   # Rebuild one stage only
-  ./docker/rocm714/run.sh python export/build.py --pipeline text --imgsz 1008 --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 --steps backbone
-  ./docker/rocm714/run.sh python export/build.py --pipeline box --imgsz 504 --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 --force
+  ./docker/rocm714/run.sh python export/build.py --pipeline text --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 --steps backbone
+  ./docker/rocm714/run.sh python export/build.py --pipeline box --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 --force
 
-Each step skips if its output already exists. Safe to re-run after interruption.
+Only 504px builds are supported. Each step skips if its output already exists.
+Safe to re-run after interruption.
 """
 from __future__ import annotations
 
@@ -46,6 +44,8 @@ from pathlib import Path
 WORKSPACE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(WORKSPACE))
 from tracker.rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
+
+BUILD_IMGSZ = 504
 
 
 G  = "\033[32m"
@@ -89,7 +89,8 @@ def skip_if_exists(path: Path, label: str, force: bool) -> bool:
 # Box-prompt pipeline
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_box(imgsz: int, args) -> bool:
+def build_box(args) -> bool:
+    imgsz = BUILD_IMGSZ
     onnx_dir  = args.onnx_dir
     mod_dir   = onnx_dir / "tracker_modules"
     bb_dir    = onnx_dir / "backbone_tracker"
@@ -145,7 +146,7 @@ def build_box(imgsz: int, args) -> bool:
                 "--imgsz", str(imgsz),
                 "--backbone-source", "tracker",
                 "--skip-verify",
-            ], f"Compile backbone .mxr  (~3 min @504 / ~9 min @1008)")
+            ], "Compile backbone .mxr @504px")
 
     # Step 5: prewarm direct-MIG caches
     if run_all or "prewarm" in steps:
@@ -164,18 +165,17 @@ def build_box(imgsz: int, args) -> bool:
 # Text-prompt pipeline  (delegates to build_text_prompt_mig.py)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_text(imgsz: int, args) -> bool:
+def build_text(args) -> bool:
+    imgsz = BUILD_IMGSZ
     step_header(f"Text-prompt MIG @ {imgsz}px  →  {args.onnx_dir}/")
 
     cmd = [
         sys.executable,
         "export/build_text_prompt_mig.py",
-        "--imgsz", str(imgsz),
         "--checkpoint", str(args.checkpoint),
         "--onnx-dir", str(args.onnx_dir),
     ]
-    # Only forward --ptr-tokens if user explicitly set it; otherwise let
-    # build_text_prompt_mig.py pick the per-imgsz default (504→64, 1008→48).
+    # Let the text builder use its validated 64-token default unless overridden.
     if args.ptr_tokens is not None:
         cmd += ["--ptr-tokens", str(args.ptr_tokens)]
     if args.force:
@@ -190,27 +190,26 @@ def build_text(imgsz: int, args) -> bool:
 # Final demo hints
 # ─────────────────────────────────────────────────────────────────────────────
 
-def print_hints(pipeline: str, imgsz_list: list[int], checkpoint: Path,
+def print_hints(pipeline: str, checkpoint: Path,
                 onnx_dir: Path) -> None:
     banner("Done — next steps")
     print("Run these commands from the repository root in the host terminal.")
     print("Keep host SAM3_MODEL_DIR and SAM3_ONNX_DIR set to the checkpoint and artifacts used for this build.")
     print("Normally omit --onnx-dir to use the wrapper's SAM3_ONNX_DIR; the examples show the explicit equivalent.")
     print("Override --onnx-dir only when you intend to select another container-visible directory.")
-    first = imgsz_list[0]
 
     if pipeline in ("box", "all"):
         print(f"""
 {B}Box-prompt demo:{NC}
   ./docker/rocm714/run.sh python demo_box.py --checkpoint "{checkpoint}" --onnx-dir "{onnx_dir}" \\
-      --imgsz {first} --video YOUR_VIDEO.mp4 --box x1,y1,x2,y2
+      --video YOUR_VIDEO.mp4 --box x1,y1,x2,y2
 """)
 
     if pipeline in ("text", "all"):
         print(f"""\
 {B}Text-prompt demo (MIG-accelerated):{NC}
   ./docker/rocm714/run.sh python demo_live.py --checkpoint "{checkpoint}" --onnx-dir "{onnx_dir}" \\
-      --imgsz {first} --video YOUR_VIDEO.mp4 --text "object"
+      --video YOUR_VIDEO.mp4 --text "object"
 """)
 
 
@@ -224,9 +223,6 @@ def parse_args():
     )
     p.add_argument("--pipeline", choices=["box", "text", "all"], default="box",
                    help="Which pipeline to build (default: box)")
-    p.add_argument("--imgsz", type=int, nargs="+", default=[504],
-                   choices=[504, 1008],
-                   help="Resolution(s) to build (default: 504)")
     p.add_argument("--checkpoint", type=Path, default=WORKSPACE / "model/sam3")
     p.add_argument("--onnx-dir", type=Path,
                    default=os.environ.get("SAM3_ONNX_DIR") or None,
@@ -237,12 +233,9 @@ def parse_args():
     p.add_argument("--steps", nargs="+", default=["all"],
                    help=("Limit to specific stages. Box: tracker_modules, backbone, prewarm. "
                          "Text: backbone, detr_encoder, memory_attention, fixed_decoder."))
-    p.add_argument("--ptr-tokens", type=int, default=None,  # 504→64, 1008→48
-                   help="Pointer token slots for memory_attention. Default: 64 at 504px, 48 at 1008px (highest safe K per kernel cliff). Set explicitly to override.")
-    args = p.parse_args()
-    if len(args.imgsz) != 1:
-        p.error("--onnx-dir selects one resolution; run each --imgsz with its own directory")
-    return args
+    p.add_argument("--ptr-tokens", type=int, default=None,
+                   help="Pointer token slots for memory_attention. Default: 64 at 504px.")
+    return p.parse_args()
 
 
 def main():
@@ -250,21 +243,20 @@ def main():
     t_start = time.perf_counter()
 
     banner(f"SAM3 artifact build  |  pipeline={args.pipeline}  "
-           f"imgsz={args.imgsz}  checkpoint={args.checkpoint.name}")
+           f"imgsz={BUILD_IMGSZ}  checkpoint={args.checkpoint.name}")
 
     all_ok = True
-    for imgsz in args.imgsz:
-        if args.pipeline in ("box", "all"):
-            all_ok = build_box(imgsz, args) and all_ok
-        if args.pipeline in ("text", "all"):
-            all_ok = build_text(imgsz, args) and all_ok
+    if args.pipeline in ("box", "all"):
+        all_ok = build_box(args) and all_ok
+    if args.pipeline in ("text", "all"):
+        all_ok = build_text(args) and all_ok
 
     elapsed = time.perf_counter() - t_start
     status = f"{G}ALL OK{NC}" if all_ok else f"{Y}SOME STEPS FAILED{NC}"
     banner(f"Total: {elapsed/60:.1f} min  |  {status}")
 
     if all_ok:
-        print_hints(args.pipeline, args.imgsz, args.checkpoint, args.onnx_dir)
+        print_hints(args.pipeline, args.checkpoint, args.onnx_dir)
 
     return 0 if all_ok else 1
 

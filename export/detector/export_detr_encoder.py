@@ -9,7 +9,7 @@ Inputs (text-prompt path, fixed shapes after Sam3 preprocessor):
     vision_pos:     (1, 256, P, P)
     text_features:  (1, 32, 256)     — CLIP text encoder pooler_output, padded to 32
     text_mask:      (1, 32) bool     — True where token is real (post-pad)
-where P = imgsz // 14 (P=72 at 1008px, P=36 at 504px).
+where P = 36 for the supported 504px resolution.
 
 Output:
     last_hidden_state: (1, P*P, 256)
@@ -44,7 +44,7 @@ def parse_args():
                    required=not bool(os.environ.get("SAM3_ONNX_DIR")),
                    help="Writable artifact root (defaults to SAM3_ONNX_DIR). "
                         "Outputs go to <onnx-dir>/detector_modules/.")
-    p.add_argument("--imgsz", type=int, default=1008)
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--text-seq-len", type=int, default=32)
     p.add_argument("--opset", type=int, default=17)
     p.add_argument("--no-fp16", action="store_true",

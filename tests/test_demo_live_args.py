@@ -113,6 +113,11 @@ def test_live_api_defaults_parallel_tail_to_auto():
     )
 
 
+def test_live_api_rejects_1008_before_model_loading():
+    with pytest.raises(ValueError, match="only the validated 504px resolution"):
+        SAM3Live(checkpoint="unused", prompts=["swan"], imgsz=1008)
+
+
 def test_live_api_rejects_bootstrap_with_default_fixed_decoder(tmp_path):
     with pytest.raises(ValueError, match="cannot be combined with bootstrap_frames"):
         SAM3Live(

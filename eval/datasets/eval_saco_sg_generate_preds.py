@@ -76,7 +76,7 @@ def main():
                     default=os.environ.get("SAM3_ONNX_DIR") or None,
                     required=not bool(os.environ.get("SAM3_ONNX_DIR")))
     ap.add_argument("--checkpoint", type=Path, default=WORKSPACE / "model/sam3")
-    ap.add_argument("--imgsz", type=int, default=504)
+    ap.add_argument("--imgsz", type=int, default=504, choices=(504,))
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--checkpoint-every", type=int, default=50,
                     help="Save partial results every N annotations")

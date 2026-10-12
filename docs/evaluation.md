@@ -202,18 +202,14 @@ For new live results, record at least:
 
 ## Instrumented offline module profile
 
-The profiler resolves `onnx_files_<imgsz>` relative to its working directory
-and has no `--onnx-dir` option. Run it from `/models` so it uses the container's
-explicit artifact mount, not the checkout's legacy artifact directory:
+The profiler uses the 504px artifact directory selected by `SAM3_ONNX_DIR`.
+Normally omit `--onnx-dir`; the example shows the explicit container path.
 
 ```bash
-./docker/rocm714/run.sh sh -c '
-  cd /models &&
-  python /workspace/eval/benchmarks/profile_full_mig.py \
-    --checkpoint /models/sam3 --video /workspace/assets/blackswan.mp4 \
-    --text swan --imgsz 504 --max-frames 30 \
-    --out /workspace/results/perf/profile_504_mig.json
-'
+./docker/rocm714/run.sh python eval/benchmarks/profile_full_mig.py \
+  --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
+  --video assets/blackswan.mp4 --text swan --imgsz 504 --max-frames 30 \
+  --out results/perf/profile_504_mig.json
 ```
 
 This profiles 30 propagation frames after initialization, matching the

@@ -615,7 +615,7 @@ def parse_args(argv=None):
     )
     parser.add_argument("--video", type=Path, required=True)
     parser.add_argument("--text", type=str, nargs="+", required=True)
-    parser.add_argument("--imgsz", type=int, default=504, choices=(504, 1008))
+    parser.add_argument("--imgsz", type=int, default=504, choices=(504,))
     parser.add_argument("--no-mig", action="store_true")
     parallel = parser.add_mutually_exclusive_group()
     parallel.add_argument(

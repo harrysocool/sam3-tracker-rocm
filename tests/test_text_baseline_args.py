@@ -68,11 +68,11 @@ def test_pytorch_reference_disables_gpu_overlap(monkeypatch, video):
     assert args.pipeline_backbone is False
 
 
-def test_native_resolution_pytorch_reference_remains_available(monkeypatch):
-    args = _parse(monkeypatch, "--no-mig", "--imgsz", "1008")
-    assert args.imgsz == 1008
-    assert args.fixed_detr_decoder is False
-    assert not args.mig and not args.parallel_tail and not args.pipeline_backbone
+@pytest.mark.parametrize("flags", [[], ["--no-mig"]])
+def test_unsupported_resolution_is_rejected_for_mig_and_pytorch(monkeypatch, flags):
+    with pytest.raises(SystemExit) as caught:
+        _parse(monkeypatch, *flags, "--imgsz", "1008")
+    assert caught.value.code == 2
 
 
 def test_serial_mig_disables_prefetch_automatically(monkeypatch):
@@ -110,7 +110,6 @@ def test_fixed_decoder_can_be_requested_explicitly(monkeypatch):
     (["--no-mig", "--pipeline-backbone"], "--pipeline-backbone requires --parallel-tail"),
     (["--no-parallel-tail", "--pipeline-backbone"], "--pipeline-backbone requires --parallel-tail"),
     (["--no-mig", "--fixed-detr-decoder"], "--fixed-detr-decoder requires --mig"),
-    (["--imgsz", "1008", "--fixed-detr-decoder"], "--fixed-detr-decoder requires --imgsz 504"),
 ])
 def test_invalid_acceleration_combinations_are_rejected(monkeypatch, flags, message):
     with pytest.raises(SystemExit, match=message):
@@ -135,13 +134,10 @@ def test_contradictory_flags_and_unsupported_resolution_are_rejected(monkeypatch
     assert exc.value.code == 2
 
 
-def test_1008_mig_requires_explicit_artifact_selection(monkeypatch):
-    with pytest.raises(SystemExit, match="1008px MIG inference requires an explicit --onnx-dir"):
-        _parse(monkeypatch, "--imgsz", "1008")
-    args = _parse(monkeypatch, "--imgsz", "1008", "--onnx-dir", "/models/custom")
-    assert args.imgsz == 1008
-    assert args.onnx_dir == Path("/models/custom")
-    assert args.fixed_detr_decoder is False
+def test_explicit_artifacts_cannot_enable_unsupported_resolution(monkeypatch):
+    with pytest.raises(SystemExit) as caught:
+        _parse(monkeypatch, "--imgsz", "1008", "--onnx-dir", "/models/custom")
+    assert caught.value.code == 2
 
 
 def _forbid_model_load(*args, **kwargs):

@@ -46,7 +46,7 @@ def parse_args():
                    default=os.environ.get("SAM3_ONNX_DIR") or None,
                    required=not bool(os.environ.get("SAM3_ONNX_DIR")),
                    help="Writable artifact root (defaults to SAM3_ONNX_DIR from run.sh).")
-    p.add_argument("--imgsz", type=int, default=504)
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--opset", type=int, default=17)
     p.add_argument(
         "--backbone-source",

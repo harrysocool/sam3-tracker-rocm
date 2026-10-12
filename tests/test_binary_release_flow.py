@@ -60,6 +60,7 @@ def test_setup_model_build_selects_build_root_without_reusing_inference_path(tmp
     assert lines[:2] == ["/existing/checkpoint", str(build_root / "onnx_files_504")]
     assert (build_root / "onnx_files_504").is_dir()
     assert lines[lines.index("--onnx-root") + 1] == "/models"
+    assert "--imgsz" not in lines
 
 
 def test_runtime_assembly_contains_no_source_build_commands():

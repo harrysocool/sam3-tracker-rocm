@@ -36,7 +36,7 @@ def parse_args():
                    required=not bool(os.environ.get("SAM3_ONNX_DIR")),
                    help="Standalone tracker artifact root (defaults to SAM3_ONNX_DIR).")
     p.add_argument("--image",      type=Path, default=WORKSPACE / "assets" / "demo.jpg")
-    p.add_argument("--imgsz",      type=int,  default=504)
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--warmup",     type=int,  default=8)
     p.add_argument("--runs",       type=int,  default=30)
     return p.parse_args()

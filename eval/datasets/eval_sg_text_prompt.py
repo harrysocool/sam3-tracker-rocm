@@ -56,8 +56,8 @@ def main():
                     help="Max frames per annotation (0=all, recommend 20 for quick test)")
     ap.add_argument("--out", type=Path,
                     default=WORKSPACE/f"results/eval/saco_sg/saco_sg_30seq_textprompt_preds_{_TS}.json")
-    ap.add_argument("--imgsz", type=int, default=1008,
-                    help="Input resolution (504 or 1008)")
+    ap.add_argument("--imgsz", type=int, default=504, choices=(504,),
+                    help="Input resolution; only the validated 504px path is supported.")
     ap.add_argument("--mig", action="store_true",
                     help="Use MIGraphX acceleration (requires LD_PRELOAD)")
     ap.add_argument("--parallel-tail", action="store_true",
@@ -114,7 +114,7 @@ def main():
         detr_onnx = args.onnx_dir / "detector_modules" / "detr_encoder_simplified.onnx"
         if detr_onnx.exists():
             patch_sam3_video_model_detr_encoder(model, detr_onnx)
-        ptr_tokens = {504: 64, 1008: 48}.get(args.imgsz, 32)
+        ptr_tokens = 64
         mem_onnx = (
             args.onnx_dir / "tracker_modules"
             / f"memory_attention_fixed_S7_P{ptr_tokens}.onnx"

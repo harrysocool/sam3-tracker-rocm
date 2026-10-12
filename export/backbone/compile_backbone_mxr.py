@@ -53,7 +53,7 @@ def parse_args():
                         "<onnx-dir>/backbone_<source>/single_simplified.onnx, writes "
                         "<onnx-dir>/backbone_<source>/tuned.mxr or "
                         "tuned_gpuio.mxr with --gpu-io.")
-    p.add_argument("--imgsz", type=int, default=504)
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--backbone-source", choices=["tracker", "detector"],
                    default="tracker",
                    help="Which backbone subdir to operate on")

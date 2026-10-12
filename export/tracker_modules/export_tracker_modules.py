@@ -51,7 +51,7 @@ def parse_args() -> argparse.Namespace:
                    required=not bool(os.environ.get("SAM3_ONNX_DIR")),
                    help="Writable artifact root (defaults to SAM3_ONNX_DIR). "
                         "Outputs go to <onnx-dir>/tracker_modules/.")
-    p.add_argument("--imgsz", type=int, default=1008)
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--checkpoint", type=Path, default=LOCAL_HF_MODEL)
     p.add_argument("--opset", type=int, default=17)
     p.add_argument("--verify", action="store_true", help="Run CPU accuracy test after export")
@@ -249,7 +249,7 @@ class MemoryEncoderWrapper(nn.Module):
     """Memory encoder: encodes a mask + vision features into a memory entry.
 
     Caller must resize mask to (1, 1, H*16, W*16) before passing.
-    For 1008px (H=W=72): mask size = 1152×1152.
+    For 504px (H=W=36): mask size = 576×576.
 
     Inputs:
         vision_features   (1, 256, H, W)   — backbone_fpn_2 (raw, no no_memory_embedding)

@@ -32,7 +32,7 @@ def parse_args():
                    help="Artifact root (defaults to SAM3_ONNX_DIR). Reads "
                         "<onnx-dir>/backbone_<source>/single_fp32.onnx, writes "
                         "<onnx-dir>/backbone_<source>/single_simplified.onnx.")
-    p.add_argument("--imgsz", type=int, default=504)
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--backbone-source", choices=["tracker", "detector"],
                    default="tracker",
                    help="Which backbone subdir to operate on")

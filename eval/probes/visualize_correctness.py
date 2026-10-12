@@ -130,7 +130,7 @@ def main():
     ap.add_argument("--onnx-dir", type=Path,
                     default=os.environ.get("SAM3_ONNX_DIR") or None,
                     required=not bool(os.environ.get("SAM3_ONNX_DIR")))
-    ap.add_argument("--imgsz", type=int, default=504)
+    ap.add_argument("--imgsz", type=int, default=504, choices=(504,))
     ap.add_argument("--sequence", nargs="+", required=True)
     ap.add_argument("--num-samples", type=int, default=6)
     ap.add_argument("--output-dir", type=Path, required=True)

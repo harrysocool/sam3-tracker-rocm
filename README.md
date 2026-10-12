@@ -359,8 +359,8 @@ flags, and additional visual examples.
 
 ## Known limitations
 
-- **Validated target:** gfx1151 at 504px. Other GPUs are untested; 1008px is an
-  advanced research path, not supported by the current fixed decoder.
+- **Validated target:** gfx1151 at 504px. Current build and runtime entry points
+  support only 504px; other GPUs are untested.
 - **Cold start:** ONNX/MXR build and first-use ORT compilation take time.
   Build once, retain caches, and measure startup separately from steady state.
 - **Object scaling:** more active objects increase tracker cost. Live and

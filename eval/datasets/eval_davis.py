@@ -10,7 +10,7 @@ Reports: per-sequence J, overall J mean, FPS
 Usage:
     MIGRAPHX_SKIP_BENCHMARKING=1 \\
         python scripts/onnx/analysis/eval_davis.py \\
-        [--imgsz 1008] [--davis dataset/DAVIS]
+        [--imgsz 504] [--davis dataset/DAVIS]
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ from tracker import SAM3OnnxTracker, preprocess_image
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--imgsz", type=int, default=1008)
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--davis", type=Path,
                    default=WORKSPACE_ROOT / "dataset/DAVIS")
     p.add_argument("--split", default="val",

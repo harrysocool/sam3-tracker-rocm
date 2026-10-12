@@ -106,7 +106,8 @@ def parse_args():
              "tracker propagation thereafter. Synchronizes, resets tracking, "
              "then seeks to frame 0. Default 0 performs no preload/warmup.",
     )
-    p.add_argument("--imgsz", type=int, default=504, choices=(504, 1008))
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,),
+                   help="Input resolution; only the validated 504px path is supported.")
     mig_group = p.add_mutually_exclusive_group()
     mig_group.add_argument(
         "--mig",

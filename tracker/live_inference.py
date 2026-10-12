@@ -60,7 +60,7 @@ from .output_processing import (
 
 # Memory-attention pointer-token cap per resolution (must match
 # memory_attention_fixed_S7_P{K}.onnx artifact that was compiled by build.py).
-_K_PER_IMGSZ = {504: 64, 1008: 48}
+_MEMORY_POINTER_TOKENS = 64
 # Original SAM3 tracker artifact contract: exact memory shapes S1 through S10.
 _REQUIRED_MEMORY_ATTENTION_SLOTS = tuple(range(1, 11))
 
@@ -102,7 +102,7 @@ class SAM3Live:
             onnx_dir: MIGraphX artifact root. When omitted with ``mig=True``,
                 uses ``SAM3_ONNX_DIR`` set by the container launcher.
                 Set that variable or pass an explicit directory.
-            imgsz: 504 or 1008. Must match the MIG artifacts under ``onnx_dir``.
+            imgsz: only 504 is supported. Must match the artifacts under ``onnx_dir``.
             dtype: fp16 (default) or fp32.
             device: torch device, defaults to cuda if available.
             mig: enable MIGraphX accelerated paths (vision encoder, DETR encoder,
@@ -163,6 +163,8 @@ class SAM3Live:
                 more samples in the few frames available; tighten if exemplar
                 quality is bad.
         """
+        if imgsz != 504:
+            raise ValueError("SAM3Live supports only the validated 504px resolution")
         # Lazy import so that consumers of this module don't pay model import cost
         # if they only want the class definition.
         from transformers import Sam3VideoModel, AutoProcessor, Sam3VideoConfig
@@ -384,7 +386,7 @@ class SAM3Live:
             )
 
         # K is resolution-dependent (MLIR attention perf cliff).
-        k = _K_PER_IMGSZ.get(imgsz, 32)
+        k = _MEMORY_POINTER_TOKENS
         mem_attn_onnx = onnx_dir / "tracker_modules" / f"memory_attention_fixed_S7_P{k}.onnx"
         if not mem_attn_onnx.exists():
             for alt in (32, 48, 64, 16, 4):

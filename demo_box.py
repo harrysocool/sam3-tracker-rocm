@@ -43,8 +43,8 @@ def parse_args():
                    required=not bool(os.environ.get("SAM3_ONNX_DIR")),
                    help="Artifact root (defaults to SAM3_ONNX_DIR from run.sh). "
                         "Reads <onnx-dir>/backbone_tracker/* and <onnx-dir>/tracker_modules/*.")
-    p.add_argument("--imgsz", type=int, default=504,
-                   help="Input resolution (504 for speed, 1008 for quality)")
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,),
+                   help="Input resolution; only the validated 504px path is supported.")
     p.add_argument("--box", type=str, required=True,
                    help="Box prompt in original image coords: x1,y1,x2,y2")
     p.add_argument("--image", type=Path, default=None,
