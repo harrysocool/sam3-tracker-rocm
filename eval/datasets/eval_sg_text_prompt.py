@@ -64,15 +64,16 @@ def main():
                     help="Overlap detector and tracker tails. Requires --mig.")
     ap.add_argument("--pipeline-backbone", action="store_true",
                     help="Prefetch the next MIG backbone. Requires --parallel-tail.")
-    ap.add_argument("--onnx-dir", type=Path, default=None,
-                    help="ONNX artefacts root (default: onnx_files_<imgsz>)")
+    ap.add_argument("--onnx-dir", type=Path,
+                    default=os.environ.get("SAM3_ONNX_DIR") or None,
+                    help="ONNX artifact root (defaults to SAM3_ONNX_DIR)")
     args = ap.parse_args()
     if args.parallel_tail and not args.mig:
         ap.error("--parallel-tail requires --mig")
     if args.pipeline_backbone and not args.parallel_tail:
         ap.error("--pipeline-backbone requires --parallel-tail")
-    if args.onnx_dir is None:
-        args.onnx_dir = WORKSPACE / f"onnx_files_{args.imgsz}"
+    if args.mig and args.onnx_dir is None:
+        ap.error("set SAM3_ONNX_DIR or pass --onnx-dir for MIG inference")
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda")

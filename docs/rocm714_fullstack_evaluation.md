@@ -87,12 +87,15 @@ it requires `librocsolver.so.1`, while ROCm 7.14 provides a different ABI major
 ## Artifacts
 
 Historical evidence remains outside Git. The locations below reflect the archive
-layout. Regenerable model binaries and caches from completed experiments were
+layout relative to the local artifact root; no machine-specific absolute path
+is required. These are evidence locations, separate from the runtime model
+directory selected by `SAM3_ONNX_DIR`.
+Regenerable model binaries and caches from completed experiments were
 removed during cleanup; consult each archive's `ARCHIVE_CLEANUP.json` for the
 retained files and original artifact hashes.
 
 ```text
-/home/amd/project/sam3-artifacts/gpu/archive/2026-08/2026-08-26__fullstack-rocm714/
+gpu/archive/2026-08/2026-08-26__fullstack-rocm714/
   backbone_detector/tuned_gpuio.mxr
   detr_cache/
   memory_cache/                  # S1 through S10
@@ -102,7 +105,7 @@ retained files and original artifact hashes.
   mask_diff_synced_rerun.json
   text_fullmodel_synced.mp4
 
-/home/amd/project/sam3-artifacts/gpu/archive/2026-08/2026-08-27__parallel-tail/
+gpu/archive/2026-08/2026-08-27__parallel-tail/
   scoped_fence_50f_ab.json
   scoped_fence_person_dog_50f_ab.json
   backbone_pipeline_final_acceptance.json
@@ -116,7 +119,7 @@ retained files and original artifact hashes.
   davis_val_504_post_parallel.json
   backbone_b2_rejected.json
 
-/home/amd/project/sam3-artifacts/gpu/archive/2026-08/2026-08-27__position-encoding-cache/
+gpu/archive/2026-08/2026-08-27__position-encoding-cache/
   benchmark_pipeline.py
   swan_50f_ab.json
   person_dog_50f_ab.json
@@ -126,52 +129,52 @@ retained files and original artifact hashes.
   summary.json
   SHA256SUMS
 
-/home/amd/project/sam3-artifacts/gpu/archive/2026-08/2026-08-27__backbone-kernel-profile/
+gpu/archive/2026-08/2026-08-27__backbone-kernel-profile/
   backbone_kernel_trace.csv
   backbone_kernel_stats.csv
   mlp_counter_summary.json
   qkv_probe_result.json
   {OccupancyPercent,L2CacheHit,MemUnitBusy,VALUInsts,FETCH_SIZE,WRITE_SIZE}/
 
-/home/amd/project/sam3-artifacts/gpu/archive/2026-08/2026-08-27__mlp-fc1-triton/
+gpu/archive/2026-08/2026-08-27__mlp-fc1-triton/
   real_finalists.json
 
-/home/amd/project/sam3-artifacts/gpu/archive/2026-08/2026-08-27__hipblaslt-fc1/
+gpu/archive/2026-08/2026-08-27__hipblaslt-fc1/
   result.json
 
-/home/amd/project/sam3-artifacts/gpu/archive/2026-08/2026-08-27__hipblaslt-fc2/
+gpu/archive/2026-08/2026-08-27__hipblaslt-fc2/
   result.json
 
-/home/amd/project/sam3-artifacts/gpu/archive/2026-08/2026-08-27__rocwmma-fc1/
+gpu/archive/2026-08/2026-08-27__rocwmma-fc1/
   real_layers_exact_final.json
   rocwmma_fc1_exact_summary.json
 
-/home/amd/project/sam3-artifacts/gpu/archive/2026-08/2026-08-27__detr-rpb-compile/
+gpu/archive/2026-08/2026-08-27__detr-rpb-compile/
   rpb_compile_bench.json
   rpb_cuda_graph_bench.json
 
-/home/amd/project/sam3-artifacts/gpu/archive/2026-08/2026-08-27__detr-rpb-pipeline/
+gpu/archive/2026-08/2026-08-27__detr-rpb-pipeline/
   rpb_runtime_patch.py
   rpb_exact_patch.py
   rpb_pipeline_bench.py
   rpb_compile_pipeline_50f_ab.json
   rpb_exact_pipeline_50f_ab.json
 
-/home/amd/project/sam3-artifacts/gpu/archive/2026-08/2026-08-27__runtime-overhead-probes/
+gpu/archive/2026-08/2026-08-27__runtime-overhead-probes/
   ort_reuse_bench.py
   ort_reuse_s7.json
 
-/home/amd/project/sam3-artifacts/gpu/archive/2026-08/2026-08-27__memory-attention-grouped/
+gpu/archive/2026-08/2026-08-27__memory-attention-grouped/
   b1_vs_b2_s7.json
   b1_vs_b3_s7.json
   s7_b1_concurrency_comparative.json
 
-/home/amd/project/sam3-artifacts/gpu/archive/2026-08/2026-08-27__low-precision-probes/
+gpu/archive/2026-08/2026-08-27__low-precision-probes/
   sam3_int8_fc1_final.json
   sam3_int8_fc1_tune.json
   sam3_quant_fc1_results.json
 
-/home/amd/project/sam3-artifacts/gpu/archive/2026-08/2026-08-26__deep-optimization-rejections/
+gpu/archive/2026-08/2026-08-26__deep-optimization-rejections/
   deep_optimization_rejections_20260826.json
 ```
 

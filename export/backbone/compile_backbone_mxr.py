@@ -46,7 +46,9 @@ def parse_args():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("--onnx-dir", type=Path, required=True,
+    p.add_argument("--onnx-dir", type=Path,
+                   default=os.environ.get("SAM3_ONNX_DIR") or None,
+                   required=not bool(os.environ.get("SAM3_ONNX_DIR")),
                    help="Resolution root (e.g. /models/onnx_files_504 in the container). Reads "
                         "<onnx-dir>/backbone_<source>/single_simplified.onnx, writes "
                         "<onnx-dir>/backbone_<source>/tuned.mxr or "

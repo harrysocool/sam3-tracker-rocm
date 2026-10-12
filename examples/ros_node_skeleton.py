@@ -15,8 +15,12 @@ cannot remove frames already buffered by DDS, a camera driver, or a decoder.
 
 Standalone test (the file source is paced at its declared FPS):
 
-    python examples/ros_node_skeleton.py \
-        --checkpoint model/sam3 --onnx-dir onnx_files_504 \
+Normally omit --onnx-dir to use SAM3_ONNX_DIR selected by run.sh.
+Pass it only when deliberately overriding with a container-visible directory.
+The example below shows the explicit equivalent.
+
+    ./docker/rocm714/run.sh python examples/ros_node_skeleton.py \
+        --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
         --video assets/blackswan.mp4 --text swan water
 """
 from __future__ import annotations
@@ -606,9 +610,8 @@ def parse_args(argv=None):
     parser.add_argument(
         "--onnx-dir",
         type=Path,
-        default=Path(
-            os.environ.get("SAM3_DEFAULT_ONNX_DIR", "inference/production/rocm714-mgx217-504")
-        ),
+        default=os.environ.get("SAM3_ONNX_DIR") or None,
+        help="MIG artifact root (defaults to SAM3_ONNX_DIR from run.sh).",
     )
     parser.add_argument("--video", type=Path, required=True)
     parser.add_argument("--text", type=str, nargs="+", required=True)
@@ -685,6 +688,8 @@ def parse_args(argv=None):
         parser.error("--parallel-tail requires MIG (remove --no-mig)")
     if args.fixed_detr_decoder is True and args.no_mig:
         parser.error("--fixed-detr-decoder requires MIG")
+    if not args.no_mig and args.onnx_dir is None:
+        parser.error("set SAM3_ONNX_DIR or pass --onnx-dir for MIG inference")
     return args
 
 

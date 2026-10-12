@@ -14,7 +14,11 @@ Pipeline:
     [compile_backbone_mxr.py]    ->  backbone_<source>/tuned.mxr  (the runtime cache)
 
 Usage:
-    python export/backbone/export_backbone_single.py --imgsz 504 --onnx-dir inference/legacy/standalone-tracker-504
+    Normally omit --onnx-dir to use the writable SAM3_ONNX_DIR selected by run.sh.
+    Pass it only when deliberately overriding with a container-visible build directory.
+    The example below shows the explicit equivalent.
+
+    ./docker/rocm714/run.sh python export/backbone/export_backbone_single.py --imgsz 504 --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504
 """
 
 from __future__ import annotations
@@ -38,9 +42,10 @@ def parse_args():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     p.add_argument("--checkpoint", type=Path, default=WORKSPACE / "model" / "sam3")
-    p.add_argument("--onnx-dir", type=Path, default=None,
-                   help="Resolution root, e.g. inference/legacy/standalone-tracker-504. "
-                        "Defaults based on --imgsz and --backbone-source.")
+    p.add_argument("--onnx-dir", type=Path,
+                   default=os.environ.get("SAM3_ONNX_DIR") or None,
+                   required=not bool(os.environ.get("SAM3_ONNX_DIR")),
+                   help="Writable artifact root (defaults to SAM3_ONNX_DIR from run.sh).")
     p.add_argument("--imgsz", type=int, default=504)
     p.add_argument("--opset", type=int, default=17)
     p.add_argument(
@@ -90,13 +95,6 @@ class SingleSessionBackbone(nn.Module):
 
 def main():
     args = parse_args()
-    if args.onnx_dir is None:
-        legacy_name = (
-            f"standalone-tracker-{args.imgsz}"
-            if args.backbone_source == "tracker"
-            else f"detector-baselines-{args.imgsz}"
-        )
-        args.onnx_dir = WORKSPACE / "inference" / "legacy" / legacy_name
     sub_dir = args.onnx_dir / f"backbone_{args.backbone_source}"
     sub_dir.mkdir(parents=True, exist_ok=True)
     out_path = sub_dir / "single_fp32.onnx"

@@ -137,7 +137,7 @@ output-rate measurements differ.
 
 The tool defaults to **504px MIGraphX inference with the fixed DETR decoder**,
 same-frame parallel tails, and next-frame backbone prefetch for videos. It uses
-the artifact mount configured by Quick start through `SAM3_DEFAULT_ONNX_DIR`.
+the artifact mount configured by Quick start through `SAM3_ONNX_DIR`.
 Single-image runs do not prefetch another frame.
 
 Like live, `--text` accepts multiple prompts and quoted multiword phrases.

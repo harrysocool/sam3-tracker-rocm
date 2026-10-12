@@ -10,15 +10,21 @@ Use --no-fixed-detr-decoder for native-decoder comparisons with MIG enabled.
 Camera and ROS consumers use demo_live.py / SAM3Live for latest-frame scheduling.
 
 Usage:
+  Normally omit --onnx-dir to use SAM3_ONNX_DIR selected by run.sh.
+  Pass it only when deliberately overriding with a container-visible directory.
+  The examples below show the explicit equivalent.
+
   # Single image, using the supported container and configured artifact mount
   ./docker/rocm714/run.sh python tools/text_baseline.py \\
       --checkpoint /models/sam3 \\
+      --onnx-dir /models/onnx_files_504 \\
       --image assets/truck.jpg \\
       --text "truck"
 
   # Video with MIGraphX and backbone prefetch enabled by default
   ./docker/rocm714/run.sh python tools/text_baseline.py \\
       --checkpoint /models/sam3 \\
+      --onnx-dir /models/onnx_files_504 \\
       --video assets/blackswan.mp4 \\
       --text "swan" \\
       --max-frames 50
@@ -131,8 +137,7 @@ def parse_args(argv=None):
     )
     p.set_defaults(pipeline_backbone=None)
     p.add_argument("--onnx-dir", type=Path, default=None,
-                   help="MIG artifact root. Defaults to SAM3_DEFAULT_ONNX_DIR "
-                        "from the container wrapper, or inference/production/rocm714-mgx217-504.")
+                   help="MIG artifact root. Defaults to SAM3_ONNX_DIR from run.sh.")
     args = p.parse_args(argv)
     if (args.image is None) == (args.video is None):
         sys.exit("Pass exactly one of --image or --video")
@@ -166,9 +171,11 @@ def parse_args(argv=None):
     if args.onnx_dir is None:
         if args.mig and args.imgsz != 504:
             sys.exit("1008px MIG inference requires an explicit --onnx-dir with matching artifacts")
-        args.onnx_dir = Path(
-            os.environ.get("SAM3_DEFAULT_ONNX_DIR", "inference/production/rocm714-mgx217-504")
-        )
+        configured_dir = os.environ.get("SAM3_ONNX_DIR")
+        if configured_dir:
+            args.onnx_dir = Path(configured_dir)
+        elif args.mig:
+            p.error("set SAM3_ONNX_DIR or pass --onnx-dir for MIG inference")
     return args
 
 

@@ -14,9 +14,12 @@ Key design decisions:
 
 
 Usage:
-    PYTHONPATH not required (transformers>=5.8.0 includes sam3_tracker_video)\
-        python export/tracker_modules/export_tracker_modules.py \\
-        [--onnx-dir onnx_files_1008] [--imgsz 1008] [--opset 17] [--verify]
+    Normally omit --onnx-dir to use the writable SAM3_ONNX_DIR selected by run.sh.
+    Pass it only when deliberately overriding with a container-visible build directory.
+    The example below shows the explicit equivalent.
+
+    ./docker/rocm714/run.sh python export/tracker_modules/export_tracker_modules.py \\
+        --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 --imgsz 504
 """
 
 from __future__ import annotations
@@ -43,9 +46,11 @@ from tracker.rocm_env import apply as _apply_rocm_env; _apply_rocm_env()
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--onnx-dir", type=Path, default=None,
-                   help="Resolution root (e.g. inference/legacy/standalone-tracker-504). Outputs go to "
-                        "<onnx-dir>/tracker_modules/. Defaults based on --imgsz.")
+    p.add_argument("--onnx-dir", type=Path,
+                   default=os.environ.get("SAM3_ONNX_DIR") or None,
+                   required=not bool(os.environ.get("SAM3_ONNX_DIR")),
+                   help="Writable artifact root (defaults to SAM3_ONNX_DIR). "
+                        "Outputs go to <onnx-dir>/tracker_modules/.")
     p.add_argument("--imgsz", type=int, default=1008)
     p.add_argument("--checkpoint", type=Path, default=LOCAL_HF_MODEL)
     p.add_argument("--opset", type=int, default=17)
@@ -53,8 +58,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--fixed-slots", type=int, default=7, metavar="N",
                    help="Also export memory_attention_fixed_N<N>.onnx with static shapes for MIGraphX (0=skip)")
     args = p.parse_args()
-    if args.onnx_dir is None:
-        args.onnx_dir = WORKSPACE_ROOT / f"onnx_files_{args.imgsz}"
     args.output_dir = args.onnx_dir / "tracker_modules"
     return args
 

@@ -7,6 +7,7 @@ IoU between PT and MIG masks. Catches MIG numerical regressions.
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import sys
 import time
@@ -31,8 +32,10 @@ def parse_args():
     p.add_argument("--text", type=str, required=True)
     p.add_argument("--imgsz", type=int, default=1008, choices=[504, 1008])
     p.add_argument("--max-frames", type=int, default=20)
-    p.add_argument("--onnx-dir", type=Path, default=None,
-                   help="Default: onnx_files_<imgsz>")
+    p.add_argument("--onnx-dir", type=Path,
+                   default=os.environ.get("SAM3_ONNX_DIR") or None,
+                   required=not bool(os.environ.get("SAM3_ONNX_DIR")),
+                   help="MIG artifact root (defaults to SAM3_ONNX_DIR)")
     p.add_argument("--parallel-tail", action="store_true",
                    help="Enable detector/tracker tail overlap on the MIG model")
     p.add_argument("--pipeline-backbone", action="store_true",
@@ -185,8 +188,6 @@ def iou(a: np.ndarray, b: np.ndarray) -> float:
 
 def main():
     args = parse_args()
-    if args.onnx_dir is None:
-        args.onnx_dir = Path(f"onnx_files_{args.imgsz}")
     device = torch.device("cuda")
     dtype = torch.float16
 

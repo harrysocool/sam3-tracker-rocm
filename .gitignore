@@ -87,3 +87,6 @@ data/
 
 # External inference artifact entry point
 inference
+
+# Private machine paths (loaded manually with source .env.local)
+/.env.local

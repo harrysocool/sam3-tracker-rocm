@@ -21,7 +21,6 @@ Quick start
 
     live = SAM3Live(
         checkpoint="model/sam3",
-        onnx_dir="inference/production/rocm714-mgx217-504",
         prompts=["car", "sidewalk", "grass"],
         imgsz=504,
     )
@@ -101,8 +100,8 @@ class SAM3Live:
             checkpoint: HF model dir (contains model.safetensors).
             prompts: initial text prompts (e.g. ["car", "sidewalk"]).
             onnx_dir: MIGraphX artifact root. When omitted with ``mig=True``,
-                defaults to ``onnx_files_<imgsz>_mgx217`` in the current workspace
-                or `SAM3_DEFAULT_ONNX_DIR` when set by the container launcher.
+                uses ``SAM3_ONNX_DIR`` set by the container launcher.
+                Set that variable or pass an explicit directory.
             imgsz: 504 or 1008. Must match the MIG artifacts under ``onnx_dir``.
             dtype: fp16 (default) or fp32.
             device: torch device, defaults to cuda if available.
@@ -177,13 +176,10 @@ class SAM3Live:
         self.redetect_every = max(1, int(redetect_every))
         self.max_objects_per_prompt = max_objects_per_prompt
         if mig:
-            onnx_dir = Path(
-                onnx_dir
-                or os.environ.get(
-                    "SAM3_DEFAULT_ONNX_DIR",
-                    f"onnx_files_{imgsz}_mgx217",
-                )
-            )
+            configured_dir = onnx_dir or os.environ.get("SAM3_ONNX_DIR")
+            if not configured_dir:
+                raise ValueError("set SAM3_ONNX_DIR or pass onnx_dir for MIG inference")
+            onnx_dir = Path(configured_dir)
             if not onnx_dir.is_dir():
                 raise FileNotFoundError(f"MIGraphX artifact directory not found: {onnx_dir}")
         if parallel_tail is None:

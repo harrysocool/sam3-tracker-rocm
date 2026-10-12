@@ -39,9 +39,11 @@ def parse_args():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     p.add_argument("--checkpoint", type=Path, default=Path("model/sam3"))
-    p.add_argument("--onnx-dir", type=Path, default=None,
-                   help="Resolution root (e.g. onnx_files_1008). Outputs go to "
-                        "<onnx-dir>/detector_modules/. Defaults from --imgsz.")
+    p.add_argument("--onnx-dir", type=Path,
+                   default=os.environ.get("SAM3_ONNX_DIR") or None,
+                   required=not bool(os.environ.get("SAM3_ONNX_DIR")),
+                   help="Writable artifact root (defaults to SAM3_ONNX_DIR). "
+                        "Outputs go to <onnx-dir>/detector_modules/.")
     p.add_argument("--imgsz", type=int, default=1008)
     p.add_argument("--text-seq-len", type=int, default=32)
     p.add_argument("--opset", type=int, default=17)
@@ -52,8 +54,6 @@ def parse_args():
     p.add_argument("--skip-verify", action="store_true",
                    help="Skip ONNX-CPU vs PyTorch verification")
     args = p.parse_args()
-    if args.onnx_dir is None:
-        args.onnx_dir = WORKSPACE / f"onnx_files_{args.imgsz}"
     args.out_dir = args.onnx_dir / "detector_modules"
     return args
 

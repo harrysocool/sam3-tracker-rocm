@@ -11,7 +11,7 @@ from tracker.live_inference import SAM3Live
 
 
 def _parse(monkeypatch, *extra):
-    monkeypatch.delenv("SAM3_DEFAULT_ONNX_DIR", raising=False)
+    monkeypatch.setenv("SAM3_ONNX_DIR", "/models/onnx_files_504")
     monkeypatch.setattr(
         sys,
         "argv",
@@ -34,7 +34,7 @@ def test_live_defaults_to_mig_parallel_tail_and_fixed_auto(monkeypatch):
     assert args.mig is True
     assert args.parallel_tail is True
     assert args.fixed_detr_decoder is None
-    assert str(args.onnx_dir) == "inference/production/rocm714-mgx217-504"
+    assert str(args.onnx_dir) == "/models/onnx_files_504"
     assert args.redetect_interval_ms == 0.0
     assert args.max_objects == 5
     assert args.max_frames == 0
@@ -43,6 +43,21 @@ def test_live_defaults_to_mig_parallel_tail_and_fixed_auto(monkeypatch):
 def test_parallel_tail_can_be_disabled_explicitly(monkeypatch):
     args = _parse(monkeypatch, "--no-parallel-tail")
     assert args.parallel_tail is False
+
+
+def test_explicit_artifact_root_overrides_environment(monkeypatch):
+    args = _parse(monkeypatch, "--onnx-dir", "/workspace/results/experiment")
+    assert str(args.onnx_dir) == "/workspace/results/experiment"
+
+
+def test_missing_artifact_config_requires_directory_only_for_mig(monkeypatch, capsys):
+    _parse(monkeypatch)
+    monkeypatch.delenv("SAM3_ONNX_DIR")
+    with pytest.raises(SystemExit):
+        demo_live.parse_args()
+    assert "set SAM3_ONNX_DIR or pass --onnx-dir" in capsys.readouterr().err
+    monkeypatch.setattr(sys, "argv", [*sys.argv, "--no-mig"])
+    assert demo_live.parse_args().onnx_dir is None
 
 
 def test_no_mig_explicitly_selects_pytorch_and_serial(monkeypatch):

@@ -42,7 +42,9 @@ def parse_args():
                    default=WORKSPACE_ROOT / "dataset/gt-annotations/saco_veval_smartglasses_val.json")
     p.add_argument("--img-root", type=Path,
                    default=WORKSPACE_ROOT / "dataset/saco_sg/JPEGImages_6fps")
-    p.add_argument("--onnx-dir", type=Path, default=None)
+    p.add_argument("--onnx-dir", type=Path,
+                   default=os.environ.get("SAM3_ONNX_DIR") or None,
+                   required=not bool(os.environ.get("SAM3_ONNX_DIR")))
     p.add_argument("--checkpoint", type=Path,
                    default=WORKSPACE_ROOT / "model/sam3")
     p.add_argument("--num-maskmem", type=int, default=7)
@@ -68,9 +70,6 @@ def mask_iou(m1, m2):
 def main():
     args = parse_args()
 
-    # Auto-select paths based on imgsz
-    if args.onnx_dir is None:
-        args.onnx_dir = WORKSPACE_ROOT / (f"onnx_files_{args.imgsz}")
     if args.out is None:
         args.out = WORKSPACE_ROOT / f"results/eval/saco_sg/baseline_50seq_{args.imgsz}px_{_TS}.json"
 

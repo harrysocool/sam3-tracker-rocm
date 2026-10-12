@@ -8,7 +8,7 @@ from tools import text_baseline
 
 
 def _parse(monkeypatch, *extra, video=True):
-    monkeypatch.delenv("SAM3_DEFAULT_ONNX_DIR", raising=False)
+    monkeypatch.setenv("SAM3_ONNX_DIR", "/models/onnx_files_504")
     source = ["--video", "assets/blackswan.mp4"] if video else ["--image", "assets/truck.jpg"]
     return text_baseline.parse_args([
         "--checkpoint", "model/sam3", "--text", "swan", *source, *extra,
@@ -24,28 +24,38 @@ def test_accelerated_defaults_select_the_supported_resolution(monkeypatch, video
     assert args.fixed_detr_decoder is True
     assert args.parallel_tail is True
     assert args.pipeline_backbone is video
-    assert args.onnx_dir == Path("inference/production/rocm714-mgx217-504")
+    assert args.onnx_dir == Path("/models/onnx_files_504")
     assert args.text == ["swan"]
     assert args.max_objects == 5
     assert args.max_frames == 120
 
 
 def test_artifact_root_uses_container_environment(monkeypatch):
-    monkeypatch.setenv("SAM3_DEFAULT_ONNX_DIR", "/models/onnx_files_504")
+    monkeypatch.setenv("SAM3_ONNX_DIR", "/workspace/results/experiment")
     args = text_baseline.parse_args([
         "--checkpoint", "model/sam3", "--text", "swan",
         "--video", "assets/blackswan.mp4",
     ])
-    assert args.onnx_dir == Path("/models/onnx_files_504")
+    assert args.onnx_dir == Path("/workspace/results/experiment")
 
 
 def test_explicit_artifact_root_overrides_container_environment(monkeypatch):
-    monkeypatch.setenv("SAM3_DEFAULT_ONNX_DIR", "/models/onnx_files_504")
+    monkeypatch.setenv("SAM3_ONNX_DIR", "/models/onnx_files_504")
     args = text_baseline.parse_args([
         "--checkpoint", "model/sam3", "--text", "swan",
         "--video", "assets/blackswan.mp4", "--onnx-dir", "/custom/artifacts",
     ])
     assert args.onnx_dir == Path("/custom/artifacts")
+
+
+def test_missing_artifact_config_requires_directory_only_for_mig(monkeypatch, capsys):
+    monkeypatch.delenv("SAM3_ONNX_DIR", raising=False)
+    argv = ["--checkpoint", "model/sam3", "--text", "swan",
+            "--video", "assets/blackswan.mp4"]
+    with pytest.raises(SystemExit):
+        text_baseline.parse_args(argv)
+    assert "set SAM3_ONNX_DIR or pass --onnx-dir" in capsys.readouterr().err
+    assert text_baseline.parse_args([*argv, "--no-mig"]).onnx_dir is None
 
 
 @pytest.mark.parametrize("video", [False, True])

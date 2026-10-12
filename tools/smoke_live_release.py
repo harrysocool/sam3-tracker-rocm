@@ -13,6 +13,7 @@ and the validation/orchestration helpers can be tested on a CPU-only host.
 from __future__ import annotations
 
 import argparse
+import os
 import hashlib
 import json
 import math
@@ -42,7 +43,9 @@ def _frame_count(value: str) -> int:
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument("--onnx-dir", type=Path, required=True)
+    parser.add_argument("--onnx-dir", type=Path,
+                        default=os.environ.get("SAM3_ONNX_DIR") or None,
+                        required=not bool(os.environ.get("SAM3_ONNX_DIR")))
     parser.add_argument("--video", type=Path, default=ROOT / "assets/blackswan.mp4")
     parser.add_argument("--text", default="swan", help="One known-positive text prompt")
     parser.add_argument("--frames", type=_frame_count, default=12)

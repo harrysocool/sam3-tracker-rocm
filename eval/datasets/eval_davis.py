@@ -44,7 +44,9 @@ def parse_args():
                    default=WORKSPACE_ROOT / "dataset/DAVIS")
     p.add_argument("--split", default="val",
                    help="val or test-dev")
-    p.add_argument("--onnx-dir", type=Path, default=None)
+    p.add_argument("--onnx-dir", type=Path,
+                   default=os.environ.get("SAM3_ONNX_DIR") or None,
+                   required=not bool(os.environ.get("SAM3_ONNX_DIR")))
     p.add_argument("--checkpoint", type=Path,
                    default=WORKSPACE_ROOT / "model/sam3")
     p.add_argument("--num-maskmem", type=int, default=7)
@@ -72,8 +74,6 @@ def mask_iou(pred: np.ndarray, gt: np.ndarray) -> float:
 def main():
     args = parse_args()
 
-    if args.onnx_dir is None:
-        args.onnx_dir = WORKSPACE_ROOT / f"onnx_files_{args.imgsz}"
     if args.out is None:
         args.out = WORKSPACE_ROOT / f"results/eval/davis/davis_{args.split}_{args.imgsz}px_{_TS}.json"
 

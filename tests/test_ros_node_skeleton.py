@@ -177,7 +177,7 @@ def test_stale_result_is_not_published(monkeypatch):
 
 
 def _args(*flags):
-    return ["--checkpoint", "unused", "--video", "unused.mp4", "--text", "swan", *flags]
+    return ["--checkpoint", "unused", "--onnx-dir", "unused", "--video", "unused.mp4", "--text", "swan", *flags]
 
 
 @pytest.mark.parametrize(("flags", "expected"), [

@@ -17,14 +17,20 @@ Runs the complete local model-build pipeline for the text-prompt MIG path:
 Each step skips if its output file already exists (use --force to rebuild).
 
 Usage:
-  # Build 504px artefacts (~15 min)
-  ./docker/rocm714/run.sh python export/build_text_prompt_mig.py --imgsz 504
+  Run these commands from the repository root in the host terminal.
+  Select a writable SAM3_ONNX_DIR before launching the supported container.
+  Normally omit --onnx-dir to use that selected directory. Pass it only when
+  deliberately overriding with another container-visible build directory.
+  The single-resolution examples below show the explicit equivalent.
 
-  # Build both resolutions
-  python export/build_text_prompt_mig.py --imgsz 504 1008
+  # Build 504px artefacts (~15 min)
+  ./docker/rocm714/run.sh python export/build_text_prompt_mig.py --imgsz 504 --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504
+
+  # Build both resolutions under an explicit writable container directory
+  ./docker/rocm714/run.sh python export/build_text_prompt_mig.py --imgsz 504 1008 --checkpoint /models/sam3 --onnx-root /workspace/results/multi-resolution-build
 
   # Rebuild backbone only (force)
-  python export/build_text_prompt_mig.py --imgsz 504 --force --steps backbone
+  ./docker/rocm714/run.sh python export/build_text_prompt_mig.py --imgsz 504 --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 --force --steps backbone
 """
 from __future__ import annotations
 
@@ -128,8 +134,11 @@ def parse_args():
     p.add_argument("--checkpoint", type=Path,
                    default=WORKSPACE / "model/sam3",
                    help="Path to model/sam3 (default: model/sam3)")
-    p.add_argument("--onnx-root", type=Path, default=None,
-                   help="Root for onnx_files_<imgsz>/ dirs (default: project root)")
+    artifact_location = p.add_mutually_exclusive_group()
+    artifact_location.add_argument("--onnx-dir", type=Path,
+                   help="Writable artifact root for one resolution; defaults to SAM3_ONNX_DIR.")
+    artifact_location.add_argument("--onnx-root", type=Path,
+                   help="Explicit parent of onnx_files_<imgsz>/ directories for multiple resolutions.")
     p.add_argument("--force", action="store_true",
                    help="Rebuild even if output files already exist")
     p.add_argument("--steps", nargs="+",
@@ -149,7 +158,15 @@ def parse_args():
         action="store_true",
         help="Require a verified EC performance mode before hardware autotuning.",
     )
-    return p.parse_args()
+    args = p.parse_args()
+    if args.onnx_root is None and args.onnx_dir is None:
+        configured_dir = os.environ.get("SAM3_ONNX_DIR")
+        if not configured_dir:
+            p.error("set SAM3_ONNX_DIR or pass --onnx-dir / --onnx-root")
+        args.onnx_dir = Path(configured_dir)
+    if args.onnx_dir is not None and len(args.imgsz) != 1:
+        p.error("--onnx-dir selects one resolution; use --onnx-root for multiple resolutions")
+    return args
 
 
 def run(cmd: list[str], label: str, *, env=None) -> bool:
@@ -181,8 +198,7 @@ def exists(path: Path, label: str, force: bool) -> bool:
 
 
 def build_for_imgsz(imgsz: int, args) -> bool:
-    onnx_root = args.onnx_root or WORKSPACE
-    onnx_dir = onnx_root / f"onnx_files_{imgsz}"
+    onnx_dir = args.onnx_dir or args.onnx_root / f"onnx_files_{imgsz}"
     det_dir = onnx_dir / "backbone_detector"
     mod_dir = onnx_dir / "detector_modules"
     trk_dir = onnx_dir / "tracker_modules"
@@ -383,7 +399,7 @@ def main():
         print(f"\n{'='*60}")
         print(f"  Building text-prompt MIG artefacts @ {imgsz}px")
         print(f"  checkpoint : {args.checkpoint}")
-        print(f"  onnx_files : onnx_files_{imgsz}/")
+        print(f"  onnx_files : {args.onnx_dir or args.onnx_root / f'onnx_files_{imgsz}'}")
         print(f"{'='*60}")
         ok = build_for_imgsz(imgsz, args)
         all_ok = all_ok and ok

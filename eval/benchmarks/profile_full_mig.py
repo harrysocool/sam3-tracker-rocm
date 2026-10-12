@@ -8,6 +8,7 @@ MIG-ization. Outputs both stdout table and JSON.
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import statistics
 import sys
@@ -35,13 +36,19 @@ def parse_args():
                    help="frames after init to profile (default 15)")
     p.add_argument("--mig", action="store_true", default=True)
     p.add_argument("--no-mig", action="store_false", dest="mig")
+    p.add_argument("--onnx-dir", type=Path,
+                   default=os.environ.get("SAM3_ONNX_DIR") or None,
+                   help="MIG artifact root (defaults to SAM3_ONNX_DIR)")
     p.add_argument("--out", type=Path, required=True)
-    return p.parse_args()
+    args = p.parse_args()
+    if args.mig and args.onnx_dir is None:
+        p.error("set SAM3_ONNX_DIR or pass --onnx-dir for MIG inference")
+    return args
 
 
 def main():
     args = parse_args()
-    onnx_dir = Path(f"onnx_files_{args.imgsz}")
+    onnx_dir = args.onnx_dir
     device, dtype = torch.device("cuda"), torch.float16
 
     # Build model with config-based init for non-1008

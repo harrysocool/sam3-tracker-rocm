@@ -51,8 +51,10 @@ import migraphx as _mxr
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--onnx-dir", type=Path, default=Path("onnx_files_504"),
-                   help="Resolution root, e.g. onnx_files_504 or onnx_files_1008. "
+    p.add_argument("--onnx-dir", type=Path,
+                   default=os.environ.get("SAM3_ONNX_DIR") or None,
+                   required=not bool(os.environ.get("SAM3_ONNX_DIR")),
+                   help="Writable artifact root (defaults to SAM3_ONNX_DIR). "
                         "Operates on <onnx-dir>/tracker_modules/.")
     p.add_argument("--warmup", type=int, default=1,
                    help="Number of warmup inference runs per session")
