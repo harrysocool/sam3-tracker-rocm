@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Headless installation smoke, not a throughput or mask-quality benchmark.
 
-Run inside docker/rocm714/run.sh with an installed 504px artifact directory.
+Run inside docker/rocm101/run.sh with an installed 504px artifact directory.
 Frames are submitted one at a time and consumed synchronously: there is no
 arrival pacing, capture thread, N+1 preprocessing, rendering, or intentional
 dropping. Hybrid detection requests use explicit frame indices, not a timer.
@@ -136,10 +136,11 @@ def artifact_identity(checkpoint: Path, onnx_dir: Path, video: Path) -> dict:
     return result
 
 
-def validate_runtime(version: str, providers) -> None:
-    _require(version == "1.24.2", f"ORT 1.24.2 is required, got {version}")
-    _require("MIGraphXExecutionProvider" in providers,
-             f"MIGraphXExecutionProvider is required, got {list(providers)}")
+def validate_runtime(stack: dict) -> None:
+    from tracker.ort_plugin_ep import stack_errors
+
+    errors = stack_errors(stack)
+    _require(not errors, "unsupported MIGraphX/ONNX Runtime stack: " + "; ".join(errors))
 
 
 def create_live(args, mode: str, full_class, hybrid_class):
@@ -155,15 +156,17 @@ def create_live(args, mode: str, full_class, hybrid_class):
 
 
 def _load_runtime(args):
-    import onnxruntime as ort
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from tracker.ort_plugin_ep import describe_ort_migraphx_stack
 
-    providers = ort.get_available_providers()
-    validate_runtime(ort.__version__, providers)
+    stack = describe_ort_migraphx_stack()
+    validate_runtime(stack)
     import torch
     import migraphx
 
     _require(torch.cuda.is_available() and torch.version.hip is not None,
-             "A ROCm GPU is required; run through docker/rocm714/run.sh")
+             "A ROCm GPU is required; run through docker/rocm101/run.sh")
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
     from tracker.live_inference import SAM3Live
@@ -174,7 +177,7 @@ def _load_runtime(args):
     return SimpleNamespace(
         environment={
             "python": platform.python_version(), "platform": platform.platform(),
-            "onnxruntime": ort.__version__, "providers": providers,
+            "stack": stack,
             "torch": torch.__version__, "hip": torch.version.hip,
             "migraphx_version": getattr(migraphx, "__version__", None),
             "migraphx_module": migraphx.__file__,

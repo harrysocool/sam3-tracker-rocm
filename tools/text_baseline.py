@@ -15,14 +15,14 @@ Usage:
   The examples below show the explicit equivalent.
 
   # Single image, using the supported container and configured artifact mount
-  ./docker/rocm714/run.sh python tools/text_baseline.py \\
+  ./docker/rocm101/run.sh python tools/text_baseline.py \\
       --checkpoint /models/sam3 \\
       --onnx-dir /models/onnx_files_504 \\
       --image assets/truck.jpg \\
       --text "truck"
 
   # Video with MIGraphX and backbone prefetch enabled by default
-  ./docker/rocm714/run.sh python tools/text_baseline.py \\
+  ./docker/rocm101/run.sh python tools/text_baseline.py \\
       --checkpoint /models/sam3 \\
       --onnx-dir /models/onnx_files_504 \\
       --video assets/blackswan.mp4 \\
@@ -267,7 +267,7 @@ def main():
     dtype = torch.float16 if args.dtype == "fp16" else torch.float32
     if args.mig:
         if device.type != "cuda" or torch.version.hip is None:
-            sys.exit("MIG inference requires a ROCm GPU; use docker/rocm714/run.sh "
+            sys.exit("MIG inference requires a ROCm GPU; use docker/rocm101/run.sh "
                      "or select --no-mig for the PyTorch reference")
         if not args.onnx_dir.is_dir():
             sys.exit(f"MIG artifact directory not found: {args.onnx_dir}. "

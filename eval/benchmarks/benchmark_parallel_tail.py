@@ -32,6 +32,7 @@ from tracker.mig_detr_encoder import patch_sam3_video_model_detr_encoder  # noqa
 from tracker.mig_memory_attention import patch_sam3_video_model_memory_attention  # noqa: E402
 from tracker.mig_vision_encoder import patch_sam3_video_model_with_mig  # noqa: E402
 from tracker.migraphx_runtime import MIGraphXBackbone  # noqa: E402
+from tracker.ort_plugin_ep import describe_ort_migraphx_stack  # noqa: E402
 from tracker.batched_mask_decoder import patch_batched_mask_decoder  # noqa: E402
 from tracker.backbone_pipeline import BackbonePrefetchPipeline  # noqa: E402
 from tracker.parallel_video import (  # noqa: E402
@@ -427,7 +428,7 @@ def main() -> int:
             "hip": torch.version.hip,
             "transformers": transformers.__version__,
             "onnxruntime": ort.__version__,
-            "providers": ort.get_available_providers(),
+            "stack": describe_ort_migraphx_stack(),
             "device": torch.cuda.get_device_name(),
         },
         "git_status": subprocess.check_output(
