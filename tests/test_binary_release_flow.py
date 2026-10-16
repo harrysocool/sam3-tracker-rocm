@@ -22,7 +22,7 @@ def run(path, *args):
 def test_help_entrypoints_do_not_start_work():
     for path, args in (
         (ROOT / "setup.sh", ()),
-        (ROOT / "docker/rocm714/build.sh", ("--help",)),
+        (ROOT / "docker/rocm101/build.sh", ("--help",)),
         (ROOT / "tools/docker_test_runner.sh", ("--help",)),
         (ROOT / "tools/release_gate.sh", ("--help",)),
     ):
@@ -64,47 +64,42 @@ def test_setup_model_build_selects_build_root_without_reusing_inference_path(tmp
 
 
 def test_runtime_assembly_contains_no_source_build_commands():
-    script = (ROOT / "docker/rocm714/build.sh").read_text()
-    dockerfile = (ROOT / "docker/rocm714/Dockerfile").read_text()
+    script = (ROOT / "docker/rocm101/build.sh").read_text()
+    dockerfile = (ROOT / "docker/rocm101/Dockerfile").read_text()
     combined = script + dockerfile
     for forbidden in (
         "git clone", "cmake", "ninja", "tools/ci_build", "rbuild",
-        "MIGRAPHX_REPO", "ORT_REPO",
+        "MIGRAPHX_REPO", "ORT_REPO", "harrysocool", "fc1sink", "migraphx-develop",
     ):
         assert forbidden not in combined
     assert "--only-binary=:all:" in dockerfile
-    assert "COPY --from=migraphx" in dockerfile
-    assert "COPY --from=ort" in dockerfile
+    assert "COPY --from=wheels" in dockerfile
     runner = (ROOT / "tools/docker_test_runner.sh").read_text()
     assert 'build.sh" --no-cache' in runner
     assert "Reusing existing runtime image (--reuse-runtime)" in runner
     assert 'docker image inspect "${IMAGE}"' in runner
-    assert 'torch.__version__ == "2.11.0+rocm7.13.0"' in runner
-    assert 'str(migraphx.__version__) == "2.17.0.dev+2e9924db6"' in runner
+    assert 'torch.__version__ == "2.14.0+rocm10.1.0"' in runner
+    assert "stack_errors" in runner
 
 
-def test_runtime_binary_locations_and_hashes_are_pinned():
-    script = (ROOT / "docker/rocm714/build.sh").read_text()
-    assert (
-        "https://github.com/harrysocool/AMDMIGraphX/releases/download/"
-        "v2.17.0%2Bsam3-fc1sink.20260908.1/${MGX_NAME}"
-    ) in script
-    mgx_sha = re.search(r"^MGX_SHA256=([0-9a-f]+)$", script, re.MULTILINE)
-    assert mgx_sha is not None
-    assert len(mgx_sha.group(1)) == 64
-    assert mgx_sha.group(1) == (
-        "ed1458c632eb2f0e2cab3c457aee93e39196cbb77d2180e47525e0009563dac1"
-    )
-    assert "ef10e3e808e8805c26cc27f47572a53e385463f29d578e1ea2fe13d00e6f5ee0" in script
-    assert (
-        "https://github.com/harrysocool/sam3-tracker-rocm/releases/download/"
-        "v0.2.0-rc4/${ORT_NAME}"
-    ) in script
-
-    runtime_readme = (ROOT / "docker/rocm714/README.md").read_text()
-    assert "v2.17.0%2Bsam3-fc1sink.20260908.1" in runtime_readme
-    assert "sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc4-local" in runtime_readme
-    assert "sam3-gpu714-ort1242-mgx217-gfx1151:torch211" not in runtime_readme
+def test_runtime_wheels_come_from_official_indexes_and_are_hash_pinned():
+    script = (ROOT / "docker/rocm101/build.sh").read_text()
+    for base in (
+        "https://stable.repo.amd.com/rocm/pytorch/whl-next",
+        "https://stable.repo.amd.com/rocm/migraphx/whl-next",
+        "https://stable.repo.amd.com/rocm/onnxruntime/whl-next",
+    ):
+        assert base in script
+    rows = re.findall(r'^"([0-9a-f]{64}) \S+ (\S+\.whl)"$', script, re.MULTILINE)
+    names = [name for _, name in rows]
+    for required in (
+        "torch-2.14.0+rocm10.1.0", "amd_torch_device_gfx1151", "amd_torch_device_gfx115x",
+        "migraphx-2.18.0+rocm10.1.0", "migraphx_libs-2.18.0+rocm10.1.0",
+        "onnxruntime_ep_migraphx-1.0.0+rocm10.1.0", "onnxruntime-1.29.0",
+    ):
+        assert any(name.startswith(required) for name in names), required
+    runtime_readme = (ROOT / "docker/rocm101/README.md").read_text()
+    assert "sam3-gpu101-ort129-mgx218-gfx1151:0.4.0-rc1-local" in runtime_readme
 
 
 def test_repository_license_scope_is_explicit():
@@ -120,19 +115,18 @@ def test_repository_license_scope_is_explicit():
 
 
 def test_source_release_and_runtime_dependency_versions_are_consistent():
-    source_version = "0.3.0-rc1"
-    runtime_version = "0.2.0-rc4"
+    source_version = "0.4.0-rc1"
+    runtime_version = "0.4.0-rc1"
     assert (ROOT / "VERSION").read_text().strip() == source_version
     release_notes = ROOT / "docs/releases" / f"{source_version}.md"
     assert release_notes.is_file()
     assert f"SAM3 ROCm {source_version}" in release_notes.read_text()
 
-    # Source releases continue to reuse the checksum-pinned runtime bundle
-    # published for rc4. Keep source metadata independent from that dependency.
+    # The runtime image tag carries the source release version.
     for path in (
-        ROOT / "docker/rocm714/build.sh",
-        ROOT / "docker/rocm714/run.sh",
-        ROOT / "docker/rocm714/README.md",
+        ROOT / "docker/rocm101/build.sh",
+        ROOT / "docker/rocm101/run.sh",
+        ROOT / "docker/rocm101/README.md",
         ROOT / "tools/docker_test_runner.sh",
     ):
         assert runtime_version in path.read_text()
@@ -140,7 +134,7 @@ def test_source_release_and_runtime_dependency_versions_are_consistent():
 
 def test_model_build_enables_current_optimizations():
     source = (ROOT / "export/build_text_prompt_mig.py").read_text()
-    assert 'sink_env["ROCMLIR_SINK_FINAL_ERF"] = "1"' in source
+    assert "ROCMLIR_SINK_FINAL_ERF" not in source
     assert "export_fixed_detr_decoder.py" in source
     assert "compile_fixed_detr_decoder.py" in source
     assert "compile_memory_attention.py" in source
@@ -240,8 +234,8 @@ def test_legacy_host_installers_are_removed():
 
 def test_shell_syntax():
     for path in (
-        ROOT / "setup.sh", ROOT / "docker/rocm714/build.sh",
-        ROOT / "docker/rocm714/run.sh", ROOT / "tools/docker_test_runner.sh",
+        ROOT / "setup.sh", ROOT / "docker/rocm101/build.sh",
+        ROOT / "docker/rocm101/run.sh", ROOT / "tools/docker_test_runner.sh",
         ROOT / "tools/release_gate.sh",
     ):
         assert subprocess.run([BASH, "-n", str(path)], check=False).returncode == 0

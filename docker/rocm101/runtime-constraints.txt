@@ -1,5 +1,5 @@
-# Pure-Python / numerical dependencies observed in the validated 2.17 runtime.
-# Torch/torchvision/Triton and ORT come from their separately pinned gfx1151
+# Pure-Python / numerical dependencies for the ROCm 10.1 runtime.
+# Torch/torchvision/Triton, MIGraphX and ORT come from their separately pinned
 # wheels; do not let pip substitute PyPI Torch or Python-packaged ROCm libraries.
 # This file intentionally does not add optional post-processing dependencies.
 transformers==5.8.1
@@ -42,3 +42,4 @@ markdown-it-py==4.2.0
 mdurl==0.1.2
 shellingham==1.5.4
 annotated-doc==0.0.5
+onnxruntime==1.29.0

@@ -11,9 +11,9 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNNER = ROOT / "docker/rocm714/run.sh"
+RUNNER = ROOT / "docker/rocm101/run.sh"
 BASH = shutil.which("bash")
-DEFAULT_IMAGE = "sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc4-local"
+DEFAULT_IMAGE = "sam3-gpu101-ort129-mgx218-gfx1151:0.4.0-rc1-local"
 
 
 def _require_release_container(image: str) -> None:

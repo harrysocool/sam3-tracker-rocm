@@ -1,15 +1,15 @@
-"""Resolve a gfx1151 PyTorch wheel against the system ROCm installation.
+"""Resolve the Torch wheel against the system ROCm installation.
 
-AMD's gfx1151 PyTorch wheel is currently built against ROCm 7.13 and normally
-preloads ROCm libraries from Python wheels. The container supplies compatible
-ROCm 7.14 libraries under /opt/rocm. Skipping that preload avoids importing
-gfx942-only libraries from the builder image.
+AMD's ROCm 10.1 PyTorch wheel normally preloads ROCm libraries from Python
+wheels. The container supplies the same-version ROCm 10.1 libraries under
+/opt/rocm. Skipping that preload avoids importing a second, wheel-supplied ROCm
+stack.
 """
 
 from pathlib import Path
 import glob
 
-__version__ = "7.14.0"
+__version__ = "10.1.0"
 
 
 def initialize_process(**_kwargs):

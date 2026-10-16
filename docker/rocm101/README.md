@@ -1,6 +1,6 @@
 # Docker runtime setup and troubleshooting
 
-This guide covers the ROCm 7.14 / MIGraphX 2.17 container, its directory mounts,
+This guide covers the ROCm 10.1 / MIGraphX 2.18 / ONNX Runtime 1.29 container, its directory mounts,
 and common setup issues. For a first installation, follow the root
 [Quick start](../../README.md#quick-start) through local weight configuration,
 runtime assembly, model building, and the installation smoke.
@@ -39,16 +39,17 @@ for the model directory layout. The setup scripts do not download weights.
 ./setup.sh --runtime
 ```
 
-This invokes `docker/rocm714/build.sh`. It verifies the downloaded MIGraphX and
-ONNX Runtime binaries, installs the pinned ROCm and Torch packages, and builds
+This invokes `docker/rocm101/build.sh`. It verifies the downloaded AMD MIGraphX,
+ONNX Runtime plugin EP, and Torch wheels, installs the pinned ROCm and Torch packages, and builds
 a local Docker image. Host ROCm and Conda environments are not used by this
 container workflow.
 
-The default build finishes by checking GPU availability, MIGraphX 2.17,
-ONNX Runtime 1.24.2, and `MIGraphXExecutionProvider`. On success it prints:
+The default build finishes by running `smoke_test.py`: GPU availability, the supported
+MIGraphX / ONNX Runtime / plugin-EP versions, SDPA, and an ONNX Runtime
+session that must be fully assigned to the MIGraphX plugin EP. On success it prints:
 
 ```text
-Binary runtime ready: sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc4-local
+Binary runtime ready: sam3-gpu101-ort129-mgx218-gfx1151:0.4.0-rc1-local
 ```
 
 This confirms runtime assembly. The image does not contain the model weights
@@ -132,7 +133,7 @@ launching the wrapper:
 
 ```bash
 SAM3_ONNX_DIR="/absolute/path/to/experiment-artifacts" \
-./docker/rocm714/run.sh python eval/benchmarks/bench_pipeline.py \
+./docker/rocm101/run.sh python eval/benchmarks/bench_pipeline.py \
   --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 --imgsz 504
 ```
 
@@ -169,7 +170,7 @@ Installation smoke PASS: results/perf/installation-smoke.json
 Then run the bundled video demo:
 
 ```bash
-./docker/rocm714/run.sh python demo_live.py \
+./docker/rocm101/run.sh python demo_live.py \
   --checkpoint /models/sam3 \
   --video assets/blackswan.mp4 --text swan --max-frames 50
 ```
@@ -178,7 +179,7 @@ Output is saved under `results/` in the host checkout. To open an interactive
 shell with the same mounts and runtime:
 
 ```bash
-./docker/rocm714/run.sh
+./docker/rocm101/run.sh
 ```
 
 See [usage](../../docs/usage.md) for other prompts, optional hybrid detection,
@@ -199,15 +200,15 @@ and offline inference commands. Camera and ROS applications should follow the
 | `SHA256 mismatch` | Inspect the file named in the error. For the managed download cache, retry with a new `SAM3_BINARY_CACHE`; local override files must match the pinned release checksums. |
 
 During runtime assembly, pip can report that Torch requires
-`rocm[libraries]==7.13.0`. This specific resolver warning is expected: the
-gfx1151 wheel declares a Python ROCm dependency, while the image supplies
-system ROCm 7.14 libraries. The compatibility module described below selects
+`rocm[libraries]~=10.1.0` and `rocm-bootstrap`. These specific resolver
+warnings are expected: the Torch wheels declare Python ROCm dependencies,
+while the image supplies system ROCm 10.1 libraries. The compatibility module described below selects
 those libraries. The default build's GPU/provider check must still pass.
 
 MIGraphX MXR files and ORT caches depend on the compiler/runtime version.
 After changing runtime versions, rebuild into a new artifact directory.
-Host MIGraphX 2.16 is not supported for this deployment path and cannot load
-the current fixed-decoder artifact. The installation smoke reports missing
+Artifacts built with the previous ROCm 7.14 / MIGraphX 2.17 runtime cannot be
+loaded and must be rebuilt. The installation smoke reports missing
 optimized artifacts; check the model-build result and selected artifact path.
 
 ## Advanced configuration
@@ -215,20 +216,12 @@ optimized artifacts; check the model-build result and selected artifact path.
 ### Download cache and local runtime binaries
 
 The default binary cache is
-`~/.cache/sam3-runtime-binaries/0.2.0-rc4/`. Set `SAM3_BINARY_CACHE` to use a
+`~/.cache/sam3-runtime-binaries/0.4.0-rc1/`. Set `SAM3_BINARY_CACHE` to use a
 different directory. `--no-cache` rebuilds Docker layers; it does not clear
 this download cache or Docker's pip cache mount.
 
-To supply already downloaded runtime binaries, use their local paths:
-
-```bash
-MIGRAPHX_ARCHIVE=/path/to/migraphx.tar.gz \
-ORT_WHEEL_PATH=/path/to/onnxruntime_migraphx.whl \
-./setup.sh --runtime
-```
-
-These overrides retain checksum verification. The default URLs and SHA256
-values are pinned in [build.sh](build.sh).
+Every wheel is verified against the SHA256 pinned in [build.sh](build.sh) before
+the Docker build starts, including files already present in the cache.
 
 ### Custom image name
 
@@ -252,7 +245,7 @@ writable output mount:
 mkdir -p "$PWD/results/strict-validation"
 SAM3_DOCKER_STRICT=1 \
 SAM3_OUTPUT_DIR="$PWD/results/strict-validation" \
-./docker/rocm714/run.sh python tools/smoke_live_release.py \
+./docker/rocm101/run.sh python tools/smoke_live_release.py \
   --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
   --video assets/blackswan.mp4 --text swan --frames 12 --mode both \
   --output /output/installation-smoke.json
@@ -274,26 +267,28 @@ lower-level export and evaluation tools still accept explicit `--imgsz 504`.
 | Component | Pinned version |
 |---|---|
 | Container base | Ubuntu 24.04 |
-| ROCm packages | 7.14, Debian package release `7.14.1-0`, gfx1151 |
-| MIGraphX | 2.17, release commit `2e9924db6e6c0c9ff5dcbd61f59b97132598731a` |
-| ONNX Runtime | 1.24.2, commit `058787ceead760166e3c50a0a4cba8a833a6f53f` |
-| PyTorch | `2.11.0+rocm7.13.0`, gfx1151 wheel |
-| torchvision | `0.26.0+rocm7.13.0` |
-| Triton | `3.6.0+rocm7.13.0` |
+| ROCm packages | 10.1, Debian package release `10.1.0-3`, gfx1151 |
+| MIGraphX | `2.18.0+rocm10.1.0` (official `migraphx` + `migraphx-libs` wheels) |
+| ONNX Runtime | `1.29.0`, with the official `onnxruntime-ep-migraphx` `1.0.0+rocm10.1.0` plugin EP |
+| PyTorch | `2.14.0+rocm10.1.0`, with `amd-torch-device-gfx1151` and `amd-torch-device-gfx115x` |
+| torchvision | `0.29.0a0+rocm10.1.0` |
+| Triton | `3.8.0+git669b31ac.rocm10.1.0` |
 
-The SAM3-specific MIGraphX archive is published in the
-[`harrysocool/AMDMIGraphX` release](https://github.com/harrysocool/AMDMIGraphX/releases/tag/v2.17.0%2Bsam3-fc1sink.20260908.1).
-It is based on upstream MIGraphX
-`9f1a138e77f4738d82a065d225836b3b337950ce` and rocMLIR FC1-sink commit
-`f3404d59b581fdf9d8cd7c1be9aeeb267851af93` (tag
-`sam3-fc1-sink-rocm714-v2`). Its SHA256 is
-`ed1458c632eb2f0e2cab3c457aee93e39196cbb77d2180e47525e0009563dac1`.
+MIGraphX, the plugin EP, and Torch come from AMD's package indexes
+(`stable.repo.amd.com/rocm/{migraphx,onnxruntime,pytorch}/whl-next`); ONNX
+Runtime comes from PyPI. Nothing is compiled during the image build.
 
-The validated gfx1151 Torch wheel was built against ROCm 7.13. The included
-`rocm_sdk_system.py` compatibility module prevents it from preloading
-Python-packaged ROCm 7.13 libraries; dynamic libraries resolve from the
-container's system ROCm 7.14 installation instead. This combination is covered
-by the runtime check and model regression records.
+The plugin EP is registered from a library and attached with
+`SessionOptions.add_provider_for_devices`; `tracker/ort_plugin_ep.py` is the
+single session factory and raises if any graph node is not assigned to
+MIGraphX. `amd-torch-device-gfx115x` is required in addition to the gfx1151
+wheel: without it the default SDPA fails with `hipErrorInvalidImage`.
+
+The Torch wheels declare Python-packaged ROCm dependencies. The included
+`rocm_sdk_system.py` compatibility module prevents them from preloading a
+second ROCm stack; dynamic libraries resolve from the container's system
+ROCm 10.1 installation instead. This combination is covered by the runtime
+check and model regression records.
 
 For a complete rebuild from downloaded runtime binaries through local model
 compilation, use the [release validation runner](../../docs/evaluation.md#clean-environment-release-validation).
