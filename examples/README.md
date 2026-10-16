@@ -12,7 +12,7 @@ repository does not provide a ROS package or launch file.
 
 Complete the [Quick start](../README.md#quick-start) first. The standalone
 commands below use the supported container with `SAM3_MODEL_DIR` and
-`SAM3_ONNX_DIR` exported to the model and MIGraphX 2.17 artifact directories.
+`SAM3_ONNX_DIR` exported to the model and MIGraphX 2.18 artifact directories.
 
 ## Standalone video check
 
@@ -20,7 +20,7 @@ Run this from the repository root. The bundled `blackswan.mp4` contains
 50 frames at 24 FPS; the example paces arrivals at that rate:
 
 ```bash
-./docker/rocm714/run.sh python examples/ros_node_skeleton.py \
+./docker/rocm101/run.sh python examples/ros_node_skeleton.py \
   --checkpoint /models/sam3 \
   --onnx-dir /models/onnx_files_504 \
   --video assets/blackswan.mp4 \
@@ -87,7 +87,7 @@ In `SAM3Node.stats()`, `completed_frames`, `completed_service_ms`, and
 ### Exercise prompt changes
 
 ```bash
-./docker/rocm714/run.sh python examples/ros_node_skeleton.py \
+./docker/rocm101/run.sh python examples/ros_node_skeleton.py \
   --checkpoint /models/sam3 \
   --onnx-dir /models/onnx_files_504 \
   --video assets/blackswan.mp4 \

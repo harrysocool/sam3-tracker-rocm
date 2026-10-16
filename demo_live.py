@@ -15,11 +15,11 @@ Pass it only when deliberately overriding with a container-visible directory.
 The examples below show the explicit equivalent.
 
 Single prompt, MIG accelerated:
-    ./docker/rocm714/run.sh python demo_live.py --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \\
+    ./docker/rocm101/run.sh python demo_live.py --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \\
         --video assets/blackswan.mp4 --text swan --imgsz 504 --mig
 
 Multi-class (key new feature):
-    ./docker/rocm714/run.sh python demo_live.py --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \\
+    ./docker/rocm101/run.sh python demo_live.py --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \\
         --video assets/parkour.mp4 --text person trees buildings \\
         --imgsz 504 --mig
 

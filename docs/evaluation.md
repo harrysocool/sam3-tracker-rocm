@@ -1,6 +1,6 @@
 # Evaluation and regression guide
 
-GPU commands use the [supported ROCm 7.14 / MIGraphX 2.17 container](../docker/rocm714/README.md).
+GPU commands use the [supported ROCm 7.14 / MIGraphX 2.17 container](../docker/rocm101/README.md).
 Complete [Quick start](../README.md#quick-start), keep `SAM3_MODEL_DIR` and
 `SAM3_ONNX_DIR` exported, and run commands from the checkout root in Bash.
 Keep outputs under ignored `results/perf/` or an external artifact directory.
@@ -37,7 +37,7 @@ a different file and needs its own compatibility and correctness validation.
 Before any GPU measurement:
 
 ```bash
-./docker/rocm714/run.sh python -c \
+./docker/rocm101/run.sh python -c \
   "import onnxruntime as o; print(o.__version__, o.get_available_providers())"
 ```
 
@@ -47,7 +47,7 @@ is the NPU environment and must not be used for GPU measurements.
 Run the headless installation smoke on the locally built artifacts:
 
 ```bash
-./docker/rocm714/run.sh python tools/smoke_live_release.py \
+./docker/rocm101/run.sh python tools/smoke_live_release.py \
   --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
   --video assets/blackswan.mp4 --text swan --frames 12 --mode both \
   --output results/perf/installation-smoke.json
@@ -71,7 +71,7 @@ python3 -m pytest -q tests/test_binary_release_flow.py
 ## PT-vs-MIG mask regression
 
 ```bash
-./docker/rocm714/run.sh python eval/datasets/mask_diff_pt_vs_mig.py \
+./docker/rocm101/run.sh python eval/datasets/mask_diff_pt_vs_mig.py \
   --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
   --video assets/blackswan.mp4 --text swan --imgsz 504 --max-frames 30 \
   --parallel-tail \
@@ -109,7 +109,7 @@ Run three 250-arrival repetitions:
 ```bash
 mkdir -p results/perf/canonical
 for run in 1 2 3; do
-  ./docker/rocm714/run.sh \
+  ./docker/rocm101/run.sh \
     python eval/benchmarks/benchmark_latest_frame_canonical.py \
       --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
       --profile canonical-250 \
@@ -120,7 +120,7 @@ done
 Run the 1000-arrival soak:
 
 ```bash
-./docker/rocm714/run.sh \
+./docker/rocm101/run.sh \
   python eval/benchmarks/benchmark_latest_frame_canonical.py \
     --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
     --profile soak-1000 \
@@ -148,7 +148,7 @@ power policy as `not_fully_reported` rather than inventing a value.
 ## Offline serial-versus-parallel A/B
 
 ```bash
-./docker/rocm714/run.sh python eval/benchmarks/benchmark_parallel_tail.py \
+./docker/rocm101/run.sh python eval/benchmarks/benchmark_parallel_tail.py \
   --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
   --video assets/blackswan.mp4 --text swan --imgsz 504 \
   --max-frames 50 --repeats 2 \
@@ -169,7 +169,7 @@ bundled file as a paced source and reporting the integration statistics:
 ```bash
 mkdir -p results/perf
 set -o pipefail
-./docker/rocm714/run.sh python examples/ros_node_skeleton.py \
+./docker/rocm101/run.sh python examples/ros_node_skeleton.py \
   --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
   --video assets/blackswan.mp4 --text swan \
   --policy always_full --max-frames 50 \
@@ -206,7 +206,7 @@ The profiler uses the 504px artifact directory selected by `SAM3_ONNX_DIR`.
 Normally omit `--onnx-dir`; the example shows the explicit container path.
 
 ```bash
-./docker/rocm714/run.sh python eval/benchmarks/profile_full_mig.py \
+./docker/rocm101/run.sh python eval/benchmarks/profile_full_mig.py \
   --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
   --video assets/blackswan.mp4 --text swan --imgsz 504 --max-frames 30 \
   --out results/perf/profile_504_mig.json

@@ -2,8 +2,8 @@
 
 Start with the [Quick start](../README.md#quick-start). Run commands below from
 the repository root, with `SAM3_MODEL_DIR` and `SAM3_ONNX_DIR` exported to the
-model directory and locally built MIGraphX 2.17 artifact directory.
-All current GPU examples use [the supported container](../docker/rocm714/README.md).
+model directory and locally built MIGraphX 2.18 artifact directory.
+All current GPU examples use [the supported container](../docker/rocm101/README.md).
 
 ## Live video
 
@@ -13,12 +13,12 @@ should use the [integration skeleton](../examples/README.md), not the file demo.
 
 ```bash
 # Default: full detection on every consumed frame
-./docker/rocm714/run.sh python demo_live.py \
+./docker/rocm101/run.sh python demo_live.py \
   --checkpoint /models/sam3 \
   --video assets/blackswan.mp4 --text swan --max-frames 50
 
 # Multiple prompts, same defaults
-./docker/rocm714/run.sh python demo_live.py \
+./docker/rocm101/run.sh python demo_live.py \
   --checkpoint /models/sam3 \
   --video assets/blackswan.mp4 --text swan water --max-frames 50
 ```
@@ -36,7 +36,7 @@ ignored `results/inputs/` directory and use its container path:
 mkdir -p results/inputs
 cp /absolute/path/to/my-video.mp4 results/inputs/my-video.mp4
 
-./docker/rocm714/run.sh python demo_live.py \
+./docker/rocm101/run.sh python demo_live.py \
   --checkpoint /models/sam3 \
   --video /workspace/results/inputs/my-video.mp4 \
   --text person \
@@ -49,7 +49,7 @@ Replace the input path and prompt with your own. The output is saved as
 An arbitrary host path such as `/home/user/videos/my-video.mp4` is not visible
 inside the container unless it lies in one of the configured mounts. A video
 symlink pointing outside those mounts is insufficient. See the
-[mount reference](../docker/rocm714/README.md#directories-and-mounts) for the
+[mount reference](../docker/rocm101/README.md#directories-and-mounts) for the
 host-to-container mapping.
 
 ### Scheduling and ownership
@@ -71,7 +71,7 @@ wall-clock recording or proof of the model's throughput.
 ### Optional hybrid detection
 
 ```bash
-./docker/rocm714/run.sh python demo_live.py \
+./docker/rocm101/run.sh python demo_live.py \
   --checkpoint /models/sam3 \
   --video assets/blackswan.mp4 --text swan --max-frames 50 \
   --redetect-interval-ms 1000
@@ -120,7 +120,7 @@ deployment stacks. Never load MIGraphX 2.17 MXR files with host 2.16 libraries.
 For all advanced flags:
 
 ```bash
-./docker/rocm714/run.sh python demo_live.py --help
+./docker/rocm101/run.sh python demo_live.py --help
 ```
 
 Do not change prompts or reset tracking on an active inference owner. Close
@@ -148,23 +148,23 @@ as they arrive and defaults to no source-frame limit.
 
 ```bash
 # Accelerated offline video, using the defaults
-./docker/rocm714/run.sh python tools/text_baseline.py \
+./docker/rocm101/run.sh python tools/text_baseline.py \
   --checkpoint /models/sam3 \
   --video assets/blackswan.mp4 --text swan --max-frames 50
 
 # Multiple prompts, at most two tracked objects per prompt
-./docker/rocm714/run.sh python tools/text_baseline.py \
+./docker/rocm101/run.sh python tools/text_baseline.py \
   --checkpoint /models/sam3 \
   --video assets/blackswan.mp4 --text swan water \
   --max-objects 2 --max-frames 50
 
 # Accelerated single image, using the defaults
-./docker/rocm714/run.sh python tools/text_baseline.py \
+./docker/rocm101/run.sh python tools/text_baseline.py \
   --checkpoint /models/sam3 \
   --image assets/truck.jpg --text truck
 
 # Explicit PyTorch video reference at the same resolution
-./docker/rocm714/run.sh python tools/text_baseline.py \
+./docker/rocm101/run.sh python tools/text_baseline.py \
   --checkpoint /models/sam3 \
   --video assets/blackswan.mp4 --text swan --no-mig --max-frames 50
 ```
@@ -262,7 +262,7 @@ recordings of the current live throughput or frame-age measurements.
 
 | Area | Entry points |
 |---|---|
-| Runtime / model build | [setup.sh](../setup.sh), [container wrapper](../docker/rocm714/run.sh), [text exporter](../export/build_text_prompt_mig.py) |
+| Runtime / model build | [setup.sh](../setup.sh), [container wrapper](../docker/rocm101/run.sh), [text exporter](../export/build_text_prompt_mig.py) |
 | Streaming / hybrid API | [live_inference.py](../tracker/live_inference.py), [hybrid_inference.py](../tracker/hybrid_inference.py) |
 | Latest-frame scheduling | [latest_frame.py](../tracker/latest_frame.py) |
 | Same-frame overlap / offline lookahead | [parallel_video.py](../tracker/parallel_video.py), [backbone_pipeline.py](../tracker/backbone_pipeline.py) |

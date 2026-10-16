@@ -19,7 +19,7 @@ Normally omit --onnx-dir to use SAM3_ONNX_DIR selected by run.sh.
 Pass it only when deliberately overriding with a container-visible directory.
 The example below shows the explicit equivalent.
 
-    ./docker/rocm714/run.sh python examples/ros_node_skeleton.py \
+    ./docker/rocm101/run.sh python examples/ros_node_skeleton.py \
         --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
         --video assets/blackswan.mp4 --text swan water
 """
