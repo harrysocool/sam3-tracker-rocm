@@ -24,6 +24,7 @@ import onnxruntime as ort
 from transformers.models.sam3.modeling_sam3 import Sam3DETREncoderOutput
 
 from .ort_gpu_io import GpuIoExecutionError, run_float32_gpu
+from .ort_plugin_ep import create_mig_session
 
 
 def precompute_cross_attn_mask(text_mask: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
@@ -54,17 +55,10 @@ class MIGDetrEncoder(nn.Module):
             Path(onnx_path).parent / "ort_cache"
         )
         cache_dir.mkdir(parents=True, exist_ok=True)
-        providers = [
-            ("MIGraphXExecutionProvider", {
-                "migraphx_fp16_enable": "1",
-                "migraphx_model_cache_dir": str(cache_dir),
-            }),
-            "CPUExecutionProvider",
-        ]
         print(f"  detr_encoder (ORT MIG EP, fp16): opening {Path(onnx_path).name} with cache ...")
         import time
         t0 = time.perf_counter()
-        self.session = ort.InferenceSession(str(onnx_path), sess_options=opts, providers=providers)
+        self.session = create_mig_session(onnx_path, opts, cache_dir)
         elapsed = time.perf_counter() - t0
         prov = self.session.get_providers()[0]
         output = self.session.get_outputs()[0]

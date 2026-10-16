@@ -10,7 +10,7 @@ import threading
 from contextlib import contextmanager
 from collections.abc import Mapping, Sequence
 
-import numpy as np
+import onnxruntime as ort
 import torch
 
 
@@ -46,7 +46,6 @@ def run_float32_gpu(
     if first.device.type != "cuda":
         raise ValueError(f"GPU I/O binding requires CUDA/HIP tensors, got {first.device}")
     device = first.device
-    device_id = device.index if device.index is not None else torch.cuda.current_device()
 
     # The exported ONNX boundaries are FP32 even when MIGraphX quantizes the
     # graph internally. Keep these tensors alive until run_with_iobinding
@@ -58,23 +57,17 @@ def run_float32_gpu(
     output = torch.empty(tuple(output_shape), device=device, dtype=torch.float32)
 
     binding = session.io_binding()
+    # Plugin EP memory has the AMD vendor id; bind_input("cuda") is rejected, so
+    # Torch tensors are bound as DLPack OrtValues. Keep them alive until the run
+    # is synchronized.
+    ort_values = []
     for name, tensor in bound_inputs.items():
-        binding.bind_input(
-            name,
-            "cuda",
-            device_id,
-            np.float32,
-            tuple(tensor.shape),
-            tensor.data_ptr(),
-        )
-    binding.bind_output(
-        output_name,
-        "cuda",
-        device_id,
-        np.float32,
-        tuple(output.shape),
-        output.data_ptr(),
-    )
+        value = ort.OrtValue.from_dlpack(tensor)
+        ort_values.append(value)
+        binding.bind_ortvalue_input(name, value)
+    out_value = ort.OrtValue.from_dlpack(output)
+    ort_values.append(out_value)
+    binding.bind_ortvalue_output(output_name, out_value)
     try:
         if getattr(_thread_state, "fence_inputs", False):
             # The casts above are Torch kernels queued on the branch stream.
