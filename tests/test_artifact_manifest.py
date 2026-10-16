@@ -73,9 +73,9 @@ def test_manifest_records_complete_identity(monkeypatch, tmp_path):
         artifact_manifest,
         "runtime_metadata",
         lambda: {
-            "torch": "test", "torch_hip": "test", "onnxruntime": "1.24.2",
-            "migraphx": "2.17", "migraphx_module": "/test/migraphx.so",
-            "providers": ["MIGraphXExecutionProvider", "CPUExecutionProvider"],
+            "torch": "test", "torch_hip": "test", "onnxruntime": "1.29.0",
+            "migraphx": "2.18.0+rocm10.1.0", "migraphx_module": "/test/migraphx.so",
+            "ep": "plugin", "ep_package": "1.0.0+rocm10.1.0",
             "gpu_name": "test-gpu", "gpu_arch": "gfx1151",
             "gpu_arch_detail": "gfx1151:sramecc+:xnack-",
         },

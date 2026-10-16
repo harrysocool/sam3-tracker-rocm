@@ -17,17 +17,17 @@ Usage:
   The examples below show explicit directory selection.
 
   # Box-prompt only (fastest, good first step)
-  ./docker/rocm714/run.sh python export/build.py --pipeline box --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504
+  ./docker/rocm101/run.sh python export/build.py --pipeline box --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504
 
   # Text-prompt MIG only
-  ./docker/rocm714/run.sh python export/build.py --pipeline text --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504
+  ./docker/rocm101/run.sh python export/build.py --pipeline text --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504
 
   # Everything at 504px
-  ./docker/rocm714/run.sh python export/build.py --pipeline all --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504
+  ./docker/rocm101/run.sh python export/build.py --pipeline all --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504
 
   # Rebuild one stage only
-  ./docker/rocm714/run.sh python export/build.py --pipeline text --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 --steps backbone
-  ./docker/rocm714/run.sh python export/build.py --pipeline box --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 --force
+  ./docker/rocm101/run.sh python export/build.py --pipeline text --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 --steps backbone
+  ./docker/rocm101/run.sh python export/build.py --pipeline box --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 --force
 
 Only 504px builds are supported. Each step skips if its output already exists.
 Safe to re-run after interruption.
@@ -201,14 +201,14 @@ def print_hints(pipeline: str, checkpoint: Path,
     if pipeline in ("box", "all"):
         print(f"""
 {B}Box-prompt demo:{NC}
-  ./docker/rocm714/run.sh python demo_box.py --checkpoint "{checkpoint}" --onnx-dir "{onnx_dir}" \\
+  ./docker/rocm101/run.sh python demo_box.py --checkpoint "{checkpoint}" --onnx-dir "{onnx_dir}" \\
       --video YOUR_VIDEO.mp4 --box x1,y1,x2,y2
 """)
 
     if pipeline in ("text", "all"):
         print(f"""\
 {B}Text-prompt demo (MIG-accelerated):{NC}
-  ./docker/rocm714/run.sh python demo_live.py --checkpoint "{checkpoint}" --onnx-dir "{onnx_dir}" \\
+  ./docker/rocm101/run.sh python demo_live.py --checkpoint "{checkpoint}" --onnx-dir "{onnx_dir}" \\
       --video YOUR_VIDEO.mp4 --text "object"
 """)
 

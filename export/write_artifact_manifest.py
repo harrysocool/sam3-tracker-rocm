@@ -10,6 +10,10 @@ import os
 from pathlib import Path
 import platform
 import shutil
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tracker.ort_plugin_ep import describe_ort_migraphx_stack, stack_errors  # noqa: E402
 
 ARTIFACT_SUBDIRS = (
     "backbone_detector",
@@ -59,10 +63,8 @@ def runtime_metadata() -> dict:
     return {
         "torch": torch.__version__,
         "torch_hip": torch.version.hip,
-        "onnxruntime": onnxruntime.__version__,
-        "migraphx": getattr(migraphx, "__version__", "unknown"),
         "migraphx_module": str(Path(migraphx.__file__).resolve()),
-        "providers": onnxruntime.get_available_providers(),
+        **describe_ort_migraphx_stack(),
         "gpu_name": getattr(properties, "name", None),
         "gpu_arch": arch_detail.split(":", 1)[0] if arch_detail else None,
         "gpu_arch_detail": arch_detail,
@@ -365,10 +367,11 @@ def build_manifest(
         max_spatial_slots=max_spatial_slots,
     )
     stack = runtime_metadata()
-    if not stack["providers"] or stack["providers"][0] != "MIGraphXExecutionProvider":
+    stack_problems = stack_errors(stack)
+    if stack_problems:
         raise RuntimeError(
-            "artifact manifest requires MIGraphXExecutionProvider as primary: "
-            f"{stack['providers']}"
+            "artifact manifest requires the supported ROCm 10.1 stack: "
+            + "; ".join(stack_problems)
         )
 
     return {

@@ -24,10 +24,10 @@ Usage:
   The single-resolution examples below show the explicit equivalent.
 
   # Build 504px artefacts (~15 min)
-  ./docker/rocm714/run.sh python export/build_text_prompt_mig.py --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504
+  ./docker/rocm101/run.sh python export/build_text_prompt_mig.py --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504
 
   # Rebuild backbone only (force)
-  ./docker/rocm714/run.sh python export/build_text_prompt_mig.py --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 --force --steps backbone
+  ./docker/rocm101/run.sh python export/build_text_prompt_mig.py --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 --force --steps backbone
 
 Only 504px builds are supported.
 """
@@ -221,8 +221,6 @@ def build_artifacts(args) -> bool:
 
     # ── Step 1: export backbone ONNX ─────────────────────────────────────
     if run_all or "backbone" in steps:
-        sink_env = full_autotune_env()
-        sink_env["ROCMLIR_SINK_FINAL_ERF"] = "1"
         out = det_dir / "single_fp32.onnx"
         if not exists(out, "backbone ONNX", args.force):
             ok = ok and run([
@@ -271,7 +269,8 @@ def build_artifacts(args) -> bool:
                 "--backbone-source", "detector",
                 "--gpu-io",
                 "--skip-verify",
-            ], f"[4/11] Compile FC1-sink GPU-I/O backbone .mxr @{imgsz}px", env=sink_env)
+            ], f"[4/11] Compile GPU-I/O backbone .mxr @{imgsz}px",
+                env=full_autotune_env())
 
     # ── Step 4: export DETR encoder ───────────────────────────────────────
     if run_all or "detr_encoder" in steps:
@@ -398,7 +397,7 @@ def main():
 
     if all_ok:
         print(f"""
-Next: run the strict/read-only installation smoke through docker/rocm714/run.sh.
+Next: run the strict/read-only installation smoke through docker/rocm101/run.sh.
 The clean-environment runner performs this automatically:
   ./tools/docker_test_runner.sh --help
 """)

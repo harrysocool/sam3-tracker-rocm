@@ -16,9 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _assert_current_guidance(message):
     for text in (
-        "ROCm 7.14 / MIGraphX 2.17",
-        "docker/rocm714/run.sh",
-        "docker/rocm714/README.md",
+        "ROCm 10.1 / MIGraphX 2.18",
+        "docker/rocm101/run.sh",
+        "docker/rocm101/README.md",
         "SAM3_ONNX_DIR",
         "--onnx-dir",
         "baseline MXR files",
@@ -30,8 +30,8 @@ def _assert_current_guidance(message):
         "2.15+patches",
     ):
         assert removed not in message
-    assert (ROOT / "docker/rocm714/run.sh").is_file()
-    assert (ROOT / "docker/rocm714/README.md").is_file()
+    assert (ROOT / "docker/rocm101/run.sh").is_file()
+    assert (ROOT / "docker/rocm101/README.md").is_file()
 
 
 def test_help_points_to_current_runtime_without_importing_migraphx(monkeypatch, capsys):

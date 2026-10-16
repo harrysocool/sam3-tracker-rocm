@@ -12,8 +12,13 @@ import shutil
 os.environ.pop("MIGRAPHX_SKIP_BENCHMARKING", None)
 os.environ.pop("MIGRAPHX_MLIR_USE_SPECIFIC_OPS", None)
 
+import sys
+
 import numpy as np
 import onnxruntime as ort
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from tracker.ort_plugin_ep import create_mig_session  # noqa: E402
 
 
 def sha256(path: Path) -> str:
@@ -42,16 +47,7 @@ def main() -> int:
 
     options = ort.SessionOptions()
     options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-    session = ort.InferenceSession(
-        str(args.onnx),
-        sess_options=options,
-        providers=[(
-            "MIGraphXExecutionProvider",
-            {"migraphx_fp16_enable": "1", "migraphx_model_cache_dir": str(cache)},
-        )],
-    )
-    if session.get_providers()[0] != "MIGraphXExecutionProvider":
-        raise RuntimeError(f"MIGraphX is not primary: {session.get_providers()}")
+    session = create_mig_session(args.onnx, options, cache)
 
     generator = np.random.default_rng(20260831)
     feed = {}

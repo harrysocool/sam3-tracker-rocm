@@ -125,6 +125,9 @@ def compile_worker(onnx_dir: Path, slot: int, ptr_tokens: int) -> None:
     import numpy as np
     import onnxruntime as ort
 
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from tracker.ort_plugin_ep import create_mig_session
+
     graph = graph_path(onnx_dir, slot, ptr_tokens)
     cache = cache_path(onnx_dir)
     if not graph.is_file():
@@ -134,26 +137,10 @@ def compile_worker(onnx_dir: Path, slot: int, ptr_tokens: int) -> None:
 
     options = ort.SessionOptions()
     options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-    providers = [
-        (
-            "MIGraphXExecutionProvider",
-            {
-                "migraphx_fp16_enable": "1",
-                "migraphx_model_cache_dir": str(cache),
-            },
-        ),
-        "CPUExecutionProvider",
-    ]
 
     started = time.perf_counter()
-    session = ort.InferenceSession(
-        str(graph), sess_options=options, providers=providers
-    )
-    selected = session.get_providers()
-    if not selected or selected[0] != "MIGraphXExecutionProvider":
-        raise RuntimeError(
-            f"S{slot} did not select MIGraphXExecutionProvider: {selected}"
-        )
+    # Raises if any node is not assigned to the MIGraphX EP.
+    session = create_mig_session(graph, options, cache)
 
     dtype_for = {
         "tensor(float)": np.float32,
