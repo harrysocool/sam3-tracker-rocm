@@ -265,7 +265,7 @@ host MIGraphX 2.16.
 
 ## Final release gate
 
-Maintainers should qualify one clean `dev` or matching `release/rcN` commit
+Maintainers should qualify one clean `dev` or matching `release/<VERSION>` commit
 with the single release-gate entry point. The gate requires a new output
 directory outside the checkout and the canonical checkpoint:
 

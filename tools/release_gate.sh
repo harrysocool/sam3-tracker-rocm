@@ -45,7 +45,7 @@ Options:
   -h, --help
 
 The gate is intentionally fixed. It requires:
-  * clean dev or release/rcN source at the versioned commit;
+  * clean dev or release/<VERSION> source at the versioned commit;
   * EC Performance mode and 120/140/120 W power-policy attestations;
   * 30 GiB free for the normal full rebuild, or 15 GiB with --reuse-runtime;
   * a clean runtime/model build and strict full+hybrid smoke;
@@ -112,7 +112,7 @@ branch="$(git -C "${ROOT}" symbolic-ref --quiet --short HEAD)" || \
 version="$(< "${ROOT}/VERSION")"
 [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+-rc[0-9]+$ ]] || \
     die "VERSION is not a release-candidate version: ${version}"
-expected_release_branch="release/rc${version##*-rc}"
+expected_release_branch="release/${version}"
 case "${branch}" in
     dev|"${expected_release_branch}") ;;
     *) die "run from dev or ${expected_release_branch}, got ${branch}" ;;
