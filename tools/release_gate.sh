@@ -35,8 +35,8 @@ Required inputs:
   --output NEW_DIR       New evidence directory outside the Git checkout
 
 Options:
-  --image TAG                Runtime image tag (default: pinned rc4-local tag)
-  --reuse-runtime           Reuse verified IMAGE; default is a no-cache rebuild
+  --image TAG                Runtime image tag (default: pinned 0.4.0-rc1-local tag)
+  --reuse-runtime            Reuse verified IMAGE; default is a no-cache rebuild
   --preflight-only           Validate inputs without creating output or running work
   -h, --help
 

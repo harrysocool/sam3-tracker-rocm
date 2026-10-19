@@ -2,8 +2,9 @@
 
 > **Historical optimization summary.** This report spans earlier native and
 > offline experiments. Its host-default and optional-container descriptions
-> are superseded: current live deployment uses only the ROCm 7.14 / MIGraphX
-> 2.17 container. See [Quick start](../../README.md#quick-start) and the
+> are superseded: the ROCm 7.14 / MIGraphX 2.17 container was the supported runtime through
+> v0.3.0-rc1; current live deployment uses only the ROCm 10.1 / MIGraphX 2.18
+> container. See [Quick start](../../README.md#quick-start) and the
 > [separated performance records](../performance.md) for current usage and context.
 
 **Hardware**: AMD Ryzen AI Max+ 395 (gfx1151), 128GB unified memory (UMA=64GB GPU pool)

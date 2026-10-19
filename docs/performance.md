@@ -82,7 +82,7 @@ prewarm by default, and does not loop the clip. It is not the original
 250-arrival headless benchmark. The original image label was
 `sam3-gpu714-ort1242-mgx217-gfx1151:torch211`; current release assembly is
 documented in the [container guide](../docker/rocm101/README.md). This is not
-a fresh measurement of each locally rebuilt rc4 model artifact.
+a fresh measurement of each locally rebuilt model artifact.
 
 ## Fixed-decoder controlled A/B
 
