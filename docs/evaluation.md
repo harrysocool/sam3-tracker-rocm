@@ -1,6 +1,6 @@
 # Evaluation and regression guide
 
-GPU commands use the [supported ROCm 7.14 / MIGraphX 2.17 container](../docker/rocm101/README.md).
+GPU commands use the [supported ROCm 10.1 / MIGraphX 2.18 container](../docker/rocm101/README.md).
 Complete [Quick start](../README.md#quick-start), keep `SAM3_MODEL_DIR` and
 `SAM3_ONNX_DIR` exported, and run commands from the checkout root in Bash.
 Keep outputs under ignored `results/perf/` or an external artifact directory.
@@ -38,11 +38,15 @@ Before any GPU measurement:
 
 ```bash
 ./docker/rocm101/run.sh python -c \
-  "import onnxruntime as o; print(o.__version__, o.get_available_providers())"
+  "from tracker.ort_plugin_ep import describe_ort_migraphx_stack, stack_errors; \
+print(describe_ort_migraphx_stack(), stack_errors())"
 ```
 
-Expect ORT **1.24.2** and `MIGraphXExecutionProvider`. A VitisAI-only result
-is the NPU environment and must not be used for GPU measurements.
+Expect ORT **1.29.x**, MIGraphX **2.18.0+rocm10.1.0**, the plugin EP
+**1.0.0+rocm10.1.0**, and an empty error list (`[]`);
+`get_available_providers()` does not list MIGraphX because it comes from the
+plugin EP. A VitisAI-only result is the NPU environment and must not be used
+for GPU measurements.
 
 Run the headless installation smoke on the locally built artifacts:
 
@@ -97,8 +101,8 @@ negative-evidence, and reset-lifecycle checks, not just a high mean IoU.
 The canonical harness requires a schema-2 `ARTIFACT_MANIFEST.json`, rejects
 dirty-source artifacts and tracker-memory environment overrides, verifies the
 manifest checksum plus every recorded artifact hash, and rejects unrecorded
-files. It also requires ONNX Runtime 1.24.2 with MIGraphX as the primary
-provider. It always uses original SAM3 S7/C4, full detection on every consumed
+files. It also requires the exact supported stack (ONNX Runtime 1.29 with the
+MIGraphX plugin EP, `tracker.ort_plugin_ep.SUPPORTED_STACK`). It always uses original SAM3 S7/C4, full detection on every consumed
 frame, same-frame parallel tail, and no N+1 lookahead. The profile also pins
 `assets/blackswan.mp4` by SHA256, prompt `swan`, 24 FPS, five discarded warm
 outputs, and the complete aggregation window; custom timing arguments are not
@@ -135,7 +139,7 @@ For release/reference runs, label the machine and attest the measured power
 policy before invoking either profile:
 
 ```bash
-export SAM3_BUILD_HOST_ID=harry-evo-x2
+export SAM3_BUILD_HOST_ID=my-gfx1151-host
 export SAM3_STAPM_LIMIT_W=120
 export SAM3_FAST_PPT_LIMIT_W=140
 export SAM3_SLOW_PPT_LIMIT_W=120
@@ -187,7 +191,7 @@ rejected results. Neither includes downstream ROS transport or rendering.
 `--max-frames` caps available source arrivals; it does not extend or loop a
 short file.
 
-The [published live reference](performance.md#default-full-detection-live-reference)
+The [published live reference](performance.md#current-full-detection-live-reference-rocm-101-040-rc1)
 uses the canonical harness above. Neither this ROS integration check nor a
 rendered `demo_live.py` run exactly reproduces it.
 
@@ -246,20 +250,19 @@ ORT prewarming, and full/hybrid installation smoke together:
 ```bash
 ./tools/docker_test_runner.sh \
   --checkpoint "$SAM3_MODEL_DIR" \
-  --output "$HOME/sam3-artifacts/gpu/clean-validation-0.3.0-rc1"
+  --output "$HOME/sam3-artifacts/gpu/clean-validation-0.4.0-rc1"
 ```
 
 The normal release path rebuilds the image with Docker cache disabled. For a
 source-only release whose Dockerfile and pinned runtime inputs are unchanged,
 `--reuse-runtime` explicitly reuses the selected existing image after verifying
-its exact Torch/HIP/MIGraphX/ORT versions, primary provider, and GPU architecture.
+its exact Torch/HIP/MIGraphX/ORT plugin-EP stack and GPU architecture.
 
 Choose a **new** output directory; use `--resume` only for the same interrupted
 build. This is a model-building workflow, not a lightweight documentation
 check. It downloads precompiled runtime dependencies and compiles SAM3 models
 locally; it does not build ROCm/MIGraphX/ORT/Torch from source.
 
-Use `--migraphx-archive` and `--ort-wheel` for local binary release files.
 Do not overwrite immutable baseline `tuned.mxr` files or reuse caches from
 host MIGraphX 2.16.
 
@@ -270,22 +273,22 @@ with the single release-gate entry point. The gate requires a new output
 directory outside the checkout and the canonical checkpoint:
 
 ```bash
-export SAM3_BUILD_HOST_ID=harry-evo-x2
+export SAM3_BUILD_HOST_ID=my-gfx1151-host
 export SAM3_STAPM_LIMIT_W=120
 export SAM3_FAST_PPT_LIMIT_W=140
 export SAM3_SLOW_PPT_LIMIT_W=120
 
 ./tools/release_gate.sh \
   --checkpoint "$SAM3_MODEL_DIR" \
-  --output "$HOME/sam3-artifacts/gpu/releases/0.3.0-rc1/validation" \
-  --reuse-runtime
+  --output "$HOME/sam3-artifacts/gpu/releases/<VERSION>/validation"
 ```
 
-Normal releases omit `--reuse-runtime` and rebuild the runtime image from
-scratch. The flag above is the documented `0.3.0-rc1` exception because its
-Dockerfile and pinned runtime inputs are unchanged from rc4. A missing or
-mismatched image is an error in reuse mode. The preflight requires 15 GiB free
-for this exception and 30 GiB for the normal full-rebuild path.
+Releases rebuild the runtime image from scratch (the 0.4.0-rc1 gate ran this
+way). `--reuse-runtime` is an explicit exception, only for a release whose
+Dockerfile and pinned runtime inputs are unchanged from the previously
+qualified image; a missing or mismatched image is an error in reuse mode. The
+preflight requires 15 GiB free for the exception and 30 GiB for the normal
+full-rebuild path.
 
 If the optional EC driver is unavailable, verify Performance mode in BIOS and
 also export `SAM3_EC_POWER_MODE=performance`. The script does not modify EC,
@@ -303,7 +306,7 @@ Success writes `RELEASE_GATE_PASS.json`; a failure writes
 commit, tag, release, or published artifact.
 
 Box-prompt artifact generation and DAVIS regression are not part of the
-`0.3.0-rc1` gate. The current local model build produces only the supported
+release-candidate gate. The current local model build produces only the supported
 text/live artifact profile; a reproducible box build and box-specific manifest
 are deferred to a later release candidate. Historical DAVIS results must not
-be presented as validation of a newly built rc1 artifact root.
+be presented as validation of a newly built artifact root.

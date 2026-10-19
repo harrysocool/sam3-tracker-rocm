@@ -8,8 +8,6 @@ CHECKPOINT=""
 OUTPUT=""
 IMAGE="sam3-gpu101-ort129-mgx218-gfx1151:0.4.0-rc1-local"
 FRAMES=12
-MGX_ARCHIVE=""
-ORT_WHEEL=""
 RESUME=false
 REUSE_RUNTIME=false
 
@@ -18,8 +16,6 @@ usage() {
 Usage: tools/docker_test_runner.sh --checkpoint DIR --output NEW_DIR [OPTIONS]
 
 Options:
-  --migraphx-archive FILE  Use a local release tar instead of downloading it
-  --ort-wheel FILE         Use a local release wheel instead of downloading it
   --image TAG              Local assembled image tag
   --reuse-runtime          Reuse and verify IMAGE instead of rebuilding it
   --frames N               Final full/hybrid smoke frames (default: 12)
@@ -42,8 +38,6 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --checkpoint) value "$@"; CHECKPOINT="$2"; shift 2 ;;
         --output) value "$@"; OUTPUT="$2"; shift 2 ;;
-        --migraphx-archive) value "$@"; MGX_ARCHIVE="$2"; shift 2 ;;
-        --ort-wheel) value "$@"; ORT_WHEEL="$2"; shift 2 ;;
         --image) value "$@"; IMAGE="$2"; shift 2 ;;
         --reuse-runtime) REUSE_RUNTIME=true; shift ;;
         --frames) value "$@"; FRAMES="$2"; shift 2 ;;
@@ -61,9 +55,6 @@ if [[ -e "${OUTPUT}" && "${RESUME}" != true ]]; then
 fi
 [[ ! -e "${OUTPUT}" || -d "${OUTPUT}" ]] || die "--output must be a directory"
 [[ "${FRAMES}" =~ ^[0-9]+$ && "${FRAMES}" -ge 3 ]] || die "--frames must be at least 3"
-if [[ "${REUSE_RUNTIME}" == true && ( -n "${MGX_ARCHIVE}" || -n "${ORT_WHEEL}" ) ]]; then
-    die "--migraphx-archive and --ort-wheel cannot be used with --reuse-runtime"
-fi
 if [[ "${REUSE_RUNTIME}" == true ]]; then
     docker image inspect "${IMAGE}" >/dev/null 2>&1 || \
         die "runtime image not found: ${IMAGE}; omit --reuse-runtime to rebuild it"
@@ -76,8 +67,6 @@ exec > >(tee "${OUTPUT}/clean-build.log") 2>&1
 
 if [[ "${REUSE_RUNTIME}" != true ]]; then
     build_env=("RUNTIME_IMAGE=${IMAGE}")
-    [[ -z "${MGX_ARCHIVE}" ]] || build_env+=("MIGRAPHX_ARCHIVE=$(readlink -f -- "${MGX_ARCHIVE}")")
-    [[ -z "${ORT_WHEEL}" ]] || build_env+=("ORT_WHEEL_PATH=$(readlink -f -- "${ORT_WHEEL}")")
     env "${build_env[@]}" "${ROOT}/docker/rocm101/build.sh" --no-cache
 else
     echo "Reusing existing runtime image (--reuse-runtime): ${IMAGE}"

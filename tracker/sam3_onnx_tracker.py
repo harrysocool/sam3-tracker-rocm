@@ -277,13 +277,13 @@ class SAM3OnnxTracker:
         self.mem_enc  = _mig_direct(
             modules_dir / "memory_encoder.onnx", "mem_enc_fp32.mxr", "memory_encoder")
 
-        # memory_attention: ORT MIGraphX EP.
+        # memory_attention: ORT MIGraphX plugin EP.
         # NOTE: direct MIGraphX Python API produces numerically wrong cond output
         # (max_diff~6.7 vs CPU ORT reference) for this model — root cause is a
         # MIGraphX compiler difference for this specific attention architecture.
-        # ORT MIGraphX EP gives correct results. At 1008px with backbone in GPU
-        # memory, ORT EP may fall back to CPU (silent); acceptable since this
-        # module contributes <10% of total latency. FP16 via migraphx_fp16_enable.
+        # ORT MIGraphX EP gives correct results. create_mig_session raises if any
+        # node is not assigned to MIGraphX, so there is no silent CPU fallback.
+        # FP16 via migraphx_fp16_enable.
         mem_attn_fixed  = modules_dir / "memory_attention_fixed_N7.onnx"
         if mem_attn_fixed.exists():
             ort_opts = ort.SessionOptions()
@@ -292,22 +292,17 @@ class SAM3OnnxTracker:
             # First run: ~5 min compilation → cache saved. Subsequent: ~1.3s load from cache.
             _ort_cache_dir = modules_dir / "ort_mig_cache"
             _ort_cache_dir.mkdir(parents=True, exist_ok=True)
-            try:
-                # Raises instead of silently running on CPU if any node is not on MIGraphX.
-                self.mem_attn = create_mig_session(
-                    mem_attn_fixed, ort_opts, _ort_cache_dir, fp16=_attn_fp16)
-                prov = self.mem_attn.get_providers()[0]
-                fp16_on = "FP16" if _attn_fp16 else ""
-                print(f"  memory_attention (ORT {prov[:3]} {fp16_on}): loaded")
-            except Exception as e:
-                self.mem_attn = ort.InferenceSession(str(mem_attn_fixed), providers=CPU)
-                print(f"  memory_attention: CPU fallback ({str(e)[:50]})")
+            # Raises instead of silently running on CPU if any node is not on MIGraphX.
+            self.mem_attn = create_mig_session(
+                mem_attn_fixed, ort_opts, _ort_cache_dir, fp16=_attn_fp16)
+            prov = self.mem_attn.get_providers()[0]
+            fp16_on = "FP16" if _attn_fp16 else ""
+            print(f"  memory_attention (ORT {prov[:3]} {fp16_on}): loaded")
             self._mem_attn_slots = num_maskmem
         else:
-            self.mem_attn = ort.InferenceSession(
-                str(modules_dir / "memory_attention.onnx"), providers=CPU)
-            self._mem_attn_slots = 0
-            print("  memory_attention: CPU (dynamic) — export fixed_N7 for MIGraphX speedup")
+            raise FileNotFoundError(
+                f"fixed memory-attention module not found: {mem_attn_fixed}; "
+                "re-export the tracker modules (there is no CPU fallback)")
 
         self.memory_bank = MemoryBank(temporal_pe, max_slots=num_maskmem)
         self._frame_idx  = 0

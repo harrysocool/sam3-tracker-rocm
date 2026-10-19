@@ -5,8 +5,8 @@
 > does not automate these steps. Some commands require older source revisions;
 > do not use this page as a fallback for the optimized live path.
 >
-> Start with [Quick start](../../README.md#quick-start) for the supported ROCm 7.14 /
-> MIGraphX 2.17 container. Historical context is in the
+> Start with [Quick start](../../README.md#quick-start) for the supported ROCm 10.1 /
+> MIGraphX 2.18 container. Historical context is in the
 > [legacy-runtime archive](legacy-runtime.md).
 
 ---

@@ -5,11 +5,11 @@ Text-prompted video segmentation and tracking on AMD ROCm, built on
 MIGraphX. Describe a target, such as `"swan"` or `"person on a bike"`, to detect
 and track its masks through video.
 
-> **Current release:** [v0.3.0-rc1](https://github.com/harrysocool/sam3-tracker-rocm/releases/tag/v0.3.0-rc1).
+> **Current release:** [v0.4.0-rc1](https://github.com/harrysocool/sam3-tracker-rocm/releases/tag/v0.4.0-rc1).
 > It validates the 504px FP16 text/live pipeline on gfx1151 with the pinned
-> ROCm 7.14 / MIGraphX 2.17 / ONNX Runtime 1.24.2 container. This is a
+> ROCm 10.1 / MIGraphX 2.18 / ONNX Runtime 1.29 container. This is a
 > source-only release: model weights are obtained separately and ONNX/MXR
-> artifacts are compiled locally. See the [release notes](docs/releases/0.3.0-rc1.md).
+> artifacts are compiled locally. See the [release notes](docs/releases/0.4.0-rc1.md).
 
 The **streaming API prioritizes fresh observations**: it processes the newest
 available frame and runs full text detection on every consumed frame by
@@ -34,27 +34,25 @@ and an offline text-prompt inference tool.
 ## Performance
 
 Release-qualified live reference runs on **Ryzen AI Max+ 395 / gfx1151**,
-**504px**, `blackswan.mp4`, prompt `swan`, and one object, using ROCm 7.14 /
-MIGraphX 2.17 / ONNX Runtime 1.24.2. The source was paced at 24 FPS for 250
+**504px**, `blackswan.mp4`, prompt `swan`, and one object, using ROCm 10.1 /
+MIGraphX 2.18 / ONNX Runtime 1.29. The source was paced at 24 FPS for 250
 arrivals. Measurements exclude overlay and video encoding.
 
-Both modes used the rc1 artifacts, fixed DETR decoder, same-frame
+The runs used the 0.4.0-rc1 artifacts, fixed DETR decoder, same-frame
 detector/tracker parallel tail, S7/C4 tracker memory, and latest-frame
 scheduling without N+1 GPU work.
 
 | Detection policy | Mean service time | Output rate | Emitted / captured |
 |---|---:|---:|---:|
-| **Full detection on every consumed frame (default)** | **90.73–90.93 ms** | **11.00–11.02 Hz** | 115–116 / 250 |
-| Hybrid, 1000 ms detection interval (opt-in) | 79.34–79.42 ms | 12.60–12.61 Hz | 132 / 250 |
+| **Full detection on every consumed frame (default)** | **89.77–90.15 ms** | **11.09–11.14 Hz** | 117 / 250 |
 
-Each row summarizes three runs. Full-mode values come from the rc1 final gate;
-hybrid values come from fresh-container reruns with explicit warmup. Every run
-reached the final source frame with no inference failure or abort.
+The row summarizes the three canonical-250 runs of the 0.4.0-rc1 final gate;
+all passed the gate thresholds. The opt-in hybrid mode (1000 ms detection
+interval) has not been re-measured on the 10.1 stack; its ROCm 7.14 numbers
+remain in [Performance details](docs/performance.md).
 
 Service time measures processing of a selected frame. Output rate counts
 completed results; it is not source FPS or a real-time deadline guarantee.
-The two policies perform different detection work, so their ratio is not a
-controlled optimization speedup.
 
 [Performance details](docs/performance.md) retain historical results,
 multi-object scaling, fixed-decoder A/B, and correctness checks. See the
@@ -70,7 +68,7 @@ multi-object scaling, fixed-decoder A/B, and correctness checks. See the
 | Network | Access to Docker Hub, Ubuntu package repositories, GitHub releases, AMD repositories, and PyPI for runtime dependencies |
 | SAM3 weights | A compatible local `model.safetensors`, obtained separately under the [SAM License](model/sam3/LICENSE) |
 | Disk | At least 30 GiB free; 40 GiB is recommended for clean rebuilds and validation |
-| Runtime | ROCm **7.14**, MIGraphX **2.17**, ONNX Runtime **1.24.2**, installed inside the container |
+| Runtime | ROCm **10.1**, MIGraphX **2.18**, ONNX Runtime **1.29** (MIGraphX plugin EP), installed inside the container |
 
 Use `docker/rocm101/run.sh` for the optimized GPU path. No host conda environment
 is needed. The host MIGraphX 2.16 stack is not supported for deployment and
@@ -123,14 +121,15 @@ optional [checkpoint identity check](docs/evaluation.md#checkpoint-identity).
 ./setup.sh --runtime
 ```
 
-This downloads checksum-pinned MIGraphX and ORT binaries, installs AMD ROCm and
-Torch packages, and assembles a local Docker image. It does **not** compile the
+This downloads SHA256-pinned official AMD ROCm 10.1 wheels (Torch, MIGraphX and
+the ONNX Runtime MIGraphX plugin EP) plus the PyPI ONNX Runtime wheel, and
+assembles a local Docker image. It does **not** compile the
 runtime stack or install ROCm on the host. The script checks GPU visibility and
 runtime versions after assembly.
 
 Pip may report that the gfx1151 Torch wheel requires the Python
 `rocm[libraries]` package. This warning is expected: the image deliberately uses
-the system ROCm 7.14 libraries instead, with the included `rocm_sdk`
+the system ROCm 10.1 libraries instead, with the included `rocm_sdk`
 compatibility module. Treat the final GPU/provider smoke result, not that
 resolver warning, as the runtime assembly result.
 
@@ -145,7 +144,7 @@ export SAM3_ONNX_DIR="/absolute/path/to/existing-onnx-mxr-directory"
 
 Replace the placeholder with the directory containing `backbone_detector/`,
 `tracker_modules/`, and the other runtime modules, not an individual ONNX file.
-Existing MXRs must match the supported ROCm 7.14 / MIGraphX 2.17 runtime.
+Existing MXRs must match the supported ROCm 10.1 / MIGraphX 2.18 runtime.
 `setup.sh --models` builds artifacts; it is not needed to select an existing build.
 
 Choose a new artifact directory outside the checkout. To resume an interrupted
@@ -243,11 +242,15 @@ ignored by Git and is not loaded automatically.
 
 ```bash
 ./docker/rocm101/run.sh python -c \
-  "import onnxruntime as o; print(o.__version__, o.get_available_providers())"
+  "from tracker.ort_plugin_ep import describe_ort_migraphx_stack, stack_errors; \
+print(describe_ort_migraphx_stack(), stack_errors())"
 ```
 
-Expect **1.24.2** and **MIGraphXExecutionProvider** in the provider list. A
-VitisAI-only provider list is the NPU environment, not this GPU runtime.
+Expect ONNX Runtime **1.29.x**, MIGraphX **2.18.0+rocm10.1.0**, the
+`onnxruntime-ep-migraphx` plugin **1.0.0+rocm10.1.0**, and an empty error list
+(`[]`). `get_available_providers()` does not list MIGraphX because it is
+provided by the plugin EP. A VitisAI-only environment is the NPU runtime, not
+this GPU runtime.
 
 ```bash
 ./docker/rocm101/run.sh python tools/smoke_live_release.py \
@@ -354,7 +357,7 @@ flags, and additional visual examples.
 - [Performance records and correctness evidence](docs/performance.md)
 - [Evaluation and regression commands](docs/evaluation.md)
 - [Historical runtime and optimization notes](docs/historical/legacy-runtime.md)
-- [v0.3.0-rc1 release notes](docs/releases/0.3.0-rc1.md)
+- [v0.4.0-rc1 release notes](docs/releases/0.4.0-rc1.md)
 - [Release notes archive](docs/releases/)
 
 ## Known limitations

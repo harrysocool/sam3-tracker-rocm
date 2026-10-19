@@ -12,8 +12,8 @@ Historical weight-download instructions are omitted. Model weights must be
 obtained independently under the separate SAM License before use; see the
 current [requirements](../../README.md#requirements).
 
-Use the [current Quick start](../../README.md#quick-start) for ROCm 7.14 / MIGraphX
-2.17 live deployment. [Current performance records](../../docs/performance.md) separate
+Use the [current Quick start](../../README.md#quick-start) for ROCm 10.1 / MIGraphX
+2.18 live deployment. [Current performance records](../../docs/performance.md) separate
 live, hybrid, offline, and box workloads. Existing baseline artifacts remain
 immutable; never overwrite them while rebuilding for another runtime.
 

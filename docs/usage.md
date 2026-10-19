@@ -115,7 +115,7 @@ only when the workload calls for it.
 MIG, same-frame parallel tails, and the available 504px fixed decoder are
 the optimized defaults. `--no-mig`, `--no-parallel-tail`, and
 `--no-fixed-detr-decoder` are diagnostic switches, not alternate supported
-deployment stacks. Never load MIGraphX 2.17 MXR files with host 2.16 libraries.
+deployment stacks. Never load MIGraphX 2.18 MXR files with host 2.16 libraries.
 
 For all advanced flags:
 
@@ -239,7 +239,7 @@ This path needs a separate tracker backbone and tracker decoder artifacts;
 12.21 FPS and DAVIS J result are not current full-text live measurements.
 See [archived box usage and evaluation](historical/legacy-runtime.md#box-prompt-usage)
 for the old commands and artifact context. Do not mix that runtime's MXR files
-into the supported MIGraphX 2.17 live root.
+into the supported MIGraphX 2.18 live root.
 
 ## Visual examples
 

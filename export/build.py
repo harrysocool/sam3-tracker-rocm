@@ -5,7 +5,7 @@ Two pipelines, pick one or both:
 
   box   — SAM3OnnxTracker (demo_box.py): tracker modules + MIGraphX backbone
             ~10 min @504px
-  text  — Sam3VideoModel: FC1-sink detector backbone + DETR encoder,
+  text  — Sam3VideoModel: detector backbone + DETR encoder,
             padded memory_attention, and the fixed 504px DETR decoder
             ~18 min @504px
 

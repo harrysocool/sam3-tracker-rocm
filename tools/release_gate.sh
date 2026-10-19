@@ -17,8 +17,6 @@ MIN_MASK_IOU=0.98
 CHECKPOINT=""
 OUTPUT=""
 IMAGE="${SAM3_DOCKER_IMAGE:-${DEFAULT_IMAGE}}"
-MGX_ARCHIVE=""
-ORT_WHEEL=""
 PREFLIGHT_ONLY=false
 REUSE_RUNTIME=false
 CURRENT_STAGE="argument parsing"
@@ -37,10 +35,8 @@ Required inputs:
   --output NEW_DIR       New evidence directory outside the Git checkout
 
 Options:
-  --image TAG                Runtime image tag (default: pinned rc4-local tag)
-  --migraphx-archive FILE    Local MIGraphX release archive for runtime assembly
-  --ort-wheel FILE           Local ONNX Runtime wheel for runtime assembly
-  --reuse-runtime           Reuse verified IMAGE; default is a no-cache rebuild
+  --image TAG                Runtime image tag (default: pinned 0.4.0-rc1-local tag)
+  --reuse-runtime            Reuse verified IMAGE; default is a no-cache rebuild
   --preflight-only           Validate inputs without creating output or running work
   -h, --help
 
@@ -74,8 +70,6 @@ while [[ $# -gt 0 ]]; do
         --checkpoint) value "$@"; CHECKPOINT="$2"; shift 2 ;;
         --output) value "$@"; OUTPUT="$2"; shift 2 ;;
         --image) value "$@"; IMAGE="$2"; shift 2 ;;
-        --migraphx-archive) value "$@"; MGX_ARCHIVE="$2"; shift 2 ;;
-        --ort-wheel) value "$@"; ORT_WHEEL="$2"; shift 2 ;;
         --reuse-runtime) REUSE_RUNTIME=true; shift ;;
         --preflight-only) PREFLIGHT_ONLY=true; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -91,13 +85,6 @@ done
 [[ -n "${OUTPUT}" ]] || die "--output is required"
 [[ -d "${CHECKPOINT}" && -f "${CHECKPOINT}/model.safetensors" ]] || \
     die "--checkpoint must contain model.safetensors"
-[[ -z "${MGX_ARCHIVE}" || -f "${MGX_ARCHIVE}" ]] || \
-    die "--migraphx-archive must be a file"
-[[ -z "${ORT_WHEEL}" || -f "${ORT_WHEEL}" ]] || \
-    die "--ort-wheel must be a file"
-if [[ "${REUSE_RUNTIME}" == true && ( -n "${MGX_ARCHIVE}" || -n "${ORT_WHEEL}" ) ]]; then
-    die "--migraphx-archive and --ort-wheel cannot be used with --reuse-runtime"
-fi
 
 CHECKPOINT="$(readlink -f -- "${CHECKPOINT}")"
 OUTPUT="$(readlink -m -- "${OUTPUT}")"
@@ -306,8 +293,6 @@ runner=(
     --output "${build_output}"
     --image "${IMAGE}"
 )
-[[ -z "${MGX_ARCHIVE}" ]] || runner+=(--migraphx-archive "${MGX_ARCHIVE}")
-[[ -z "${ORT_WHEEL}" ]] || runner+=(--ort-wheel "${ORT_WHEEL}")
 [[ "${REUSE_RUNTIME}" != true ]] || runner+=(--reuse-runtime)
 run_stage clean-build "${runner[@]}"
 assert_source_unchanged
