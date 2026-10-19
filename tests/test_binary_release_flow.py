@@ -1,6 +1,7 @@
 """CPU-only guards for the download-binaries/build-models release flow."""
 
 import hashlib
+import os
 from pathlib import Path
 import re
 import shutil
@@ -34,6 +35,32 @@ def test_help_entrypoints_do_not_start_work():
         ROOT / "tools/docker_test_runner.sh", "--help"
     ).stdout
     assert "--reuse-runtime" in run(ROOT / "tools/release_gate.sh", "--help").stdout
+
+
+def test_setup_model_build_selects_build_root_without_reusing_inference_path(tmp_path):
+    setup_root = tmp_path / "source"
+    runner = setup_root / "docker/rocm714/run.sh"
+    runner.parent.mkdir(parents=True)
+    shutil.copy2(ROOT / "setup.sh", setup_root / "setup.sh")
+    (setup_root / "VERSION").write_text("test-version\n")
+    runner.write_text(
+        '#!/bin/bash\n'
+        'printf "%s\\n" "$SAM3_MODEL_DIR" "$SAM3_ONNX_DIR" "$@"\n'
+    )
+    runner.chmod(0o755)
+    build_root = tmp_path / "new-build"
+    result = subprocess.run(
+        [BASH, str(setup_root / "setup.sh"), "--models", "/existing/checkpoint"],
+        env=os.environ | {"SAM3_MODEL_BUILD_ROOT": str(build_root),
+                          "SAM3_ONNX_DIR": "/existing/inference-artifacts"},
+        text=True, capture_output=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[:2] == ["/existing/checkpoint", str(build_root / "onnx_files_504")]
+    assert (build_root / "onnx_files_504").is_dir()
+    assert lines[lines.index("--onnx-root") + 1] == "/models"
+    assert "--imgsz" not in lines
 
 
 def test_runtime_assembly_contains_no_source_build_commands():

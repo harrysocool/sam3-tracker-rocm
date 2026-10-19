@@ -109,7 +109,7 @@ class SAM3OnnxTracker:
     Args:
         checkpoint:   Path to facebook/sam3 model directory.
         onnx_dir:     Directory containing the exported ONNX files.
-        imgsz:        Input resolution (default 504; use 1008 for higher quality).
+        imgsz:        Input resolution; only the validated 504px path is supported.
         num_maskmem:  Memory bank size (default 7).
         backbone:     "auto" (default) — use MIGraphX if cache/onnx present, else PyTorch.
                       "migraphx"       — require MIGraphX backbone (88ms at 504px).
@@ -125,6 +125,8 @@ class SAM3OnnxTracker:
         backbone: str = "auto",
         shared: "SharedTrackerResources | None" = None,
     ):
+        if imgsz != 504 or (shared is not None and shared.imgsz != 504):
+            raise ValueError("SAM3OnnxTracker supports only the validated 504px resolution")
         # Shared-resources fast path: skip all heavy module loads, just copy
         # refs + allocate own MemoryBank. Used by the hybrid pipeline.
         if shared is not None:
@@ -156,7 +158,7 @@ class SAM3OnnxTracker:
         self.HW            = self.H * self.W
         self.num_maskmem   = num_maskmem
         self.mask_mem_size = self.H * 16
-        # onnx_dir is the resolution root (onnx_files_504 / onnx_files_1008).
+        # onnx_dir is the selected 504px artifact root.
         # Files live in fixed subdirectories:
         #   <onnx_dir>/backbone_tracker/  — backbone .onnx + .mxr (tracker FPN weights)
         #   <onnx_dir>/tracker_modules/   — mask_decoder_*, memory_*, temporal_pe, caches

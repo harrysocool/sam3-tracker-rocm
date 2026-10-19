@@ -417,7 +417,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument("--imgsz", type=int, required=True)
+    parser.add_argument("--imgsz", type=int, required=True, choices=(504,))
     parser.add_argument("--ptr-tokens", type=int, required=True)
     parser.add_argument("--max-spatial-slots", type=int, default=10)
     return parser.parse_args()

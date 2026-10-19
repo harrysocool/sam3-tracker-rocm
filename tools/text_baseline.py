@@ -10,15 +10,21 @@ Use --no-fixed-detr-decoder for native-decoder comparisons with MIG enabled.
 Camera and ROS consumers use demo_live.py / SAM3Live for latest-frame scheduling.
 
 Usage:
+  Normally omit --onnx-dir to use SAM3_ONNX_DIR selected by run.sh.
+  Pass it only when deliberately overriding with a container-visible directory.
+  The examples below show the explicit equivalent.
+
   # Single image, using the supported container and configured artifact mount
   ./docker/rocm714/run.sh python tools/text_baseline.py \\
       --checkpoint /models/sam3 \\
+      --onnx-dir /models/onnx_files_504 \\
       --image assets/truck.jpg \\
       --text "truck"
 
   # Video with MIGraphX and backbone prefetch enabled by default
   ./docker/rocm714/run.sh python tools/text_baseline.py \\
       --checkpoint /models/sam3 \\
+      --onnx-dir /models/onnx_files_504 \\
       --video assets/blackswan.mp4 \\
       --text "swan" \\
       --max-frames 50
@@ -78,9 +84,8 @@ def parse_args(argv=None):
     p.add_argument("--max-objects", type=int, default=DEFAULT_MAX_OBJECTS_PER_PROMPT,
                    help="Maximum tracked objects per prompt (default 5; 0 = unlimited). "
                         "The legacy -1 value also selects the default.")
-    p.add_argument("--imgsz", type=int, default=504, choices=(504, 1008),
-                   help="Input resolution (default: 504). MIG requires matching "
-                        "artifacts; supply --onnx-dir explicitly for 1008px.")
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,),
+                   help="Input resolution; only the validated 504px path is supported.")
     mig = p.add_mutually_exclusive_group()
     mig.add_argument("--mig", dest="mig", action="store_true",
                      help="Use MIGraphX acceleration (default).")
@@ -131,8 +136,7 @@ def parse_args(argv=None):
     )
     p.set_defaults(pipeline_backbone=None)
     p.add_argument("--onnx-dir", type=Path, default=None,
-                   help="MIG artifact root. Defaults to SAM3_DEFAULT_ONNX_DIR "
-                        "from the container wrapper, or onnx_files_504_mgx217.")
+                   help="MIG artifact root. Defaults to SAM3_ONNX_DIR from run.sh.")
     args = p.parse_args(argv)
     if (args.image is None) == (args.video is None):
         sys.exit("Pass exactly one of --image or --video")
@@ -164,11 +168,11 @@ def parse_args(argv=None):
     if args.pipeline_backbone and args.video is None:
         sys.exit("--pipeline-backbone requires --video")
     if args.onnx_dir is None:
-        if args.mig and args.imgsz != 504:
-            sys.exit("1008px MIG inference requires an explicit --onnx-dir with matching artifacts")
-        args.onnx_dir = Path(
-            os.environ.get("SAM3_DEFAULT_ONNX_DIR", "onnx_files_504_mgx217")
-        )
+        configured_dir = os.environ.get("SAM3_ONNX_DIR")
+        if configured_dir:
+            args.onnx_dir = Path(configured_dir)
+        elif args.mig:
+            p.error("set SAM3_ONNX_DIR or pass --onnx-dir for MIG inference")
     return args
 
 
@@ -352,12 +356,8 @@ def main():
             print("  Fixed DETR decoder direct-MXR enabled")
 
         # Optional: also MIG-ize memory_attention (steady-state padding).
-        # K (pointer-token cap) is resolution-dependent because the MIGraphX
-        # MLIR attention kernel has a shape-dependent perf cliff:
-        #   504px:  no cliff up to K=64 (deploy K=64 → 16 obj capacity)
-        #   1008px: cliff between K=48 and K=56 (deploy K=48 → 12 obj capacity)
-        _K_PER_IMGSZ = {504: 64, 1008: 48}
-        _k = _K_PER_IMGSZ.get(args.imgsz, 32)
+        # Validated pointer-token cap for the supported 504px artifacts.
+        _k = 64
         mem_attn_onnx = args.onnx_dir / "tracker_modules" / f"memory_attention_fixed_S7_P{_k}.onnx"
         if not mem_attn_onnx.exists():
             # Fall back to whatever P-variant exists for this resolution

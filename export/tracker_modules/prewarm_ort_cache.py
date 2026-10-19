@@ -3,12 +3,16 @@
 Pre-compile and cache all ORT MIGraphX sessions for a given onnx_dir.
 
 Must be run BEFORE the tracker to populate the MIGraphX compile cache.
-Run WITHOUT the backbone loaded (no GPU memory pressure) so FP16 compilations
-succeed at 1008px without OOM.
+Run WITHOUT the backbone loaded to reduce GPU memory pressure during compilation.
+Only 504px artifacts are supported.
 
 Usage:
-    python export/tracker_modules/prewarm_ort_cache.py --onnx-dir onnx_files_504        # 504px
-    python export/tracker_modules/prewarm_ort_cache.py --onnx-dir onnx_files_1008   # 1008px
+    Normally omit --onnx-dir to use the writable SAM3_ONNX_DIR selected by run.sh.
+    Pass it only when deliberately overriding with a container-visible build directory.
+    The example below shows the explicit equivalent:
+
+    ./docker/rocm714/run.sh python export/tracker_modules/prewarm_ort_cache.py \\
+        --onnx-dir /models/onnx_files_504
 """
 from __future__ import annotations
 
@@ -51,8 +55,10 @@ import migraphx as _mxr
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--onnx-dir", type=Path, default=Path("onnx_files_504"),
-                   help="Resolution root, e.g. onnx_files_504 or onnx_files_1008. "
+    p.add_argument("--onnx-dir", type=Path,
+                   default=os.environ.get("SAM3_ONNX_DIR") or None,
+                   required=not bool(os.environ.get("SAM3_ONNX_DIR")),
+                   help="Writable artifact root (defaults to SAM3_ONNX_DIR). "
                         "Operates on <onnx-dir>/tracker_modules/.")
     p.add_argument("--warmup", type=int, default=1,
                    help="Number of warmup inference runs per session")
@@ -75,9 +81,8 @@ def main():
     args = parse_args()
     modules_dir = args.onnx_dir.resolve() / "tracker_modules"
     cache_dir = str(modules_dir / "mxr_cache")
-    Path(cache_dir).mkdir(parents=True, exist_ok=True)
 
-    # Infer resolution from directory name / feature map size
+    # Infer resolution from the ONNX input shape, independent of directory name.
     # memory_attention_fixed_N7.onnx input shapes tell us HW
     ma_path = modules_dir / "memory_attention_fixed_N7.onnx"
     if not ma_path.exists():
@@ -89,10 +94,11 @@ def main():
     HW = _tmp.get_inputs()[0].shape[0]   # current_vision_features: (HW, 1, 256)
     H = W = int(HW ** 0.5)
     del _tmp
+    if HW != 1296:
+        raise ValueError("tracker cache prewarm supports only 504px artifacts (36x36 features)")
+    Path(cache_dir).mkdir(parents=True, exist_ok=True)
 
-    # Determine whether to use FP16 for memory_attention
-    # At 1008px (HW=5184) we want FP16 — the whole point of this script is to
-    # compile it here WITHOUT the backbone so there's no OOM.
+    # Compile with no backbone loaded to reduce memory pressure.
     use_fp16_attn = True   # always compile FP16 (no backbone loaded here)
 
     print(f"Pre-warming ORT MIGraphX cache for {modules_dir}")

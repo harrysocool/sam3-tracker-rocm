@@ -44,7 +44,9 @@ def configure_worker_environment(slot: int, environ=None) -> str:
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--onnx-dir", type=Path, required=True)
+    parser.add_argument("--onnx-dir", type=Path,
+                        default=os.environ.get("SAM3_ONNX_DIR") or None,
+                        required=not bool(os.environ.get("SAM3_ONNX_DIR")))
     parser.add_argument("--ptr-tokens", type=int, required=True)
     parser.add_argument("--max-spatial-slots", type=int, default=10)
     parser.add_argument(

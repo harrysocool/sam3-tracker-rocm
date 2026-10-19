@@ -72,9 +72,11 @@ def main():
                     default=WORKSPACE / "dataset/gt-annotations/saco_veval_smartglasses_val.json")
     ap.add_argument("--img-root", type=Path,
                     default=WORKSPACE / "dataset/saco_sg/JPEGImages_6fps")
-    ap.add_argument("--onnx-dir", type=Path, default=None)
+    ap.add_argument("--onnx-dir", type=Path,
+                    default=os.environ.get("SAM3_ONNX_DIR") or None,
+                    required=not bool(os.environ.get("SAM3_ONNX_DIR")))
     ap.add_argument("--checkpoint", type=Path, default=WORKSPACE / "model/sam3")
-    ap.add_argument("--imgsz", type=int, default=504)
+    ap.add_argument("--imgsz", type=int, default=504, choices=(504,))
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--checkpoint-every", type=int, default=50,
                     help="Save partial results every N annotations")
@@ -82,8 +84,6 @@ def main():
                     help="Resume from annotation index (skip already-done)")
     args = ap.parse_args()
 
-    if args.onnx_dir is None:
-        args.onnx_dir = WORKSPACE / (f"onnx_files_{args.imgsz}")
     if args.out is None:
         args.out = WORKSPACE / f"results/eval/saco_sg/saco_sg_val_{args.imgsz}px_preds_{_TS}.json"
 

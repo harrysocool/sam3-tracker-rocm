@@ -5,9 +5,13 @@ Pipeline A (single-frame): backbone (PyTorch ROCm FP16) + mask_decoder_init (ONN
 Pipeline B (propagation) : backbone + memory_attention + mask_decoder_propagate + memory_encoder
 
 Usage:
-    python eval/bench_pipeline.py \\
-        --checkpoint model/sam3 \\
-        --onnx-dir onnx_files \\
+    Normally omit --onnx-dir to use SAM3_ONNX_DIR selected by run.sh.
+    Pass it only when deliberately overriding with a container-visible directory.
+    The example below shows the explicit equivalent.
+
+    ./docker/rocm714/run.sh python eval/benchmarks/bench_pipeline.py \\
+        --checkpoint /models/sam3 \\
+        --onnx-dir /models/onnx_files_504 \\
         --imgsz 504
 """
 
@@ -27,9 +31,12 @@ BOX_ORIG = [85, 281, 1710, 850]    # truck box at original 1800×1200
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--checkpoint", type=Path, default=WORKSPACE / "model" / "sam3")
-    p.add_argument("--onnx-dir",   type=Path, default=WORKSPACE / "onnx_files_504")
+    p.add_argument("--onnx-dir", type=Path,
+                   default=os.environ.get("SAM3_ONNX_DIR") or None,
+                   required=not bool(os.environ.get("SAM3_ONNX_DIR")),
+                   help="Standalone tracker artifact root (defaults to SAM3_ONNX_DIR).")
     p.add_argument("--image",      type=Path, default=WORKSPACE / "assets" / "demo.jpg")
-    p.add_argument("--imgsz",      type=int,  default=504)
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--warmup",     type=int,  default=8)
     p.add_argument("--runs",       type=int,  default=30)
     return p.parse_args()

@@ -65,9 +65,11 @@ def test_wrapper_handles_unknown_uid_and_multihop_absolute_weight_link(tmp_path:
     fake_id.chmod(0o755)
 
     code = (
-        "import getpass; from pathlib import Path; "
+        "import getpass, os; from pathlib import Path; "
         "from transformers import AutoProcessor, Sam3VideoModel; "
         "assert getpass.getuser() == 'portable-user'; "
+        "assert os.environ['SAM3_ONNX_DIR'] == '/models/onnx_files_504'; "
+        "assert 'SAM3_DEFAULT_ONNX_DIR' not in os.environ; "
         "assert Path('/models/sam3/model.safetensors').read_bytes() == "
         "b'sam3-wrapper-portability-fixture\\n'"
     )

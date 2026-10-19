@@ -9,6 +9,7 @@ scores are compared frame by frame.
 from __future__ import annotations
 
 import argparse
+import os
 import hashlib
 import json
 import statistics
@@ -44,7 +45,10 @@ from transformers import AutoProcessor, Sam3VideoConfig, Sam3VideoModel  # noqa:
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", type=Path, default=Path("model/sam3"))
-    parser.add_argument("--onnx-dir", type=Path, default=Path("onnx_files_504"))
+    parser.add_argument("--onnx-dir", type=Path,
+                        default=os.environ.get("SAM3_ONNX_DIR") or None,
+                        required=not bool(os.environ.get("SAM3_ONNX_DIR")),
+                        help="MIG artifact root (defaults to SAM3_ONNX_DIR from run.sh).")
     parser.add_argument("--video", type=Path, required=True)
     parser.add_argument(
         "--text",
@@ -52,7 +56,7 @@ def parse_args():
         required=True,
         help="Prompt to add; repeat for a multi-prompt benchmark.",
     )
-    parser.add_argument("--imgsz", type=int, default=504, choices=(504, 1008))
+    parser.add_argument("--imgsz", type=int, default=504, choices=(504,))
     parser.add_argument("--max-frames", type=int, default=50)
     parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument(
@@ -125,7 +129,7 @@ def build_model(args):
         model,
         args.onnx_dir / "detector_modules" / "detr_encoder_simplified.onnx",
     )
-    pointer_tokens = {504: 64, 1008: 48}[args.imgsz]
+    pointer_tokens = 64
     patch_sam3_video_model_memory_attention(
         model,
         args.onnx_dir

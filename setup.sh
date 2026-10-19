@@ -39,7 +39,7 @@ case "${1:-}" in
         mkdir -p "${build_root}/onnx_files_504"
         SAM3_MODEL_DIR="${checkpoint}" SAM3_ONNX_DIR="${build_root}/onnx_files_504" \
             exec "${ROOT}/docker/rocm714/run.sh" python export/build_text_prompt_mig.py \
-                --imgsz 504 --checkpoint /models/sam3 --onnx-root /models \
+                --checkpoint /models/sam3 --onnx-root /models \
                 --performance-build "$@"
         ;;
     *) echo "setup: unknown argument: $1" >&2; exit 2 ;;

@@ -71,8 +71,20 @@ Keep the model directory already selected in Quick start, including an
 external directory if that is where your complete checkpoint is stored.
 The command above checks that the variable is set; it does not replace it.
 
-For an existing build, reuse its actual paths instead of choosing a new
-directory. The model command exports ONNX and compiles the 504px artifacts;
+For an existing compatible build, select its artifact root and proceed to
+[Verify and run](#verify-and-run):
+
+```bash
+export SAM3_ONNX_DIR="/absolute/path/to/existing-onnx-mxr-directory"
+```
+
+Replace the placeholder with the directory containing the runtime module
+subdirectories, not a single ONNX file. Keep `SAM3_MODEL_DIR` set to the
+compatible checkpoint. Selecting existing artifacts does not require
+`setup.sh --models` or `SAM3_MODEL_BUILD_ROOT`.
+
+To resume an interrupted model build, reuse its original
+`SAM3_MODEL_BUILD_ROOT`. The model command exports ONNX and compiles the 504px artifacts;
 successful completion reports `ALL OK`. It independently autotunes the S1--S10
 memory-attention caches with full benchmarking enabled; S8 uses the validated
 generic policy and the remaining shapes use attention-specific MLIR tuning.
@@ -95,7 +107,7 @@ refreshes this manifest after writable ORT prewarm and before strict smoke.
 | Repository checkout | `/workspace`, the container working directory |
 | `SAM3_MODEL_DIR` | Complete checkpoint directory, mounted read-only at `/models/sam3` |
 | `SAM3_MODEL_BUILD_ROOT` | Build output parent; its `onnx_files_504` child contains the artifacts |
-| `SAM3_ONNX_DIR` | Artifact directory, mounted at `/models/onnx_files_504` |
+| `SAM3_ONNX_DIR` | Host artifact directory, mounted at `/models/onnx_files_504`; the container variable is set to that mount path |
 | `SAM3_OUTPUT_DIR` (optional) | Existing writable directory, mounted at `/output` |
 
 Keep `SAM3_MODEL_DIR` and `SAM3_ONNX_DIR` exported when running commands.
@@ -103,10 +115,41 @@ Re-export the same absolute paths in a new terminal. If the Git revision has
 changed since the build, use the existing build directory explicitly rather
 than recomputing its name from the new revision.
 
-The scripts do not persist these variables into your shell. Without an
-override, `run.sh` looks for checkout `model/sam3` and `onnx_files_504_mgx217`.
-The latter is a development-machine symlink and is absent from a fresh clone.
-Use the explicit exports above for customer installations.
+The scripts do not persist these variables into your shell. Save your exports
+in a Git-ignored `.env.local` file and run `source .env.local` in each new
+terminal if you want to reuse them. The file is not loaded automatically.
+Use explicit exports for installations; development-machine defaults are
+not part of the installation interface.
+
+`setup.sh --models` selects its output using `SAM3_MODEL_BUILD_ROOT` and sets
+`SAM3_ONNX_DIR` for the build subprocess only. Changing `SAM3_ONNX_DIR` alone
+does not change that setup build destination.
+
+### Select artifacts for an experiment
+
+To use another existing build for one command, set the host directory when
+launching the wrapper:
+
+```bash
+SAM3_ONNX_DIR="/absolute/path/to/experiment-artifacts" \
+./docker/rocm714/run.sh python eval/benchmarks/bench_pipeline.py \
+  --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 --imgsz 504
+```
+
+This benchmark needs standalone tracker artifacts, including `backbone_tracker/`
+and `tracker_modules/`. Full text inference uses the detector artifact set.
+Choose the directory and resolution that match the script.
+
+The example spells out the container path for clarity. Normally omit
+`--onnx-dir` and let the script use `SAM3_ONNX_DIR` set by the wrapper. Pass
+the option only when you intend to override the selected directory and have
+confirmed that the replacement is visible inside the container.
+
+Inside an interactive container, `export SAM3_ONNX_DIR=/workspace/results/my-experiment`
+selects another directory already visible through a mount. Changing the variable
+does not mount a new host directory. An explicit `--onnx-dir` overrides the
+variable. For export or compilation experiments, choose a new writable output
+directory rather than an immutable baseline.
 
 Inputs must also be accessible through a container mount. See
 [use your own video](../../docs/usage.md#use-your-own-video) for a complete
@@ -149,7 +192,7 @@ and offline inference commands. Camera and ROS applications should follow the
 | Docker permission or connection error | Confirm `docker info` works for the account running setup. |
 | Missing `/dev/kfd` or render device | Check the host AMDGPU driver and GPU device access before building the image. |
 | `Set SAM3_MODEL_DIR...` | Export the absolute path to the complete local model directory. |
-| `Set SAM3_ONNX_DIR...` | Export the artifact directory created by the model build, including its `onnx_files_504` child. |
+| `Set SAM3_ONNX_DIR...` | Export the existing artifact root containing the runtime module subdirectories. |
 | Image not found | Run `./setup.sh --runtime`; for a custom image, match the build and run settings below. |
 | Fixed DETR decoder artifact not found | Default 504px MIG requires `detr_decoder_fixed/direct_gpuio.mxr`. Check the model build and `SAM3_ONNX_DIR`; use `--no-fixed-detr-decoder` only for diagnosis. |
 | Input video cannot be opened | Use a path inside a configured mount; see the own-video example above. |
@@ -219,9 +262,12 @@ The report appears at `results/strict-validation/installation-smoke.json` on
 the host. Strict mode is for validation, not model export or cache generation;
 if a required cache is missing, populate it in writable mode before retrying.
 
-The wrapper sets `SAM3_DEFAULT_ONNX_DIR=/models/onnx_files_504` for both
-`demo_live.py` and `tools/text_baseline.py`. Other evaluation tools may require
-explicit `--onnx-dir` and `--imgsz` arguments, as shown in their usage examples.
+The wrapper sets `SAM3_ONNX_DIR=/models/onnx_files_504` inside the container.
+Current inference, export, benchmark, and dataset evaluation entry points with
+`--onnx-dir` use it as their artifact-directory default. An explicit
+`--onnx-dir` overrides it. Current entry points support only 504px artifacts.
+The two complete build entry points use 504px without an `--imgsz` option;
+lower-level export and evaluation tools still accept explicit `--imgsz 504`.
 
 ## Runtime versions
 

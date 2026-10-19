@@ -100,7 +100,7 @@ Full output fields, recovery reasons, and reset rules are documented in the
 | Parameter | Default / behavior |
 |---|---|
 | `--text` | One or more prompts; quote a multiword prompt, e.g. `--text "person on a bike"` |
-| `--imgsz` | 504; the default fixed decoder supports 504px only |
+| `--imgsz` | 504 only; retained for explicit commands using the validated resolution |
 | `--redetect-interval-ms` | 0: full detection on every consumed frame; positive: opt-in hybrid |
 | `--min-score` | 0.5: output confidence filter |
 | `--max-objects` | 5 per prompt; positive values set a persistent per-prompt cap; 0 explicitly removes the cap |
@@ -137,7 +137,7 @@ output-rate measurements differ.
 
 The tool defaults to **504px MIGraphX inference with the fixed DETR decoder**,
 same-frame parallel tails, and next-frame backbone prefetch for videos. It uses
-the artifact mount configured by Quick start through `SAM3_DEFAULT_ONNX_DIR`.
+the artifact mount configured by Quick start through `SAM3_ONNX_DIR`.
 Single-image runs do not prefetch another frame.
 
 Like live, `--text` accepts multiple prompts and quoted multiword phrases.
@@ -171,9 +171,8 @@ as they arrive and defaults to no source-frame limit.
 
 For either images or videos, add `--no-mig` to select the PyTorch reference.
 It disables the fixed decoder, parallel tails, and backbone prefetch.
-Add `--imgsz 1008` for the original-resolution PyTorch reference. MIG at 1008px
-requires an explicit `--onnx-dir` containing separately built 1008px artifacts;
-the 504px Quick start artifacts cannot be used at that resolution.
+Both MIG and the PyTorch reference use the validated 504px resolution.
+Current entry points reject other resolutions.
 
 Output defaults to `demo_out/text/<input-stem>_text.{jpg,mp4}`; override with
 `--output`. Use short noun phrases such as `"swan"`, `"yellow taxi"`, or
@@ -194,7 +193,6 @@ Output defaults to `demo_out/text/<input-stem>_text.{jpg,mp4}`; override with
 - The fixed DETR decoder is enabled by default for 504px MIG and requires
   `detr_decoder_fixed/direct_gpuio.mxr`. Use `--no-fixed-detr-decoder` for a
   native-decoder comparison while keeping the other MIG optimizations.
-  The 1008px path uses the native decoder.
 
 The offline and live 504px paths use the same fixed decoder implementation.
 Their scheduling and timing windows differ: offline prefetch optimizes file

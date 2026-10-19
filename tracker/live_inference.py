@@ -21,7 +21,6 @@ Quick start
 
     live = SAM3Live(
         checkpoint="model/sam3",
-        onnx_dir="onnx_files_504_mgx217",
         prompts=["car", "sidewalk", "grass"],
         imgsz=504,
     )
@@ -61,7 +60,7 @@ from .output_processing import (
 
 # Memory-attention pointer-token cap per resolution (must match
 # memory_attention_fixed_S7_P{K}.onnx artifact that was compiled by build.py).
-_K_PER_IMGSZ = {504: 64, 1008: 48}
+_MEMORY_POINTER_TOKENS = 64
 # Original SAM3 tracker artifact contract: exact memory shapes S1 through S10.
 _REQUIRED_MEMORY_ATTENTION_SLOTS = tuple(range(1, 11))
 
@@ -101,9 +100,9 @@ class SAM3Live:
             checkpoint: HF model dir (contains model.safetensors).
             prompts: initial text prompts (e.g. ["car", "sidewalk"]).
             onnx_dir: MIGraphX artifact root. When omitted with ``mig=True``,
-                defaults to ``onnx_files_<imgsz>_mgx217`` in the current workspace
-                or `SAM3_DEFAULT_ONNX_DIR` when set by the container launcher.
-            imgsz: 504 or 1008. Must match the MIG artifacts under ``onnx_dir``.
+                uses ``SAM3_ONNX_DIR`` set by the container launcher.
+                Set that variable or pass an explicit directory.
+            imgsz: only 504 is supported. Must match the artifacts under ``onnx_dir``.
             dtype: fp16 (default) or fp32.
             device: torch device, defaults to cuda if available.
             mig: enable MIGraphX accelerated paths (vision encoder, DETR encoder,
@@ -164,6 +163,8 @@ class SAM3Live:
                 more samples in the few frames available; tighten if exemplar
                 quality is bad.
         """
+        if imgsz != 504:
+            raise ValueError("SAM3Live supports only the validated 504px resolution")
         # Lazy import so that consumers of this module don't pay model import cost
         # if they only want the class definition.
         from transformers import Sam3VideoModel, AutoProcessor, Sam3VideoConfig
@@ -177,13 +178,10 @@ class SAM3Live:
         self.redetect_every = max(1, int(redetect_every))
         self.max_objects_per_prompt = max_objects_per_prompt
         if mig:
-            onnx_dir = Path(
-                onnx_dir
-                or os.environ.get(
-                    "SAM3_DEFAULT_ONNX_DIR",
-                    f"onnx_files_{imgsz}_mgx217",
-                )
-            )
+            configured_dir = onnx_dir or os.environ.get("SAM3_ONNX_DIR")
+            if not configured_dir:
+                raise ValueError("set SAM3_ONNX_DIR or pass onnx_dir for MIG inference")
+            onnx_dir = Path(configured_dir)
             if not onnx_dir.is_dir():
                 raise FileNotFoundError(f"MIGraphX artifact directory not found: {onnx_dir}")
         if parallel_tail is None:
@@ -388,7 +386,7 @@ class SAM3Live:
             )
 
         # K is resolution-dependent (MLIR attention perf cliff).
-        k = _K_PER_IMGSZ.get(imgsz, 32)
+        k = _MEMORY_POINTER_TOKENS
         mem_attn_onnx = onnx_dir / "tracker_modules" / f"memory_attention_fixed_S7_P{k}.onnx"
         if not mem_attn_onnx.exists():
             for alt in (32, 48, 64, 16, 4):

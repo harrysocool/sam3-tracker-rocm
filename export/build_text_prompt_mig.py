@@ -17,14 +17,19 @@ Runs the complete local model-build pipeline for the text-prompt MIG path:
 Each step skips if its output file already exists (use --force to rebuild).
 
 Usage:
-  # Build 504px artefacts (~15 min)
-  ./docker/rocm714/run.sh python export/build_text_prompt_mig.py --imgsz 504
+  Run these commands from the repository root in the host terminal.
+  Select a writable SAM3_ONNX_DIR before launching the supported container.
+  Normally omit --onnx-dir to use that selected directory. Pass it only when
+  deliberately overriding with another container-visible build directory.
+  The single-resolution examples below show the explicit equivalent.
 
-  # Build both resolutions
-  python export/build_text_prompt_mig.py --imgsz 504 1008
+  # Build 504px artefacts (~15 min)
+  ./docker/rocm714/run.sh python export/build_text_prompt_mig.py --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504
 
   # Rebuild backbone only (force)
-  python export/build_text_prompt_mig.py --imgsz 504 --force --steps backbone
+  ./docker/rocm714/run.sh python export/build_text_prompt_mig.py --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 --force --steps backbone
+
+Only 504px builds are supported.
 """
 from __future__ import annotations
 
@@ -45,6 +50,7 @@ from export.write_artifact_manifest import (
 )
 
 DEFAULT_EC_POWER_MODE_PATH = Path("/sys/class/ec_su_axb35/apu/power_mode")
+BUILD_IMGSZ = 504
 
 
 def full_autotune_env(base=None) -> dict[str, str]:
@@ -122,14 +128,14 @@ def parse_args():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("--imgsz", type=int, nargs="+", default=[504],
-                   choices=[504, 1008],
-                   help="Resolution(s) to build (default: 504). Pass both to build all.")
     p.add_argument("--checkpoint", type=Path,
                    default=WORKSPACE / "model/sam3",
                    help="Path to model/sam3 (default: model/sam3)")
-    p.add_argument("--onnx-root", type=Path, default=None,
-                   help="Root for onnx_files_<imgsz>/ dirs (default: project root)")
+    artifact_location = p.add_mutually_exclusive_group()
+    artifact_location.add_argument("--onnx-dir", type=Path,
+                   help="Writable 504px artifact root; defaults to SAM3_ONNX_DIR.")
+    artifact_location.add_argument("--onnx-root", type=Path,
+                   help="Explicit parent of the onnx_files_504/ build directory.")
     p.add_argument("--force", action="store_true",
                    help="Rebuild even if output files already exist")
     p.add_argument("--steps", nargs="+",
@@ -139,7 +145,7 @@ def parse_args():
                    help="Which steps to run (default: all)")
     p.add_argument("--ptr-tokens", type=int, default=None,
                    help="Pointer token slots for memory_attention. "
-                        "Default: 64 at 504px, 48 at 1008px (highest safe K per kernel cliff). "
+                        "Default: 64 at 504px. "
                         "Set explicitly to override.")
     p.add_argument("--max-spatial-slots", type=int, default=10,
                    help="Generate exact memory-attention shapes S1..N. Default 10 "
@@ -149,7 +155,13 @@ def parse_args():
         action="store_true",
         help="Require a verified EC performance mode before hardware autotuning.",
     )
-    return p.parse_args()
+    args = p.parse_args()
+    if args.onnx_root is None and args.onnx_dir is None:
+        configured_dir = os.environ.get("SAM3_ONNX_DIR")
+        if not configured_dir:
+            p.error("set SAM3_ONNX_DIR or pass --onnx-dir / --onnx-root")
+        args.onnx_dir = Path(configured_dir)
+    return args
 
 
 def run(cmd: list[str], label: str, *, env=None) -> bool:
@@ -180,16 +192,16 @@ def exists(path: Path, label: str, force: bool) -> bool:
     return False
 
 
-def build_for_imgsz(imgsz: int, args) -> bool:
-    onnx_root = args.onnx_root or WORKSPACE
-    onnx_dir = onnx_root / f"onnx_files_{imgsz}"
+def build_artifacts(args) -> bool:
+    imgsz = BUILD_IMGSZ
+    onnx_dir = args.onnx_dir or args.onnx_root / f"onnx_files_{imgsz}"
     det_dir = onnx_dir / "backbone_detector"
     mod_dir = onnx_dir / "detector_modules"
     trk_dir = onnx_dir / "tracker_modules"
     fixed_dir = onnx_dir / "detr_decoder_fixed"
     ptr_tokens = (
         args.ptr_tokens if args.ptr_tokens is not None
-        else {504: 64, 1008: 48}.get(imgsz, 32)
+        else 64
     )
 
     steps = set(args.steps)
@@ -243,7 +255,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "--imgsz", str(imgsz),
                 "--backbone-source", "detector",
                 "--skip-verify",
-            ], f"[3/11] Compile backbone .mxr @{imgsz}px  (~12 min at 1008px)",
+            ], f"[3/11] Compile backbone .mxr @{imgsz}px",
                 env=full_autotune_env())
 
         # Keep the established host-I/O artifact as a portable fallback and
@@ -275,7 +287,6 @@ def build_for_imgsz(imgsz: int, args) -> bool:
 
     # ── Step 5: export memory_attention ──────────────────────────────────
     if run_all or "memory_attention" in steps:
-        # Resolve None default per imgsz (504→64, 1008→48 — kernel cliff aware)
         for spatial_slots in range(1, args.max_spatial_slots + 1):
             name = f"memory_attention_fixed_S{spatial_slots}_P{ptr_tokens}.onnx"
             out = trk_dir / name
@@ -306,9 +317,6 @@ def build_for_imgsz(imgsz: int, args) -> bool:
         )
 
     if run_all or "fixed_decoder" in steps:
-        if imgsz != 504:
-            print("  fixed decoder currently supports only 504px")
-            return False
         fixed_onnx = fixed_dir / "detr_decoder_fixed_simplified.onnx"
         if not exists(fixed_onnx, "fixed decoder ONNX", args.force):
             ok = ok and run([
@@ -334,9 +342,6 @@ def build_for_imgsz(imgsz: int, args) -> bool:
             )
 
     if run_all or "prewarm" in steps:
-        if imgsz != 504:
-            print("  runtime prewarm currently supports only 504px")
-            return False
         ok = ok and run(
             [
                 sys.executable,
@@ -377,18 +382,14 @@ def main():
     verify_source_clean(required=args.performance_build)
     verify_ec_power_mode(required=args.performance_build)
     t_start = time.perf_counter()
-    all_ok = True
-
-    for imgsz in args.imgsz:
-        print(f"\n{'='*60}")
-        print(f"  Building text-prompt MIG artefacts @ {imgsz}px")
-        print(f"  checkpoint : {args.checkpoint}")
-        print(f"  onnx_files : onnx_files_{imgsz}/")
-        print(f"{'='*60}")
-        ok = build_for_imgsz(imgsz, args)
-        all_ok = all_ok and ok
-        status = "✓ complete" if ok else "✗ FAILED"
-        print(f"\n  {imgsz}px: {status}")
+    print(f"\n{'='*60}")
+    print(f"  Building text-prompt MIG artefacts @ {BUILD_IMGSZ}px")
+    print(f"  checkpoint : {args.checkpoint}")
+    print(f"  onnx_files : {args.onnx_dir or args.onnx_root / 'onnx_files_504'}")
+    print(f"{'='*60}")
+    all_ok = build_artifacts(args)
+    status = "✓ complete" if all_ok else "✗ FAILED"
+    print(f"\n  {BUILD_IMGSZ}px: {status}")
 
     total = time.perf_counter() - t_start
     print(f"\n{'='*60}")

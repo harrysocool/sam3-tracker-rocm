@@ -15,6 +15,7 @@ Usage:
 
 from __future__ import annotations
 import argparse
+import os
 from pathlib import Path
 
 import onnx
@@ -25,11 +26,13 @@ def parse_args():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("--onnx-dir", type=Path, required=True,
-                   help="Resolution root (e.g. onnx_files_504). Reads "
+    p.add_argument("--onnx-dir", type=Path,
+                   default=os.environ.get("SAM3_ONNX_DIR") or None,
+                   required=not bool(os.environ.get("SAM3_ONNX_DIR")),
+                   help="Artifact root (defaults to SAM3_ONNX_DIR). Reads "
                         "<onnx-dir>/backbone_<source>/single_fp32.onnx, writes "
                         "<onnx-dir>/backbone_<source>/single_simplified.onnx.")
-    p.add_argument("--imgsz", type=int, default=504)
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--backbone-source", choices=["tracker", "detector"],
                    default="tracker",
                    help="Which backbone subdir to operate on")

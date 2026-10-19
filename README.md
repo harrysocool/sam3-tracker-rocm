@@ -136,6 +136,18 @@ resolver warning, as the runtime assembly result.
 
 ### 3. Build the model artifacts
 
+If you already have compatible 504px ONNX/MXR artifacts, select their root
+directory and continue with [Verify the installation](#4-verify-the-installation-and-run-the-demo):
+
+```bash
+export SAM3_ONNX_DIR="/absolute/path/to/existing-onnx-mxr-directory"
+```
+
+Replace the placeholder with the directory containing `backbone_detector/`,
+`tracker_modules/`, and the other runtime modules, not an individual ONNX file.
+Existing MXRs must match the supported ROCm 7.14 / MIGraphX 2.17 runtime.
+`setup.sh --models` builds artifacts; it is not needed to select an existing build.
+
 Choose a new artifact directory outside the checkout. To resume an interrupted
 build, reuse that same directory; do not point it at older runtime artifacts.
 
@@ -217,8 +229,15 @@ serial numbers.
 mounts host `SAM3_MODEL_DIR` at `/models/sam3` and host `SAM3_ONNX_DIR` at
 `/models/onnx_files_504`. In a new shell, re-export those two absolute paths.
 This explicit configuration does not depend on the development machine's
-`onnx_files_504_mgx217` symlink. ONNX/MXR artifacts and caches are built locally;
+local artifact layout. Inside the container, the wrapper sets
+`SAM3_ONNX_DIR=/models/onnx_files_504` for the Python scripts. This does not
+change the variable in your host shell.
+ONNX/MXR artifacts and caches are built locally;
 no compiled SAM3 model bundle is downloaded.
+
+To retain your paths across terminals, put the exports in a local `.env.local`
+file and run `source .env.local` before launching the wrapper. That file is
+ignored by Git and is not loaded automatically.
 
 ### 4. Verify the installation and run the demo
 
@@ -340,8 +359,8 @@ flags, and additional visual examples.
 
 ## Known limitations
 
-- **Validated target:** gfx1151 at 504px. Other GPUs are untested; 1008px is an
-  advanced research path, not supported by the current fixed decoder.
+- **Validated target:** gfx1151 at 504px. Current build and runtime entry points
+  support only 504px; other GPUs are untested.
 - **Cold start:** ONNX/MXR build and first-use ORT compilation take time.
   Build once, retain caches, and measure startup separately from steady state.
 - **Object scaling:** more active objects increase tracker cost. Live and

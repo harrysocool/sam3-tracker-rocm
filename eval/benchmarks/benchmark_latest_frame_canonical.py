@@ -400,7 +400,9 @@ def _capture(
 def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument("--onnx-dir", type=Path, required=True)
+    parser.add_argument("--onnx-dir", type=Path,
+                        default=os.environ.get("SAM3_ONNX_DIR") or None,
+                        required=not bool(os.environ.get("SAM3_ONNX_DIR")))
     parser.add_argument(
         "--profile", required=True, choices=tuple(PROFILE_CONFIGS),
         help="Fixed canonical workload; custom timing parameters are not accepted.",

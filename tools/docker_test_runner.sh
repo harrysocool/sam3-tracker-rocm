@@ -109,7 +109,7 @@ print("Runtime image verification PASS", torch.__version__, torch.version.hip,
 '
 
 "${runtime[@]}" python export/build_text_prompt_mig.py \
-    --imgsz 504 --checkpoint /models/sam3 --onnx-root /models \
+    --checkpoint /models/sam3 --onnx-root /models \
     --performance-build
 
 # Re-run the short writable smoke as an independent lifecycle check. The model
