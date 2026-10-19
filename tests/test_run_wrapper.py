@@ -33,6 +33,7 @@ def _require_release_container(image: str) -> None:
         pytest.skip(f"release image is unavailable: {image}")
 
 
+@pytest.mark.host_only
 def test_wrapper_handles_unknown_uid_and_multihop_absolute_weight_link(tmp_path: Path):
     image = os.environ.get("SAM3_TEST_IMAGE", DEFAULT_IMAGE)
     _require_release_container(image)

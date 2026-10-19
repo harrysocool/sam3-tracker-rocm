@@ -329,7 +329,7 @@ set -euo pipefail
 python -m pip install --disable-pip-version-check --no-cache-dir \
     --only-binary=:all: --target /tmp/sam3-pytest-deps pytest==9.0.3
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="/tmp/sam3-pytest-deps:${PYTHONPATH}" \
-    python -m pytest -q --ignore=tests/test_run_wrapper.py \
+    python -m pytest -q \
     --basetemp /output/pytest-container-tmp \
     -o cache_dir=/output/pytest-container-cache
 '
@@ -353,7 +353,7 @@ run_host_wrapper_tests() {
         return "${status}"
     }
     status=0
-    SAM3_TEST_IMAGE="${IMAGE}" "${test_env}/venv/bin/python" -m pytest -q \
+    SAM3_TEST_IMAGE="${IMAGE}" "${test_env}/venv/bin/python" -m pytest -q -m "" \
         "${ROOT}/tests/test_run_wrapper.py" \
         --basetemp "${OUTPUT}/pytest-host-tmp" \
         -o "cache_dir=${OUTPUT}/pytest-host-cache" || status=$?
