@@ -10,12 +10,16 @@ is pre-loaded into the session and no N+1 GPU work is launched.
 Examples
 --------
 
+Normally omit --onnx-dir to use SAM3_ONNX_DIR selected by run.sh.
+Pass it only when deliberately overriding with a container-visible directory.
+The examples below show the explicit equivalent.
+
 Single prompt, MIG accelerated:
-    python demo_live.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \\
+    ./docker/rocm101/run.sh python demo_live.py --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \\
         --video assets/blackswan.mp4 --text swan --imgsz 504 --mig
 
 Multi-class (key new feature):
-    python demo_live.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \\
+    ./docker/rocm101/run.sh python demo_live.py --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \\
         --video assets/parkour.mp4 --text person trees buildings \\
         --imgsz 504 --mig
 
@@ -102,7 +106,8 @@ def parse_args():
              "tracker propagation thereafter. Synchronizes, resets tracking, "
              "then seeks to frame 0. Default 0 performs no preload/warmup.",
     )
-    p.add_argument("--imgsz", type=int, default=504, choices=(504, 1008))
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,),
+                   help="Input resolution; only the validated 504px path is supported.")
     mig_group = p.add_mutually_exclusive_group()
     mig_group.add_argument(
         "--mig",
@@ -148,10 +153,8 @@ def parse_args():
     p.add_argument(
         "--onnx-dir",
         type=Path,
-        default=Path(
-            os.environ.get("SAM3_DEFAULT_ONNX_DIR", "onnx_files_504_mgx217")
-        ),
-        help="MIG artifact root (defaults to the supported 2.17 runtime root).",
+        default=os.environ.get("SAM3_ONNX_DIR") or None,
+        help="MIG artifact root (defaults to SAM3_ONNX_DIR from run.sh).",
     )
     p.add_argument("--dtype", choices=("fp16", "fp32"), default="fp16")
     p.add_argument("--min-score", type=float, default=0.5,
@@ -194,6 +197,8 @@ def parse_args():
             "the default latest-frame scheduler requires prompt changes to "
             "close/reset/restart the pipeline"
         )
+    if args.mig and args.onnx_dir is None:
+        p.error("set SAM3_ONNX_DIR or pass --onnx-dir for MIG inference")
     return args
 
 

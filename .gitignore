@@ -84,3 +84,9 @@ assets/two_person_dog_lawn.mp4
 
 # Local customer rosbag (large, customer-supplied)
 data/
+
+# External inference artifact entry point
+inference
+
+# Private machine paths (loaded manually with source .env.local)
+/.env.local

@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 CHECKPOINT=""
 OUTPUT=""
-IMAGE="sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc4-local"
+IMAGE="sam3-gpu101-ort129-mgx218-gfx1151:0.4.0-rc1-local"
 FRAMES=12
 MGX_ARCHIVE=""
 ORT_WHEEL=""
@@ -78,7 +78,7 @@ if [[ "${REUSE_RUNTIME}" != true ]]; then
     build_env=("RUNTIME_IMAGE=${IMAGE}")
     [[ -z "${MGX_ARCHIVE}" ]] || build_env+=("MIGRAPHX_ARCHIVE=$(readlink -f -- "${MGX_ARCHIVE}")")
     [[ -z "${ORT_WHEEL}" ]] || build_env+=("ORT_WHEEL_PATH=$(readlink -f -- "${ORT_WHEEL}")")
-    env "${build_env[@]}" "${ROOT}/docker/rocm714/build.sh" --no-cache
+    env "${build_env[@]}" "${ROOT}/docker/rocm101/build.sh" --no-cache
 else
     echo "Reusing existing runtime image (--reuse-runtime): ${IMAGE}"
 fi
@@ -88,28 +88,25 @@ runtime=(env
     "SAM3_MODEL_DIR=${CHECKPOINT}"
     "SAM3_ONNX_DIR=${OUTPUT}/onnx_files_504"
     "SAM3_OUTPUT_DIR=${OUTPUT}"
-    "${ROOT}/docker/rocm714/run.sh"
+    "${ROOT}/docker/rocm101/run.sh"
 )
 
 "${runtime[@]}" python -c '
-import migraphx
-import onnxruntime as ort
 import torch
+from tracker.ort_plugin_ep import describe_ort_migraphx_stack, stack_errors
 
-assert torch.__version__ == "2.11.0+rocm7.13.0", torch.__version__
-assert torch.version.hip == "7.13.99004", torch.version.hip
-assert str(migraphx.__version__) == "2.17.0.dev+2e9924db6", migraphx.__version__
-assert ort.__version__ == "1.24.2", ort.__version__
-providers = ort.get_available_providers()
-assert providers and providers[0] == "MIGraphXExecutionProvider", providers
+assert torch.__version__ == "2.14.0+rocm10.1.0", torch.__version__
+stack = describe_ort_migraphx_stack()
+errors = stack_errors(stack)
+assert not errors, errors
 arch = torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
 assert arch == "gfx1151", arch
 print("Runtime image verification PASS", torch.__version__, torch.version.hip,
-      migraphx.__version__, ort.__version__, providers, arch)
+      stack, arch)
 '
 
 "${runtime[@]}" python export/build_text_prompt_mig.py \
-    --imgsz 504 --checkpoint /models/sam3 --onnx-root /models \
+    --checkpoint /models/sam3 --onnx-root /models \
     --performance-build
 
 # Re-run the short writable smoke as an independent lifecycle check. The model

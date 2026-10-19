@@ -34,9 +34,11 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--checkpoint", type=Path, default=Path("model/sam3"))
-    p.add_argument("--onnx-dir", type=Path, default=None,
-                   help="Resolution root (e.g. onnx_files_1008). Defaults from --imgsz.")
-    p.add_argument("--imgsz", type=int, default=1008)
+    p.add_argument("--onnx-dir", type=Path,
+                   default=os.environ.get("SAM3_ONNX_DIR") or None,
+                   required=not bool(os.environ.get("SAM3_ONNX_DIR")),
+                   help="Writable artifact root (defaults to SAM3_ONNX_DIR).")
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--spatial-slots", type=int, default=7,
                    help="Number of spatial memory frames (default 7, matches max_obj_ptrs_in_encoder)")
     p.add_argument("--ptr-tokens", type=int, default=64,
@@ -45,8 +47,6 @@ def parse_args():
                         "num_object_pointer_tokens=K into the graph.")
     p.add_argument("--opset", type=int, default=17)
     args = p.parse_args()
-    if args.onnx_dir is None:
-        args.onnx_dir = WORKSPACE / f"onnx_files_{args.imgsz}"
     args.out_dir = args.onnx_dir / "tracker_modules"
     return args
 

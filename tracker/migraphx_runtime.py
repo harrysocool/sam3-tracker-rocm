@@ -26,7 +26,6 @@ import numpy as np
 # torch is imported lazily in the PyTorch backbone path only.
 # MIGraphX backbone mode has zero torch dependencies.
 
-os.environ.setdefault("MIGRAPHX_SKIP_BENCHMARKING", "1")
 # Suppress clang -Werror on lifetimebound warnings in MIGraphX JIT kernel compilation.
 # Without this flag, newer comgr/clang versions fail with:
 #   "parameter ... should be marked [[clang::lifetimebound]] [-Werror,-Wlifetime-safety-intra-tu-suggestions]"

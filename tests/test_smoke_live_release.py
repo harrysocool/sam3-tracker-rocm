@@ -56,17 +56,22 @@ namespace['main'](['--help'])
     assert "--checkpoint" in result.stdout and "not a throughput" in result.stdout
 
 
-@pytest.mark.parametrize("version,providers", [
-    ("1.24.1", ["MIGraphXExecutionProvider"]), ("1.24.2", ["VitisAIExecutionProvider"]),
-    ("1.24.2", ["CPUExecutionProvider"]),
+_GOOD_STACK = {"ep": "plugin", "onnxruntime": "1.29.0",
+               "migraphx": "2.18.0+rocm10.1.0", "ep_package": "1.0.0+rocm10.1.0"}
+
+
+@pytest.mark.parametrize("override", [
+    {"onnxruntime": "1.24.2"},
+    {"migraphx": "2.17.0.dev+2e9924db6"},
+    {"ep_package": None},
 ])
-def test_runtime_rejects_wrong_stack(version, providers):
+def test_runtime_rejects_wrong_stack(override):
     with pytest.raises(ValueError):
-        smoke.validate_runtime(version, providers)
+        smoke.validate_runtime({**_GOOD_STACK, **override})
 
 
-def test_runtime_accepts_production_provider():
-    smoke.validate_runtime("1.24.2", ["MIGraphXExecutionProvider", "CPUExecutionProvider"])
+def test_runtime_accepts_production_stack():
+    smoke.validate_runtime(_GOOD_STACK)
 
 
 def test_create_live_keeps_fixed_and_parallel_defaults(tmp_path):

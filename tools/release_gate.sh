@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-DEFAULT_IMAGE="sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc4-local"
+DEFAULT_IMAGE="sam3-gpu101-ort129-mgx218-gfx1151:0.4.0-rc1-local"
 CANONICAL_CHECKPOINT_SHA256="6d06f0a5f84e435071fe6603e61d0b4cc7b40e0d39d487cfd4d67d8cc11cc14a"
 CANONICAL_VIDEO_SHA256="aaf37f0db4eba8d0058fd48b03391a742ded0d7f7db747378bec8459229476b9"
 PYTEST_REQUIREMENT="pytest==9.0.3"
@@ -45,7 +45,7 @@ Options:
   -h, --help
 
 The gate is intentionally fixed. It requires:
-  * clean dev or release/rcN source at the versioned commit;
+  * clean dev or release/<VERSION> source at the versioned commit;
   * EC Performance mode and 120/140/120 W power-policy attestations;
   * 30 GiB free for the normal full rebuild, or 15 GiB with --reuse-runtime;
   * a clean runtime/model build and strict full+hybrid smoke;
@@ -112,7 +112,7 @@ branch="$(git -C "${ROOT}" symbolic-ref --quiet --short HEAD)" || \
 version="$(< "${ROOT}/VERSION")"
 [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+-rc[0-9]+$ ]] || \
     die "VERSION is not a release-candidate version: ${version}"
-expected_release_branch="release/rc${version##*-rc}"
+expected_release_branch="release/${version}"
 case "${branch}" in
     dev|"${expected_release_branch}") ;;
     *) die "run from dev or ${expected_release_branch}, got ${branch}" ;;
@@ -318,7 +318,7 @@ runtime=(env
     "SAM3_MODEL_DIR=${CHECKPOINT}"
     "SAM3_ONNX_DIR=${artifact_root}"
     "SAM3_OUTPUT_DIR=${OUTPUT}"
-    "${ROOT}/docker/rocm714/run.sh"
+    "${ROOT}/docker/rocm101/run.sh"
 )
 image_id="$(docker image inspect --format '{{.Id}}' "${IMAGE}")"
 write_context "${image_id}"
@@ -329,7 +329,7 @@ set -euo pipefail
 python -m pip install --disable-pip-version-check --no-cache-dir \
     --only-binary=:all: --target /tmp/sam3-pytest-deps pytest==9.0.3
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="/tmp/sam3-pytest-deps:${PYTHONPATH}" \
-    python -m pytest -q --ignore=tests/test_run_wrapper.py \
+    python -m pytest -q \
     --basetemp /output/pytest-container-tmp \
     -o cache_dir=/output/pytest-container-cache
 '
@@ -353,7 +353,7 @@ run_host_wrapper_tests() {
         return "${status}"
     }
     status=0
-    SAM3_TEST_IMAGE="${IMAGE}" "${test_env}/venv/bin/python" -m pytest -q \
+    SAM3_TEST_IMAGE="${IMAGE}" "${test_env}/venv/bin/python" -m pytest -q -m "" \
         "${ROOT}/tests/test_run_wrapper.py" \
         --basetemp "${OUTPUT}/pytest-host-tmp" \
         -o "cache_dir=${OUTPUT}/pytest-host-cache" || status=$?
@@ -393,13 +393,15 @@ if build.get("image_id") != image_id:
 if build.get("ec_power_mode") != "performance":
     errors.append("artifact build did not record EC Performance mode")
 stack = manifest.get("stack", {})
-if stack.get("onnxruntime") != "1.24.2":
-    errors.append("artifact runtime did not use ONNX Runtime 1.24.2")
-if not str(stack.get("migraphx", "")).startswith("2.17"):
-    errors.append("artifact runtime did not use MIGraphX 2.17")
-providers = stack.get("providers") or []
-if not providers or providers[0] != "MIGraphXExecutionProvider":
-    errors.append("MIGraphXExecutionProvider was not primary")
+# Keep in sync with SUPPORTED_STACK in tracker/ort_plugin_ep.py (tests enforce it).
+if stack.get("ep") != "plugin":
+    errors.append("artifact runtime did not use the MIGraphX plugin EP")
+if not str(stack.get("onnxruntime", "")).startswith("1.29."):
+    errors.append("artifact runtime did not use ONNX Runtime 1.29.x")
+if stack.get("migraphx") != "2.18.0+rocm10.1.0":
+    errors.append("artifact runtime did not use MIGraphX 2.18.0+rocm10.1.0")
+if stack.get("ep_package") != "1.0.0+rocm10.1.0":
+    errors.append("artifact runtime did not use onnxruntime-ep-migraphx 1.0.0+rocm10.1.0")
 if stack.get("gpu_arch") != "gfx1151":
     errors.append(f"expected gfx1151, got {stack.get('gpu_arch')!r}")
 if errors:

@@ -10,7 +10,7 @@ Reports: per-sequence J, overall J mean, FPS
 Usage:
     MIGRAPHX_SKIP_BENCHMARKING=1 \\
         python scripts/onnx/analysis/eval_davis.py \\
-        [--imgsz 1008] [--davis dataset/DAVIS]
+        [--imgsz 504] [--davis dataset/DAVIS]
 """
 from __future__ import annotations
 
@@ -39,12 +39,14 @@ from tracker import SAM3OnnxTracker, preprocess_image
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--imgsz", type=int, default=1008)
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--davis", type=Path,
                    default=WORKSPACE_ROOT / "dataset/DAVIS")
     p.add_argument("--split", default="val",
                    help="val or test-dev")
-    p.add_argument("--onnx-dir", type=Path, default=None)
+    p.add_argument("--onnx-dir", type=Path,
+                   default=os.environ.get("SAM3_ONNX_DIR") or None,
+                   required=not bool(os.environ.get("SAM3_ONNX_DIR")))
     p.add_argument("--checkpoint", type=Path,
                    default=WORKSPACE_ROOT / "model/sam3")
     p.add_argument("--num-maskmem", type=int, default=7)
@@ -72,8 +74,6 @@ def mask_iou(pred: np.ndarray, gt: np.ndarray) -> float:
 def main():
     args = parse_args()
 
-    if args.onnx_dir is None:
-        args.onnx_dir = WORKSPACE_ROOT / f"onnx_files_{args.imgsz}"
     if args.out is None:
         args.out = WORKSPACE_ROOT / f"results/eval/davis/davis_{args.split}_{args.imgsz}px_{_TS}.json"
 

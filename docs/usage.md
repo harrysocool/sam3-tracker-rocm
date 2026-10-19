@@ -2,8 +2,8 @@
 
 Start with the [Quick start](../README.md#quick-start). Run commands below from
 the repository root, with `SAM3_MODEL_DIR` and `SAM3_ONNX_DIR` exported to the
-model directory and locally built MIGraphX 2.17 artifact directory.
-All current GPU examples use [the supported container](../docker/rocm714/README.md).
+model directory and locally built MIGraphX 2.18 artifact directory.
+All current GPU examples use [the supported container](../docker/rocm101/README.md).
 
 ## Live video
 
@@ -13,12 +13,12 @@ should use the [integration skeleton](../examples/README.md), not the file demo.
 
 ```bash
 # Default: full detection on every consumed frame
-./docker/rocm714/run.sh python demo_live.py \
+./docker/rocm101/run.sh python demo_live.py \
   --checkpoint /models/sam3 \
   --video assets/blackswan.mp4 --text swan --max-frames 50
 
 # Multiple prompts, same defaults
-./docker/rocm714/run.sh python demo_live.py \
+./docker/rocm101/run.sh python demo_live.py \
   --checkpoint /models/sam3 \
   --video assets/blackswan.mp4 --text swan water --max-frames 50
 ```
@@ -36,7 +36,7 @@ ignored `results/inputs/` directory and use its container path:
 mkdir -p results/inputs
 cp /absolute/path/to/my-video.mp4 results/inputs/my-video.mp4
 
-./docker/rocm714/run.sh python demo_live.py \
+./docker/rocm101/run.sh python demo_live.py \
   --checkpoint /models/sam3 \
   --video /workspace/results/inputs/my-video.mp4 \
   --text person \
@@ -49,7 +49,7 @@ Replace the input path and prompt with your own. The output is saved as
 An arbitrary host path such as `/home/user/videos/my-video.mp4` is not visible
 inside the container unless it lies in one of the configured mounts. A video
 symlink pointing outside those mounts is insufficient. See the
-[mount reference](../docker/rocm714/README.md#directories-and-mounts) for the
+[mount reference](../docker/rocm101/README.md#directories-and-mounts) for the
 host-to-container mapping.
 
 ### Scheduling and ownership
@@ -71,7 +71,7 @@ wall-clock recording or proof of the model's throughput.
 ### Optional hybrid detection
 
 ```bash
-./docker/rocm714/run.sh python demo_live.py \
+./docker/rocm101/run.sh python demo_live.py \
   --checkpoint /models/sam3 \
   --video assets/blackswan.mp4 --text swan --max-frames 50 \
   --redetect-interval-ms 1000
@@ -100,7 +100,7 @@ Full output fields, recovery reasons, and reset rules are documented in the
 | Parameter | Default / behavior |
 |---|---|
 | `--text` | One or more prompts; quote a multiword prompt, e.g. `--text "person on a bike"` |
-| `--imgsz` | 504; the default fixed decoder supports 504px only |
+| `--imgsz` | 504 only; retained for explicit commands using the validated resolution |
 | `--redetect-interval-ms` | 0: full detection on every consumed frame; positive: opt-in hybrid |
 | `--min-score` | 0.5: output confidence filter |
 | `--max-objects` | 5 per prompt; positive values set a persistent per-prompt cap; 0 explicitly removes the cap |
@@ -120,7 +120,7 @@ deployment stacks. Never load MIGraphX 2.17 MXR files with host 2.16 libraries.
 For all advanced flags:
 
 ```bash
-./docker/rocm714/run.sh python demo_live.py --help
+./docker/rocm101/run.sh python demo_live.py --help
 ```
 
 Do not change prompts or reset tracking on an active inference owner. Close
@@ -137,7 +137,7 @@ output-rate measurements differ.
 
 The tool defaults to **504px MIGraphX inference with the fixed DETR decoder**,
 same-frame parallel tails, and next-frame backbone prefetch for videos. It uses
-the artifact mount configured by Quick start through `SAM3_DEFAULT_ONNX_DIR`.
+the artifact mount configured by Quick start through `SAM3_ONNX_DIR`.
 Single-image runs do not prefetch another frame.
 
 Like live, `--text` accepts multiple prompts and quoted multiword phrases.
@@ -148,32 +148,31 @@ as they arrive and defaults to no source-frame limit.
 
 ```bash
 # Accelerated offline video, using the defaults
-./docker/rocm714/run.sh python tools/text_baseline.py \
+./docker/rocm101/run.sh python tools/text_baseline.py \
   --checkpoint /models/sam3 \
   --video assets/blackswan.mp4 --text swan --max-frames 50
 
 # Multiple prompts, at most two tracked objects per prompt
-./docker/rocm714/run.sh python tools/text_baseline.py \
+./docker/rocm101/run.sh python tools/text_baseline.py \
   --checkpoint /models/sam3 \
   --video assets/blackswan.mp4 --text swan water \
   --max-objects 2 --max-frames 50
 
 # Accelerated single image, using the defaults
-./docker/rocm714/run.sh python tools/text_baseline.py \
+./docker/rocm101/run.sh python tools/text_baseline.py \
   --checkpoint /models/sam3 \
   --image assets/truck.jpg --text truck
 
 # Explicit PyTorch video reference at the same resolution
-./docker/rocm714/run.sh python tools/text_baseline.py \
+./docker/rocm101/run.sh python tools/text_baseline.py \
   --checkpoint /models/sam3 \
   --video assets/blackswan.mp4 --text swan --no-mig --max-frames 50
 ```
 
 For either images or videos, add `--no-mig` to select the PyTorch reference.
 It disables the fixed decoder, parallel tails, and backbone prefetch.
-Add `--imgsz 1008` for the original-resolution PyTorch reference. MIG at 1008px
-requires an explicit `--onnx-dir` containing separately built 1008px artifacts;
-the 504px Quick start artifacts cannot be used at that resolution.
+Both MIG and the PyTorch reference use the validated 504px resolution.
+Current entry points reject other resolutions.
 
 Output defaults to `demo_out/text/<input-stem>_text.{jpg,mp4}`; override with
 `--output`. Use short noun phrases such as `"swan"`, `"yellow taxi"`, or
@@ -194,7 +193,6 @@ Output defaults to `demo_out/text/<input-stem>_text.{jpg,mp4}`; override with
 - The fixed DETR decoder is enabled by default for 504px MIG and requires
   `detr_decoder_fixed/direct_gpuio.mxr`. Use `--no-fixed-detr-decoder` for a
   native-decoder comparison while keeping the other MIG optimizations.
-  The 1008px path uses the native decoder.
 
 The offline and live 504px paths use the same fixed decoder implementation.
 Their scheduling and timing windows differ: offline prefetch optimizes file
@@ -264,7 +262,7 @@ recordings of the current live throughput or frame-age measurements.
 
 | Area | Entry points |
 |---|---|
-| Runtime / model build | [setup.sh](../setup.sh), [container wrapper](../docker/rocm714/run.sh), [text exporter](../export/build_text_prompt_mig.py) |
+| Runtime / model build | [setup.sh](../setup.sh), [container wrapper](../docker/rocm101/run.sh), [text exporter](../export/build_text_prompt_mig.py) |
 | Streaming / hybrid API | [live_inference.py](../tracker/live_inference.py), [hybrid_inference.py](../tracker/hybrid_inference.py) |
 | Latest-frame scheduling | [latest_frame.py](../tracker/latest_frame.py) |
 | Same-frame overlap / offline lookahead | [parallel_video.py](../tracker/parallel_video.py), [backbone_pipeline.py](../tracker/backbone_pipeline.py) |

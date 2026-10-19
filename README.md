@@ -72,10 +72,10 @@ multi-object scaling, fixed-decoder A/B, and correctness checks. See the
 | Disk | At least 30 GiB free; 40 GiB is recommended for clean rebuilds and validation |
 | Runtime | ROCm **7.14**, MIGraphX **2.17**, ONNX Runtime **1.24.2**, installed inside the container |
 
-Use `docker/rocm714/run.sh` for the optimized GPU path. No host conda environment
+Use `docker/rocm101/run.sh` for the optimized GPU path. No host conda environment
 is needed. The host MIGraphX 2.16 stack is not supported for deployment and
 cannot load the current fixed-decoder artifact. See the
-[container guide](docker/rocm714/README.md) for exact dependency versions.
+[container guide](docker/rocm101/README.md) for exact dependency versions.
 
 ## Quick start
 
@@ -135,6 +135,18 @@ compatibility module. Treat the final GPU/provider smoke result, not that
 resolver warning, as the runtime assembly result.
 
 ### 3. Build the model artifacts
+
+If you already have compatible 504px ONNX/MXR artifacts, select their root
+directory and continue with [Verify the installation](#4-verify-the-installation-and-run-the-demo):
+
+```bash
+export SAM3_ONNX_DIR="/absolute/path/to/existing-onnx-mxr-directory"
+```
+
+Replace the placeholder with the directory containing `backbone_detector/`,
+`tracker_modules/`, and the other runtime modules, not an individual ONNX file.
+Existing MXRs must match the supported ROCm 7.14 / MIGraphX 2.17 runtime.
+`setup.sh --models` builds artifacts; it is not needed to select an existing build.
 
 Choose a new artifact directory outside the checkout. To resume an interrupted
 build, reuse that same directory; do not point it at older runtime artifacts.
@@ -217,13 +229,20 @@ serial numbers.
 mounts host `SAM3_MODEL_DIR` at `/models/sam3` and host `SAM3_ONNX_DIR` at
 `/models/onnx_files_504`. In a new shell, re-export those two absolute paths.
 This explicit configuration does not depend on the development machine's
-`onnx_files_504_mgx217` symlink. ONNX/MXR artifacts and caches are built locally;
+local artifact layout. Inside the container, the wrapper sets
+`SAM3_ONNX_DIR=/models/onnx_files_504` for the Python scripts. This does not
+change the variable in your host shell.
+ONNX/MXR artifacts and caches are built locally;
 no compiled SAM3 model bundle is downloaded.
+
+To retain your paths across terminals, put the exports in a local `.env.local`
+file and run `source .env.local` before launching the wrapper. That file is
+ignored by Git and is not loaded automatically.
 
 ### 4. Verify the installation and run the demo
 
 ```bash
-./docker/rocm714/run.sh python -c \
+./docker/rocm101/run.sh python -c \
   "import onnxruntime as o; print(o.__version__, o.get_available_providers())"
 ```
 
@@ -231,7 +250,7 @@ Expect **1.24.2** and **MIGraphXExecutionProvider** in the provider list. A
 VitisAI-only provider list is the NPU environment, not this GPU runtime.
 
 ```bash
-./docker/rocm714/run.sh python tools/smoke_live_release.py \
+./docker/rocm101/run.sh python tools/smoke_live_release.py \
   --checkpoint /models/sam3 \
   --onnx-dir /models/onnx_files_504 \
   --video assets/blackswan.mp4 --text swan \
@@ -247,7 +266,7 @@ throughput benchmark.
 Run the source-paced demo after the smoke passes:
 
 ```bash
-./docker/rocm714/run.sh python demo_live.py \
+./docker/rocm101/run.sh python demo_live.py \
   --checkpoint /models/sam3 \
   --video assets/blackswan.mp4 --text swan \
   --max-frames 50
@@ -292,7 +311,7 @@ input, use `SAM3Live` with the latest-frame pipeline described in the
 For a recorded video where every selected frame should be processed:
 
 ```bash
-./docker/rocm714/run.sh python tools/text_baseline.py \
+./docker/rocm101/run.sh python tools/text_baseline.py \
   --checkpoint /models/sam3 \
   --video assets/blackswan.mp4 --text swan --max-frames 50
 ```
@@ -307,7 +326,7 @@ multiple prompts, output controls, and the explicit PyTorch reference mode.
 To enable optional hybrid detection:
 
 ```bash
-./docker/rocm714/run.sh python demo_live.py \
+./docker/rocm101/run.sh python demo_live.py \
   --checkpoint /models/sam3 \
   --video assets/blackswan.mp4 --text swan --max-frames 50 \
   --redetect-interval-ms 1000
@@ -330,7 +349,7 @@ flags, and additional visual examples.
 ## Documentation
 
 - [Usage and visual examples](docs/usage.md)
-- [Container, dependencies, and artifact mounts](docker/rocm714/README.md)
+- [Container, dependencies, and artifact mounts](docker/rocm101/README.md)
 - [Camera / ROS 2 integration](examples/README.md)
 - [Performance records and correctness evidence](docs/performance.md)
 - [Evaluation and regression commands](docs/evaluation.md)
@@ -340,8 +359,8 @@ flags, and additional visual examples.
 
 ## Known limitations
 
-- **Validated target:** gfx1151 at 504px. Other GPUs are untested; 1008px is an
-  advanced research path, not supported by the current fixed decoder.
+- **Validated target:** gfx1151 at 504px. Current build and runtime entry points
+  support only 504px; other GPUs are untested.
 - **Cold start:** ONNX/MXR build and first-use ORT compilation take time.
   Build once, retain caches, and measure startup separately from steady state.
 - **Object scaling:** more active objects increase tracker cost. Live and

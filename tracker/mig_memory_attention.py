@@ -34,6 +34,7 @@ import torch.nn as nn
 import onnxruntime as ort
 
 from .ort_gpu_io import GpuIoExecutionError, run_float32_gpu
+from .ort_plugin_ep import create_mig_session
 
 
 # ----- shape constants -----
@@ -77,13 +78,7 @@ class MIGMemoryAttention(nn.Module):
             onnx_path.parent / "ort_cache_mem_attn"
         )
         cache_dir.mkdir(parents=True, exist_ok=True)
-        self._providers = [
-            ("MIGraphXExecutionProvider", {
-                "migraphx_fp16_enable": "1",
-                "migraphx_model_cache_dir": str(cache_dir),
-            }),
-            "CPUExecutionProvider",
-        ]
+        self._cache_dir = cache_dir
         match = re.search(r"_S(\d+)_P(\d+)\.onnx$", onnx_path.name)
         if match is None:
             raise ValueError(
@@ -160,9 +155,7 @@ class MIGMemoryAttention(nn.Module):
         opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         print(f"  memory_attention S{path.stem.split('_S')[-1].split('_')[0]}: loading {path.name} ...")
         t0 = time.perf_counter()
-        session = ort.InferenceSession(
-            str(path), sess_options=opts, providers=self._providers
-        )
+        session = create_mig_session(path, opts, self._cache_dir)
         elapsed = time.perf_counter() - t0
         provider = session.get_providers()[0]
         output = session.get_outputs()[0]

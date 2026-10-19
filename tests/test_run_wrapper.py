@@ -11,9 +11,9 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNNER = ROOT / "docker/rocm714/run.sh"
+RUNNER = ROOT / "docker/rocm101/run.sh"
 BASH = shutil.which("bash")
-DEFAULT_IMAGE = "sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc4-local"
+DEFAULT_IMAGE = "sam3-gpu101-ort129-mgx218-gfx1151:0.4.0-rc1-local"
 
 
 def _require_release_container(image: str) -> None:
@@ -33,6 +33,7 @@ def _require_release_container(image: str) -> None:
         pytest.skip(f"release image is unavailable: {image}")
 
 
+@pytest.mark.host_only
 def test_wrapper_handles_unknown_uid_and_multihop_absolute_weight_link(tmp_path: Path):
     image = os.environ.get("SAM3_TEST_IMAGE", DEFAULT_IMAGE)
     _require_release_container(image)
@@ -65,9 +66,11 @@ def test_wrapper_handles_unknown_uid_and_multihop_absolute_weight_link(tmp_path:
     fake_id.chmod(0o755)
 
     code = (
-        "import getpass; from pathlib import Path; "
+        "import getpass, os; from pathlib import Path; "
         "from transformers import AutoProcessor, Sam3VideoModel; "
         "assert getpass.getuser() == 'portable-user'; "
+        "assert os.environ['SAM3_ONNX_DIR'] == '/models/onnx_files_504'; "
+        "assert 'SAM3_DEFAULT_ONNX_DIR' not in os.environ; "
         "assert Path('/models/sam3/model.safetensors').read_bytes() == "
         "b'sam3-wrapper-portability-fixture\\n'"
     )

@@ -6,12 +6,16 @@ Tracks an object across frames (or a single image) using a box prompt on
 the first frame, then purely memory-based propagation for all subsequent frames.
 
 Usage:
+    Normally omit --onnx-dir to use SAM3_ONNX_DIR selected by run.sh.
+    Pass it only when deliberately overriding with a container-visible directory.
+    The examples below show the explicit equivalent.
+
     # Single image (init frame only):
-    python demo_box.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
+    ./docker/rocm101/run.sh python demo_box.py --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
                    --image assets/truck.jpg --box 100,200,500,600
 
     # Video file:
-    python demo_box.py --checkpoint model/sam3 --onnx-dir onnx_files_504 \
+    ./docker/rocm101/run.sh python demo_box.py --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
                    --video my_video.mp4 --box 100,200,500,600 \
                    --output tracked.mp4
 """
@@ -25,6 +29,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import os
 
 from tracker import SAM3OnnxTracker, preprocess_image
 
@@ -33,11 +38,13 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--checkpoint", type=Path, required=True,
                    help="Path to downloaded facebook/sam3 model directory")
-    p.add_argument("--onnx-dir", type=Path, required=True,
-                   help="Resolution root, e.g. onnx_files_504 or onnx_files_1008. "
+    p.add_argument("--onnx-dir", type=Path,
+                   default=os.environ.get("SAM3_ONNX_DIR") or None,
+                   required=not bool(os.environ.get("SAM3_ONNX_DIR")),
+                   help="Artifact root (defaults to SAM3_ONNX_DIR from run.sh). "
                         "Reads <onnx-dir>/backbone_tracker/* and <onnx-dir>/tracker_modules/*.")
-    p.add_argument("--imgsz", type=int, default=504,
-                   help="Input resolution (504 for speed, 1008 for quality)")
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,),
+                   help="Input resolution; only the validated 504px path is supported.")
     p.add_argument("--box", type=str, required=True,
                    help="Box prompt in original image coords: x1,y1,x2,y2")
     p.add_argument("--image", type=Path, default=None,

@@ -2,9 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-IMAGE="${SAM3_DOCKER_IMAGE:-sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc4-local}"
+IMAGE="${SAM3_DOCKER_IMAGE:-sam3-gpu101-ort129-mgx218-gfx1151:0.4.0-rc1-local}"
 MODEL_DIR="${SAM3_MODEL_DIR:-${ROOT}/model/sam3}"
-ONNX_DIR="${SAM3_ONNX_DIR:-${ROOT}/onnx_files_504_mgx217}"
+ONNX_DIR="${SAM3_ONNX_DIR:-${ROOT}/inference/production/rocm101-mgx218-504}"
 OUTPUT_DIR="${SAM3_OUTPUT_DIR:-}"
 CONTAINER_USER="$(id -un 2>/dev/null || printf 'sam3')"
 STRICT="${SAM3_DOCKER_STRICT:-0}"
@@ -34,7 +34,7 @@ if [[ ! -d "${MODEL_DIR}" ]]; then
     exit 1
 fi
 if [[ ! -d "${ONNX_DIR}" ]]; then
-    echo "Set SAM3_ONNX_DIR to the MIGraphX 2.17 artifact root" >&2
+    echo "Set SAM3_ONNX_DIR to the MIGraphX 2.18 artifact root" >&2
     exit 1
 fi
 if [[ -n "${OUTPUT_DIR}" && ! -d "${OUTPUT_DIR}" ]]; then
@@ -132,12 +132,12 @@ exec docker run --pull=never --rm "${tty_args[@]}" \
     -e LOGNAME="${CONTAINER_USER}" \
     -e TRANSFORMERS_OFFLINE=1 \
     -e HF_HUB_OFFLINE=1 \
-    -e SAM3_DEFAULT_ONNX_DIR=/models/onnx_files_504 \
+    -e SAM3_ONNX_DIR=/models/onnx_files_504 \
     -e SAM3_DOCKER_IMAGE_REF="${IMAGE}" \
     -e SAM3_DOCKER_IMAGE_ID="${IMAGE_ID}" \
     -e SAM3_SOURCE_COMMIT="${SOURCE_COMMIT}" \
     -e SAM3_SOURCE_DIRTY="${SOURCE_DIRTY}" \
-    -e PYTHONPATH=/workspace:/opt/migraphx-develop/lib \
+    -e PYTHONPATH=/workspace \
     "${optional_env_args[@]}" \
     "${mount_args[@]}" \
     -w /workspace \

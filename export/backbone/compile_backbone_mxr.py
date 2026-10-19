@@ -8,16 +8,16 @@ session; the GPU-I/O artifact is additive and never overwrites tuned.mxr.
 
 Autotuning may take several minutes on the first compile. The resulting
 .mxr is hardware-specific (gfx1151) and tied to the MIGraphX build that
-produced it. The supported runtime is ROCm 7.14 / MIGraphX 2.17, selected
-through docker/rocm714/run.sh; do not compile deployment caches with a host
-runtime. See docker/rocm714/README.md for setup and runtime verification.
+produced it. The supported runtime is ROCm 10.1 / MIGraphX 2.18, selected
+through docker/rocm101/run.sh; do not compile deployment caches with a host
+runtime. See docker/rocm101/README.md for setup and runtime verification.
 
 Configure SAM3_MODEL_DIR and SAM3_ONNX_DIR as described in that guide.
 SAM3_ONNX_DIR must select a writable build directory containing the source
 ONNX files, not an immutable baseline; it is mounted at /models/onnx_files_504.
 For an additive GPU-I/O build, run from the repository root:
 
-    SAM3_DOCKER_STRICT=0 ./docker/rocm714/run.sh \\
+    SAM3_DOCKER_STRICT=0 ./docker/rocm101/run.sh \\
         python export/backbone/compile_backbone_mxr.py \\
         --imgsz 504 --backbone-source detector \\
         --onnx-dir /models/onnx_files_504 --gpu-io
@@ -46,12 +46,14 @@ def parse_args():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("--onnx-dir", type=Path, required=True,
+    p.add_argument("--onnx-dir", type=Path,
+                   default=os.environ.get("SAM3_ONNX_DIR") or None,
+                   required=not bool(os.environ.get("SAM3_ONNX_DIR")),
                    help="Resolution root (e.g. /models/onnx_files_504 in the container). Reads "
                         "<onnx-dir>/backbone_<source>/single_simplified.onnx, writes "
                         "<onnx-dir>/backbone_<source>/tuned.mxr or "
                         "tuned_gpuio.mxr with --gpu-io.")
-    p.add_argument("--imgsz", type=int, default=504)
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--backbone-source", choices=["tracker", "detector"],
                    default="tracker",
                    help="Which backbone subdir to operate on")
@@ -94,20 +96,7 @@ def main():
     os.environ.setdefault("MIGRAPHX_MLIR_USE_SPECIFIC_OPS", "attention")
 
     # Defer the import: it touches the dynamic linker and prints whatever
-    # warning the patched library emits.
-    # MIGraphX Python binding lives in /opt/rocm-7.2.x/lib — add it if not
-    # already on sys.path (e.g. when invoked as a subprocess without PYTHONPATH).
-    import glob as _g
-    _mxr_lib = (
-        (os.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
-        if os.environ.get("ROCM_PATH", "").rstrip("/") and os.path.isdir(os.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
-        else next(
-            (p for p in sorted(_g.glob("/opt/rocm-7.2.*/lib"), reverse=True)
-             if os.path.isdir(p)), "/opt/rocm-7.2.0/lib"
-        )
-    )
-    if _mxr_lib not in sys.path:
-        sys.path.insert(0, _mxr_lib)
+    # warning the library emits.
     import migraphx
 
     print(f"migraphx from: {migraphx.__file__}")
@@ -162,10 +151,10 @@ def main():
         raise SystemExit(
             f"Outputs are NOT C-contiguous; do not use the saved cache {dst}. "
             "Check the printed migraphx module path and use the supported "
-            "ROCm 7.14 / MIGraphX 2.17 runtime through docker/rocm714/run.sh. "
+            "ROCm 10.1 / MIGraphX 2.18 runtime through docker/rocm101/run.sh. "
             "Verify SAM3_ONNX_DIR and --onnx-dir select the intended artifact "
             "directory; do not mix host-runtime caches with container artifacts. "
-            "See docker/rocm714/README.md for runtime verification and artifact "
+            "See docker/rocm101/README.md for runtime verification and artifact "
             "setup. Rebuild in a new writable artifact directory, without "
             "overwriting baseline MXR files."
         )

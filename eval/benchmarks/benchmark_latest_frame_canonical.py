@@ -27,6 +27,7 @@ import torch
 
 from tracker.latest_frame import LatestFramePipeline
 from tracker.live_inference import SAM3Live
+from tracker.ort_plugin_ep import describe_ort_migraphx_stack, stack_errors
 
 
 ARTIFACT_SUBDIRS = (
@@ -400,7 +401,9 @@ def _capture(
 def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument("--onnx-dir", type=Path, required=True)
+    parser.add_argument("--onnx-dir", type=Path,
+                        default=os.environ.get("SAM3_ONNX_DIR") or None,
+                        required=not bool(os.environ.get("SAM3_ONNX_DIR")))
     parser.add_argument(
         "--profile", required=True, choices=tuple(PROFILE_CONFIGS),
         help="Fixed canonical workload; custom timing parameters are not accepted.",
@@ -428,12 +431,12 @@ def main() -> int:
             f"unexpected backbone artifact: {backbone_sha} != "
             f"{expected_backbone_sha}"
         )
-    providers = ort.get_available_providers()
-    if ort.__version__ != "1.24.2" or not providers \
-            or providers[0] != "MIGraphXExecutionProvider":
+    stack = describe_ort_migraphx_stack()
+    stack_problems = stack_errors(stack)
+    if stack_problems:
         raise RuntimeError(
-            "canonical benchmark requires ONNX Runtime 1.24.2 with MIGraphX "
-            f"as the primary provider, got {ort.__version__} / {providers}"
+            "canonical benchmark requires the ROCm 10.1 MIGraphX plugin-EP stack: "
+            + "; ".join(stack_problems)
         )
 
     live = SAM3Live(
@@ -547,7 +550,7 @@ def main() -> int:
             "torch": torch.__version__,
             "hip": torch.version.hip,
             "onnxruntime": ort.__version__,
-            "providers": providers,
+            "stack": stack,
         },
         "config": {
             "profile": profile["name"],

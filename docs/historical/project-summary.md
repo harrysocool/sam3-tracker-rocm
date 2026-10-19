@@ -45,7 +45,7 @@ raises the median end-to-end result to 9.03 FPS; preloaded-video backbone
 lookahead plus per-instance position-encoding caching raises it further to
 10.78 FPS. See
 [the original full-stack evaluation](../rocm714_fullstack_evaluation.md) and
-[the current container guide](../../docker/rocm714/README.md).
+[the current container guide](../../docker/rocm101/README.md).
 
 ---
 

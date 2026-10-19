@@ -56,23 +56,24 @@ def main():
                     help="Max frames per annotation (0=all, recommend 20 for quick test)")
     ap.add_argument("--out", type=Path,
                     default=WORKSPACE/f"results/eval/saco_sg/saco_sg_30seq_textprompt_preds_{_TS}.json")
-    ap.add_argument("--imgsz", type=int, default=1008,
-                    help="Input resolution (504 or 1008)")
+    ap.add_argument("--imgsz", type=int, default=504, choices=(504,),
+                    help="Input resolution; only the validated 504px path is supported.")
     ap.add_argument("--mig", action="store_true",
                     help="Use MIGraphX acceleration (requires LD_PRELOAD)")
     ap.add_argument("--parallel-tail", action="store_true",
                     help="Overlap detector and tracker tails. Requires --mig.")
     ap.add_argument("--pipeline-backbone", action="store_true",
                     help="Prefetch the next MIG backbone. Requires --parallel-tail.")
-    ap.add_argument("--onnx-dir", type=Path, default=None,
-                    help="ONNX artefacts root (default: onnx_files_<imgsz>)")
+    ap.add_argument("--onnx-dir", type=Path,
+                    default=os.environ.get("SAM3_ONNX_DIR") or None,
+                    help="ONNX artifact root (defaults to SAM3_ONNX_DIR)")
     args = ap.parse_args()
     if args.parallel_tail and not args.mig:
         ap.error("--parallel-tail requires --mig")
     if args.pipeline_backbone and not args.parallel_tail:
         ap.error("--pipeline-backbone requires --parallel-tail")
-    if args.onnx_dir is None:
-        args.onnx_dir = WORKSPACE / f"onnx_files_{args.imgsz}"
+    if args.mig and args.onnx_dir is None:
+        ap.error("set SAM3_ONNX_DIR or pass --onnx-dir for MIG inference")
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda")
@@ -113,7 +114,7 @@ def main():
         detr_onnx = args.onnx_dir / "detector_modules" / "detr_encoder_simplified.onnx"
         if detr_onnx.exists():
             patch_sam3_video_model_detr_encoder(model, detr_onnx)
-        ptr_tokens = {504: 64, 1008: 48}.get(args.imgsz, 32)
+        ptr_tokens = 64
         mem_onnx = (
             args.onnx_dir / "tracker_modules"
             / f"memory_attention_fixed_S7_P{ptr_tokens}.onnx"

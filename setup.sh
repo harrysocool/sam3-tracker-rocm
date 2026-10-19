@@ -26,7 +26,7 @@ case "${1:-}" in
     -h|--help|'') usage ;;
     --runtime)
         shift
-        exec "${ROOT}/docker/rocm714/build.sh" "$@"
+        exec "${ROOT}/docker/rocm101/build.sh" "$@"
         ;;
     --models)
         [[ $# -ge 2 ]] || { echo "setup: --models requires CHECKPOINT_DIR" >&2; exit 2; }
@@ -38,8 +38,8 @@ case "${1:-}" in
         build_root="${SAM3_MODEL_BUILD_ROOT:-${default_build}}"
         mkdir -p "${build_root}/onnx_files_504"
         SAM3_MODEL_DIR="${checkpoint}" SAM3_ONNX_DIR="${build_root}/onnx_files_504" \
-            exec "${ROOT}/docker/rocm714/run.sh" python export/build_text_prompt_mig.py \
-                --imgsz 504 --checkpoint /models/sam3 --onnx-root /models \
+            exec "${ROOT}/docker/rocm101/run.sh" python export/build_text_prompt_mig.py \
+                --checkpoint /models/sam3 --onnx-root /models \
                 --performance-build "$@"
         ;;
     *) echo "setup: unknown argument: $1" >&2; exit 2 ;;
