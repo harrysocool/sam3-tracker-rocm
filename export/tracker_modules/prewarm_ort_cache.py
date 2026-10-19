@@ -11,7 +11,7 @@ Usage:
     Pass it only when deliberately overriding with a container-visible build directory.
     The example below shows the explicit equivalent:
 
-    ./docker/rocm714/run.sh python export/tracker_modules/prewarm_ort_cache.py \\
+    ./docker/rocm101/run.sh python export/tracker_modules/prewarm_ort_cache.py \\
         --onnx-dir /models/onnx_files_504
 """
 from __future__ import annotations

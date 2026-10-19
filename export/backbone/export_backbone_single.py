@@ -18,7 +18,7 @@ Usage:
     Pass it only when deliberately overriding with a container-visible build directory.
     The example below shows the explicit equivalent.
 
-    ./docker/rocm714/run.sh python export/backbone/export_backbone_single.py --imgsz 504 --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504
+    ./docker/rocm101/run.sh python export/backbone/export_backbone_single.py --imgsz 504 --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504
 """
 
 from __future__ import annotations

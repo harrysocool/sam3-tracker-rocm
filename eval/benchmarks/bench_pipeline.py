@@ -9,7 +9,7 @@ Usage:
     Pass it only when deliberately overriding with a container-visible directory.
     The example below shows the explicit equivalent.
 
-    ./docker/rocm714/run.sh python eval/benchmarks/bench_pipeline.py \\
+    ./docker/rocm101/run.sh python eval/benchmarks/bench_pipeline.py \\
         --checkpoint /models/sam3 \\
         --onnx-dir /models/onnx_files_504 \\
         --imgsz 504

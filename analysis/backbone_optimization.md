@@ -4,7 +4,7 @@
 > "Remaining Opportunities" below describe that stage, not the complete
 > current optimization stack. They do not cover the later GPU-I/O, MIGraphX
 > 2.17, or FC1-sink work. Current runtime settings and measured results are in
-> the [container guide](../docker/rocm714/README.md) and
+> the [container guide](../docker/rocm101/README.md) and
 > [performance records](../docs/performance.md).
 
 ## Overview

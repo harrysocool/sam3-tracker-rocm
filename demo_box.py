@@ -11,11 +11,11 @@ Usage:
     The examples below show the explicit equivalent.
 
     # Single image (init frame only):
-    ./docker/rocm714/run.sh python demo_box.py --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
+    ./docker/rocm101/run.sh python demo_box.py --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
                    --image assets/truck.jpg --box 100,200,500,600
 
     # Video file:
-    ./docker/rocm714/run.sh python demo_box.py --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
+    ./docker/rocm101/run.sh python demo_box.py --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 \
                    --video my_video.mp4 --box 100,200,500,600 \
                    --output tracked.mp4
 """

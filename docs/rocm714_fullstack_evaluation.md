@@ -57,7 +57,7 @@ sha256:c3101960a75b6ee376bbb59ac071a5c57f51a109e220e3a2ae06bc9e037799b9
 
 This experiment assembled its original runtime from source. Current
 binary-based installation is documented in the
-[container guide](../docker/rocm714/README.md); the experiment commands and
+[container guide](../docker/rocm101/README.md); the experiment commands and
 paths below are provenance, not the current setup procedure.
 
 ## PyTorch gfx1151 compatibility

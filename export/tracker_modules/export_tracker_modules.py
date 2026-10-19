@@ -18,7 +18,7 @@ Usage:
     Pass it only when deliberately overriding with a container-visible build directory.
     The example below shows the explicit equivalent.
 
-    ./docker/rocm714/run.sh python export/tracker_modules/export_tracker_modules.py \\
+    ./docker/rocm101/run.sh python export/tracker_modules/export_tracker_modules.py \\
         --checkpoint /models/sam3 --onnx-dir /models/onnx_files_504 --imgsz 504
 """
 

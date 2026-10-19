@@ -148,7 +148,7 @@ LD_PRELOAD=/opt/rocm-7.2.x/lib/libmigraphx_c.so.3:/opt/rocm-7.2.x/lib/migraphx/l
 `--parallel-tail` overlaps the independent detector and tracker branches after
 the shared backbone. It is opt-in and currently validated at 504 px with the
 ROCm 7.14 container; add it to the container command documented in
-[`docker/rocm714/README.md`](../../docker/rocm714/README.md).
+[`docker/rocm101/README.md`](../../docker/rocm101/README.md).
 
 For preloaded videos, add `--pipeline-backbone` as well. It computes frame
 N+1's stateless vision backbone while frame N's detector/tracker tail runs.

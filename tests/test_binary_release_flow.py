@@ -39,7 +39,7 @@ def test_help_entrypoints_do_not_start_work():
 
 def test_setup_model_build_selects_build_root_without_reusing_inference_path(tmp_path):
     setup_root = tmp_path / "source"
-    runner = setup_root / "docker/rocm714/run.sh"
+    runner = setup_root / "docker/rocm101/run.sh"
     runner.parent.mkdir(parents=True)
     shutil.copy2(ROOT / "setup.sh", setup_root / "setup.sh")
     (setup_root / "VERSION").write_text("test-version\n")
