@@ -7,6 +7,10 @@ separately. Runtime code and local model artifacts may evolve, so record their
 identities when reproducing a result. These numbers are reference observations,
 not deployment deadlines.
 
+Unless a section says ROCm 10.1 / 0.4.0-rc1, the values below were measured on
+the retired ROCm 7.14 / MIGraphX 2.17 stack and are not comparable to the
+10.1 stack without re-measurement.
+
 ## Measurement terms
 
 - **Output Hz:** completed inference cadence in the harness's measured window.
@@ -25,7 +29,29 @@ Do not derive service time by inverting camera FPS, or interpret an age p95 as
 a hard maximum. Use pose/TF at sensor exposure time and enforce an application
 result-age budget separately.
 
-## Default full-detection live reference
+## Current full-detection live reference (ROCm 10.1, 0.4.0-rc1)
+
+Recorded October 19, 2026 by the 0.4.0-rc1 final release gate on Ryzen AI Max+
+395 / Radeon 8060S (`gfx1151`), source commit
+`f10618421fa757b85f0c587c155cf8b051775734`:
+
+- ROCm 10.1, MIGraphX 2.18, ONNX Runtime 1.29 with the
+  `onnxruntime-ep-migraphx` plugin EP; Torch 2.14.0+rocm10.1.0; 504px FP16.
+- `canonical-250` and `soak-1000` profiles, `assets/blackswan.mp4`, prompt
+  `swan`, 24 FPS paced source, full detection on every consumed frame.
+
+| Run | Mean service | p95 service | Emitted |
+|---|---:|---:|---:|
+| canonical-250 run 1 | 90.147 ms | 93.181 ms | 117 |
+| canonical-250 run 2 | 89.850 ms | 92.961 ms | 117 |
+| canonical-250 run 3 | 89.770 ms | 92.567 ms | 117 |
+| soak-1000 | 91.502 ms | 94.439 ms | 457 |
+
+The 30-frame PT-vs-MIG mask regression gave mean IoU 0.9942 and minimum IoU
+0.9893. The gate summary does not record frame-age or queue-wait percentiles,
+and the opt-in hybrid mode was not re-measured on this stack.
+
+## Historical full-detection live reference (ROCm 7.14)
 
 Recorded September 1, 2026 on Ryzen AI Max+ 395 / Radeon 8060S (`gfx1151`):
 
@@ -160,7 +186,8 @@ coverage limits of each test are in the [evaluation guide](evaluation.md).
 The September 14 review validation used the same loaded 504px FP16 MIG model
 for offline prefetch and direct `SAM3Live.infer` replay of identical frames.
 Both used the fixed decoder, same-frame parallel tails, and a 0.5 output-score
-threshold in the supported ROCm 7.14 / MIGraphX 2.17 / ORT 1.24.2 runtime.
+threshold in the ROCm 7.14 / MIGraphX 2.17 / ORT 1.24.2 runtime (retired in
+0.4.0-rc1; not re-run on 10.1).
 
 | Input and policy | Compared outputs | Result |
 |---|---:|---|

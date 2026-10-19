@@ -3,7 +3,7 @@
 text-prompt ``Sam3VideoModel`` MIG shims.
 
 Contents:
-  - ``_load_migraphx_module``   patched migraphx 2.16 Python binding loader
+  - ``_load_migraphx_module``   migraphx Python binding loader
   - ``MIGraphXSession``         ORT-like wrapper around a compiled mxr program
   - ``MIGraphXBackbone``        compiled SAM3 vision encoder (3/4/5-output FPN)
   - ``preprocess_image``        BGR uint8 → float32 NCHW normalized tensor
@@ -95,7 +95,7 @@ class MIGraphXSession:
 
 class MIGraphXBackbone:
     """
-    SAM3 vision encoder compiled with patched MIGraphX 2.16.0.
+    SAM3 vision encoder compiled with MIGraphX (official 2.18 wheel).
 
     Achieves ~88ms at 504px vs PyTorch ROCm's 139ms (1.6× speedup).
     Uses backbone_<source>/single_simplified.onnx with kernel autotuning baked into

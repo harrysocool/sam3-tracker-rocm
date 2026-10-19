@@ -194,7 +194,7 @@ def _runtime(*, force_full=False, empty=False, fail=False, close_fail=False, sta
         return live
 
     return SimpleNamespace(
-        events=events, lives=lives, environment={"onnxruntime": "1.24.2"},
+        events=events, lives=lives, environment={"onnxruntime": "1.29.0"},
         create_live=create_live, synchronize=lambda: events.append("sync"),
         pipeline_class=lambda live, **kwargs: FakePipeline(live, **kwargs, fail=fail,
                                                            close_fail=close_fail, stats_override=stats_override),

@@ -69,9 +69,9 @@ def test_execution_hardware_records_safe_host_fields(monkeypatch, tmp_path):
         (tmp_path / name).write_text(value)
     monkeypatch.setattr(benchmark.torch.cuda, "is_available", lambda: False)
     hardware = benchmark._execution_hardware(
-        {"SAM3_BUILD_HOST_ID": "harry-evo-x2"}, tmp_path
+        {"SAM3_BUILD_HOST_ID": "test-host"}, tmp_path
     )
-    assert hardware["build_host_id"] == "harry-evo-x2"
+    assert hardware["build_host_id"] == "test-host"
     assert hardware["system_vendor"] == "GMKtec"
     assert hardware["product_name"] == "NucBox_EVO-X2"
     assert hardware["bios_version"] == "test-bios"
